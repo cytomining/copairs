@@ -1,0 +1,119 @@
+'''Test functions for sampler'''
+import numpy as np
+import pandas as pd
+import pytest
+
+from copairs.sampler import Sampler
+from tests.helpers import create_dframe, simulate_plates
+
+SEED = 0
+
+
+def run_stress_sample_null(dframe, num_pairs):
+    '''Assert every null pair from a sampler does not match any column'''
+    sampler = Sampler(dframe, dframe.columns, seed=SEED)
+    for _ in range(num_pairs):
+        id1, id2 = sampler.sample_null_pair(dframe.columns)
+        row1 = dframe.loc[id1]
+        row2 = dframe.loc[id2]
+        assert (row1 != row2).all()
+
+
+def test_null_sample_large():
+    '''Test Sampler guarantees elements with different values'''
+    dframe = create_dframe(32, 10000)
+    run_stress_sample_null(dframe, 5000)
+
+
+def test_null_sample_small():
+    '''Test Sample with small set'''
+    dframe = create_dframe(3, 10)
+    run_stress_sample_null(dframe, 100)
+
+
+def test_null_sample_nan_vals():
+    '''Test the sampler ignores NaN values'''
+    dframe = create_dframe(4, 15)
+    rng = np.random.default_rng(SEED)
+    nan_mask = rng.random(dframe.shape) < 0.5
+    dframe[nan_mask] = np.nan
+    run_stress_sample_null(dframe, 1000)
+
+
+def get_naive_pairs(dframe: pd.DataFrame, groupby, diffby):
+    '''Compute valid pairs using cross product from pandas'''
+    cross = dframe.reset_index().merge(dframe.reset_index(),
+                                       how='cross',
+                                       suffixes=('_x', '_y'))
+    index = True
+    for col in groupby:
+        index = (cross[f'{col}_x'] == cross[f'{col}_y']) & index
+    for col in diffby:
+        index = (cross[f'{col}_x'] != cross[f'{col}_y']) & index
+
+    pairs = cross.loc[index, ['index_x', 'index_y']]
+    pairs = pairs.sort_values(['index_x', 'index_y']).reset_index(drop=True)
+    return pairs
+
+
+def check_naive(dframe, sampler, groupby, diffby):
+    '''Check sampler and naive generate same pairs'''
+    gt_pairs = get_naive_pairs(dframe, groupby, diffby)
+    vals = sampler.get_all_pairs(groupby, diffby)
+    vals = sum(vals.values(), [])
+    vals = pd.DataFrame(vals, columns=['index_x', 'index_y'])
+    vals = vals.sort_values(['index_x', 'index_y']).reset_index(drop=True)
+    vals = set(vals.apply(frozenset, axis=1))
+    gt_pairs = set(gt_pairs.apply(frozenset, axis=1))
+    assert gt_pairs == vals
+
+
+def test_replicate_pairs():
+    '''Test sample of valid pairs from a random generator'''
+    dframe = create_dframe(32, 1000)
+    sampler = Sampler(dframe, dframe.columns, seed=SEED)
+    check_naive(dframe, sampler, groupby=['c'], diffby=['p', 'w'])
+
+
+def test_replicate_pairs_multi():
+    '''Test sample of valid pairs from a random generator'''
+    dframe = create_dframe(32, 1000)
+    sampler = Sampler(dframe, dframe.columns, seed=SEED)
+    check_naive(dframe, sampler, groupby=['c', 'w'], diffby=['p'])
+
+
+def test_simulate_plates_single_groupby():
+    '''Test sample of valid pairs from a simulated dataset'''
+    dframe = simulate_plates(n_compounds=306, n_replicates=20, plate_size=384)
+    sampler = Sampler(dframe, dframe.columns, seed=SEED)
+    check_naive(dframe, sampler, ['c'], ['p', 'w'])
+
+
+def test_simulate_plates_mult_groupby():
+    '''Test sample of valid pairs from a simulated dataset'''
+    dframe = simulate_plates(n_compounds=306, n_replicates=20, plate_size=384)
+    sampler = Sampler(dframe, dframe.columns, seed=SEED)
+    check_naive(dframe, sampler, ['c', 'w'], ['p'])
+
+
+def test_raise_distjoint():
+    '''Test check for disjoint groupby and diffby'''
+    dframe = create_dframe(3, 10)
+    sampler = Sampler(dframe, dframe.columns, seed=SEED)
+    with pytest.raises(ValueError, match='must be disjoint lists'):
+        sampler.get_all_pairs('c', ['w', 'c'])
+
+
+def test_simulate_plates_mult_groupby_large():
+    '''Test sampler successfully complete analysis of a large dataset.'''
+    dframe = simulate_plates(n_compounds=15000,
+                             n_replicates=20,
+                             plate_size=384)
+    sampler = Sampler(dframe, dframe.columns, seed=SEED)
+    vals = sampler.get_all_pairs(groupby=['c', 'w'], diffby=['p'])
+    for _, pairs in vals.items():
+        for id1, id2 in pairs:
+            for col in ['c', 'w']:
+                assert dframe.loc[id1, col] == dframe.loc[id2, col]
+            for col in ['p']:
+                assert dframe.loc[id1, col] != dframe.loc[id2, col]

@@ -1,0 +1,30 @@
+[project]
+name = "copairs"
+version = "0.0.1"
+description = "Find pairs and compute metrics between them"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE.txt"}
+keywords = ["pairwise", "replication"]
+authors = [
+  {name = "John Arevalo", email = "johnarevalo@gmail.com" }
+]
+dependencies = [
+  "pandas",
+  "tqdm"
+]
+
+[project.optional-dependencies]
+plot = ["plotly"]
+
+[project.urls]
+"Homepage" = "https://github.com/johnarevalo/copairs"
+"Bug Reports" = "https://github.com/johnarevalo/copairs/issues"
+"Source" = "https://github.com/johnarevalo/copairs/"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"] 
