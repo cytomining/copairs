@@ -1,11 +1,14 @@
 from plotly import graph_objects as go
 from plotly.subplots import make_subplots
 
-from replicating import CorrelationTestResult
+from copairs.replicating import CorrelationTestResult
 
 
 def plot(corr_score: CorrelationTestResult, percent_score: float,
-         null_th: float, title: str) -> go.Figure:
+         null_th: float, title: str,
+         true_dist_title='True replicates',
+         null_dist_title='Null distribution'
+         ) -> go.Figure:
     '''
         Plot two distributions and a threshold line.
         '''
@@ -17,17 +20,17 @@ def plot(corr_score: CorrelationTestResult, percent_score: float,
             x=corr_score.corr_dist,
             nbinsx=20,
             # histnorm='probability',
-            name='True replicates'),
+            name=true_dist_title),
         secondary_y=True)
     fig.add_trace(
         go.Histogram(
             x=corr_score.null_dist,
             nbinsx=100,
             # histnorm='probability',
-            name='Null distribution'))
+            name=null_dist_title))
     fig.update_layout(barmode='overlay')
-    fig.update_yaxes(title_text='True replicates', secondary_y=True)
-    fig.update_yaxes(title_text='Null distribution', secondary_y=False)
+    fig.update_yaxes(title_text=true_dist_title, secondary_y=True)
+    fig.update_yaxes(title_text=null_dist_title, secondary_y=False)
 
     fig.add_vline(x=null_th,
                   line_width=3,
