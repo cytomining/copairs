@@ -13,12 +13,15 @@ class UnpairedException(Exception):
     '''Exception raised when a row can not be paired with any other row in the
     data'''
 
+
 class Sampler():
     '''Class to get pair of rows given contraints in the columns'''
 
-    def __init__(self, dframe: pd.DataFrame, columns: Union[Sequence[str], pd.Index], seed: int):
+    def __init__(self, dframe: pd.DataFrame,
+                 columns: Union[Sequence[str], pd.Index], seed: int):
         values = dframe[columns].to_numpy(copy=True)
-        reverse = [defaultdict(set) for _ in range(len(columns))]  # type: list[dict]
+        reverse = [defaultdict(set)
+                   for _ in range(len(columns))]  # type: list[dict]
         # Create a reverse index to locate rows containing particular values
         for i, row in enumerate(values):
             for j, val in enumerate(row):
@@ -44,13 +47,14 @@ class Sampler():
         self.col_to_ix = {c: i for i, c in enumerate(columns)}
         self.columns = columns
         self.n_pairs = n_pairs
+        self.rand_iter = iter([])
 
     def _null_sample(self, diffby: Collection[str]):
         '''
         Sample a pair from the frame.
         '''
         valid = set(self.frozen_valid)
-        id1 = self.rng.integers(len(valid))
+        id1 = self.integers(0, len(valid) - 1)
         valid.remove(id1)
         row1 = self.values[id1]
         diffby_int = [self.col_to_ix[col] for col in diffby]
@@ -59,7 +63,7 @@ class Sampler():
         if len(valid) == 0:
             assert np.any(row1 == self.values, axis=1).all()
             raise UnpairedException(f'{id1} has no pairs')
-        id2 = int(self.rng.choice(list(valid), 1))
+        id2 = self.choice(list(valid))
         return id1, id2
 
     def sample_null_pair(self, diffby: Collection[str], n_tries=5):
@@ -72,7 +76,25 @@ class Sampler():
         raise ValueError(
             'Number of tries exhusted. Could not find a valid pair')
 
-    def get_all_pairs(self, groupby: Union[str, Collection[str]], diffby: Collection[str]):
+    def rand_next(self):
+        try:
+            value = next(self.rand_iter)
+        except StopIteration:
+            rands = self.rng.uniform(size=int(1e6))
+            self.rand_iter = iter(rands)
+            value = next(self.rand_iter)
+        return value
+
+    def integers(self, min_val, max_val):
+        return int(self.rand_next() * (max_val - min_val + 1) + min_val)
+
+    def choice(self, items):
+        min_val, max_val = 0, len(items) - 1
+        pos = self.integers(min_val, max_val)
+        return items[pos]
+
+    def get_all_pairs(self, groupby: Union[str, Collection[str]],
+                      diffby: Collection[str]):
         '''
         Get all pairs with given params
         '''
@@ -97,12 +119,13 @@ class Sampler():
                     pairs[(key, *row1[groupby_ix[1:]])].append((id1, id2))
         return pairs
 
-    def _get_all_pairs_single(self, groupby: Union[str, int], diffby: Collection[str]):
+    def _get_all_pairs_single(self, groupby: Union[str, int],
+                              diffby: Collection[str]):
         '''
         Get all valid pairs for a single column. It considers up to 5000
         samples per each value in the column to avoid memleaks.
         '''
-        max_nunique = 5000 # Elements to pair require a limit to avoid memleak.
+        max_nunique = 5000  # Elements to pair require a limit to avoid memleak.
         if isinstance(groupby, str):
             groupby = self.col_to_ix[groupby]
         diffby_ix = [self.col_to_ix[col] for col in diffby]
@@ -112,7 +135,9 @@ class Sampler():
             processed = set()
             if len(rows) >= max_nunique:
                 column = self.columns[groupby]
-                logger.warning(f'Sampling {max_nunique} values from {key} in column {column}.')
+                logger.warning(
+                    f'Sampling {max_nunique} values from {key} in column {column}.'
+                )
                 rows = set(self.rng.choice(np.array(list(rows)), max_nunique))
 
             for id1 in rows:
@@ -124,7 +149,8 @@ class Sampler():
                     pairs[key].extend([(id1, id2) for id2 in valid])
         return pairs
 
-    def _filter_diffby(self, idx: int, diffby: Collection[int], valid: Set[int]):
+    def _filter_diffby(self, idx: int, diffby: Collection[int],
+                       valid: Set[int]):
         '''
         Remove from valid rows that have matches with idx in any of the diffby columns
         :idx: index of the row to be compared
