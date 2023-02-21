@@ -135,7 +135,7 @@ class CorrelationTestResult():
         perc_5 = np.nanpercentile(self.null_dist, 5)
         below_threshold = self.corr_dist.dropna() < perc_5
         return (np.nanmean(above_threshold.astype(float)) +
-                np.nanmean(below_threshold.astype(float))), perc_95, perc_5
+                np.nanmean(below_threshold.astype(float))), perc_5, perc_95
 
     def wasserstein_distance(self):
         '''

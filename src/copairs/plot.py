@@ -1,17 +1,20 @@
+from typing import Optional
 from plotly import graph_objects as go
 from plotly.subplots import make_subplots
 
 from copairs.replicating import CorrelationTestResult
 
 
-def plot(corr_score: CorrelationTestResult, percent_score: float,
-         null_th: float, title: str,
+def plot(corr_score: CorrelationTestResult,
+         percent_score: float,
+         title: str,
+         left_null_th: Optional[float]=None,
+         right_null_th: Optional[float]=None,
          true_dist_title='True replicates',
-         null_dist_title='Null distribution'
-         ) -> go.Figure:
+         null_dist_title='Null distribution') -> go.Figure:
     '''
-        Plot two distributions and a threshold line.
-        '''
+    Plot two distributions and threshold(s) line.
+    '''
     # fig = go.Figure()
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -32,12 +35,14 @@ def plot(corr_score: CorrelationTestResult, percent_score: float,
     fig.update_yaxes(title_text=true_dist_title, secondary_y=True)
     fig.update_yaxes(title_text=null_dist_title, secondary_y=False)
 
-    fig.add_vline(x=null_th,
-                  line_width=3,
-                  line_dash="dash",
-                  line_color="black",
-                  annotation_text=f' Null threshold:{null_th:0.2}',
-                  annotation_position="top right")
+    for pos, null_th in [('left', left_null_th), ('right', right_null_th)]:
+        if null_th:
+            fig.add_vline(x=null_th,
+                        line_width=3,
+                        line_dash='dash',
+                        line_color='black',
+                        annotation_text=f' Null th:{null_th:0.2}',
+                        annotation_position=f'top {pos}')
 
     fig.update_traces(opacity=0.75, marker_line_width=1)
     fig.update_layout(legend=dict(
