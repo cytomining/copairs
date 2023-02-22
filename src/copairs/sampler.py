@@ -1,11 +1,14 @@
 '''
 Sample pairs with given column restrictions
 '''
-from math import comb
 from collections import defaultdict
-from typing import Collection, Union, Sequence, Set
-import pandas as pd
+from math import comb
+from typing import Collection, Sequence, Set, Union
+
 import numpy as np
+import pandas as pd
+from tqdm.auto import tqdm
+
 from copairs import logger
 
 
@@ -167,3 +170,39 @@ class Sampler():
             mapper = self.reverse[col]
             valid = valid - mapper[val]
         return valid
+
+
+class SamplerMultilabel():
+
+    def __init__(self, dframe: pd.DataFrame, columns: Union[Sequence[str],
+                                                            pd.Index],
+                 multilabel_col: str, seed: int):
+        dframe = dframe.explode(multilabel_col)
+        dframe = dframe.reset_index(names='__original_index')
+        self.original_index = dframe['__original_index']
+        self.sampler = Sampler(dframe, columns, seed)
+
+    def get_all_pairs(self, groupby: Union[str, Collection[str]],
+                      diffby: Collection[str]):
+        pairs = self.sampler.get_all_pairs(groupby, diffby)
+        for key, values in pairs.items():
+            values = np.asarray(values)
+            pairs[key] = list(
+                zip(self.original_index[values[:, 0]],
+                    self.original_index[values[:, 1]]))
+
+        return pairs
+
+    def sample_null_pair(self, diffby: Collection[str], n_tries=5):
+        null_pair = self.sampler.sample_null_pair(diffby, n_tries)
+        id1, id2 = self.original_index[list(null_pair)].values
+        return id1, id2
+
+    def get_null_pairs(self, diffby: Collection[str], size: int, n_tries=5):
+        null_pairs = []
+        for _ in tqdm(range(size)):
+            null_pairs.append(self.sampler.sample_null_pair(diffby))
+        null_pairs = np.array(null_pairs)
+        null_pairs[:, 0] = self.original_index[null_pairs[:, 0]].values
+        null_pairs[:, 1] = self.original_index[null_pairs[:, 1]].values
+        return null_pairs
