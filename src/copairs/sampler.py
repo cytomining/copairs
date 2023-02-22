@@ -56,12 +56,12 @@ class Sampler():
         valid = set(self.frozen_valid)
         id1 = self.integers(0, len(valid) - 1)
         valid.remove(id1)
-        row1 = self.values[id1]
-        diffby_int = [self.col_to_ix[col] for col in diffby]
-        valid = self._filter_diffby(id1, diffby_int, valid)
+        diffby_ix = [self.col_to_ix[col] for col in diffby]
+        valid = self._filter_diffby(id1, diffby_ix, valid)
 
         if len(valid) == 0:
-            assert np.any(row1 == self.values, axis=1).all()
+            # row1 = self.values[id1]
+            # assert np.any(row1 == self.values, axis=1).all()
             raise UnpairedException(f'{id1} has no pairs')
         id2 = self.choice(list(valid))
         return id1, id2
