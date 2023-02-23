@@ -1,11 +1,11 @@
 '''Class for getting Percent replicating metric'''
-from typing import List
+from typing import List, Literal
 
 import numpy as np
 import pandas as pd
 
-from copairs.sampler import Sampler
 from copairs.compute import corrcoef_indexed
+from copairs.sampler import Sampler
 
 
 def corr_from_null_pairs(X: np.ndarray, null_pairs, n_replicates):
@@ -136,6 +136,19 @@ class CorrelationTestResult():
         below_threshold = self.corr_dist.dropna() < perc_5
         return (np.nanmean(above_threshold.astype(float)) +
                 np.nanmean(below_threshold.astype(float))), perc_5, perc_95
+
+    def percent_score(self, how: Literal['left', 'right', 'both']):
+        left_th, right_th = None, None
+        if how == 'right':
+            percent_score, right_th = self.percent_score_right()
+        elif how == 'left':
+            percent_score, left_th = self.percent_score_left()
+        elif how == 'both':
+            percent_score, left_th, right_th = self.percent_score_both()
+        else:
+            raise ValueError(f'Invalid value: {how} for how param')
+
+        return percent_score, left_th, right_th
 
     def wasserstein_distance(self):
         '''
