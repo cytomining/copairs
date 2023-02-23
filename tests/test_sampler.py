@@ -1,5 +1,4 @@
 '''Test functions for sampler'''
-from itertools import groupby
 import numpy as np
 import pandas as pd
 import pytest
@@ -133,11 +132,13 @@ def test_multilabel_column_groupby():
     rng = np.random.default_rng(SEED)
 
     dframe = simulate_plates(n_compounds=4, n_replicates=5, plate_size=5)
+    dframe = dframe[['p', 'w', 'c']]
     groupby = ['c']
     diffby = ['p', 'w']
     # Shuffle values
     for col in dframe.columns:
         rng.shuffle(dframe[col].values)
+    dframe.drop_duplicates(inplace=True)
     dframe = dframe.sort_values(['p', 'w', 'c']).reset_index(drop=True)
 
     sampler = Sampler(dframe, dframe.columns, seed=SEED)
