@@ -55,8 +55,8 @@ dframe = dframe.reset_index(drop=True)
 
 ### Getting valid pairs
 
-To get pairs of samples that share the same label but comes from different
-plates at different well positions: 
+To get pairs of samples that share the same `label` but comes from different
+`plate`s at different `well` positions: 
 
 ```python
 from copairs.sampler import Sampler
