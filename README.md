@@ -34,24 +34,24 @@ dframe = dframe.reset_index(drop=True)
 
 |    | plate   | well   | label   |
 |---:|:--------|:-------|:--------|
-|  0 | p2      | w5     | t1      |
-|  1 | p2      | w2     | t1      |
+|  0 | p1      | w2     | t4      |
+|  1 | p1      | w3     | t2      |
 |  2 | p1      | w3     | t4      |
-|  3 | p2      | w1     | t1      |
-|  4 | p3      | w1     | t4      |
-|  5 | p2      | w3     | t3      |
-|  6 | p2      | w4     | t2      |
-|  7 | p2      | w5     | t3      |
+|  3 | p1      | w4     | t1      |
+|  4 | p1      | w4     | t3      |
+|  5 | p2      | w1     | t1      |
+|  6 | p2      | w2     | t1      |
+|  7 | p2      | w3     | t1      |
 |  8 | p2      | w3     | t2      |
-|  9 | p3      | w4     | t2      |
-| 10 | p1      | w3     | t2      |
-| 11 | p3      | w5     | t2      |
-| 12 | p1      | w2     | t4      |
-| 13 | p1      | w4     | t1      |
-| 14 | p1      | w4     | t3      |
-| 15 | p3      | w5     | t4      |
-| 16 | p2      | w3     | t1      |
-| 17 | p3      | w1     | t3      |
+|  9 | p2      | w3     | t3      |
+| 10 | p2      | w4     | t2      |
+| 11 | p2      | w5     | t1      |
+| 12 | p2      | w5     | t3      |
+| 13 | p3      | w1     | t3      |
+| 14 | p3      | w1     | t4      |
+| 15 | p3      | w4     | t2      |
+| 16 | p3      | w5     | t2      |
+| 17 | p3      | w5     | t4      |
 
 ### Getting valid pairs
 
@@ -108,7 +108,8 @@ pairs_multi = sampler_multi.get_all_pairs(groupby=['label'],
                                           diffby=['plate', 'well'])
 ```
 
-The pairs_multi has the same structure as above:
+`pairs_multi` is also a `label_id: pairs` dictionary with the same
+structure discussed before:
 
 ```
 {'t4': [(0, 10), (0, 8), (10, 1), (1, 8)],
