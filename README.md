@@ -61,7 +61,7 @@ To get pairs of samples that share the same `label` but comes from different
 ```python
 from copairs.sampler import Sampler
 sampler = Sampler(dframe, ['plate', 'well', 'label'], seed=0)
-pairs_dict = sampler.get_all_pairs(groupby=['label'], diffby=['plate', 'well'])
+pairs_dict = sampler.get_all_pairs(sameby=['label'], diffby=['plate', 'well'])
 ```
 
 `pairs_dict` is a `label_id: pairs` dictionary containing the list of valid
@@ -104,7 +104,7 @@ sampler_multi = SamplerMultilabel(dframe_multi,
                                   columns=['plate', 'well', 'label'],
                                   multilabel_col='label',
                                   seed=0)
-pairs_multi = sampler_multi.get_all_pairs(groupby=['label'],
+pairs_multi = sampler_multi.get_all_pairs(sameby=['label'],
                                           diffby=['plate', 'well'])
 ```
 

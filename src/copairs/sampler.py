@@ -60,7 +60,7 @@ class Sampler():
                     index[key] = choice_from_set(rows_ix, max_size, rng)
 
         # Create a column order based on the number of potential row matches
-        # Useful to solve queries with more than one groupby
+        # Useful to solve queries with more than one sameby
         n_pairs = []
         for mapper in reverse:
             curr = 0
@@ -122,44 +122,44 @@ class Sampler():
         pos = self.integers(min_val, max_val)
         return items[pos]
 
-    def get_all_pairs(self, groupby: Union[str, Collection[str]],
+    def get_all_pairs(self, sameby: Union[str, Collection[str]],
                       diffby: Union[str, Collection[str]]):
         '''
         Get all pairs with given params
         '''
         if isinstance(diffby, str):
             diffby = [diffby]
-        if isinstance(groupby, str):
-            groupby = [groupby]
-        if set(groupby) & set(diffby):
-            raise ValueError('groupby and diffby must be disjoint lists')
-        if len(groupby) == 1:
-            key = next(iter(groupby))
+        if isinstance(sameby, str):
+            sameby = [sameby]
+        if set(sameby) & set(diffby):
+            raise ValueError('sameby and diffby must be disjoint lists')
+        if len(sameby) == 1:
+            key = next(iter(sameby))
             return self._get_all_pairs_single(key, diffby)
 
-        # Multiple groupby. Ordering by minimum number of posible pairs
-        groupby_ix = [self.col_to_ix[col] for col in groupby]
-        groupby_ix = sorted(groupby_ix, key=lambda x: self.col_order[x])
+        # Multiple sameby. Ordering by minimum number of posible pairs
+        sameby_ix = [self.col_to_ix[col] for col in sameby]
+        sameby_ix = sorted(sameby_ix, key=lambda x: self.col_order[x])
         pairs = defaultdict(list)
-        candidates = self._get_all_pairs_single(groupby_ix[0], diffby)
+        candidates = self._get_all_pairs_single(sameby_ix[0], diffby)
         for key, indices in candidates.items():
             for id1, id2 in indices:
                 row1 = self.values[id1]
                 row2 = self.values[id2]
-                if np.all(row1[groupby_ix[1:]] == row2[groupby_ix[1:]]):
-                    pairs[(key, *row1[groupby_ix[1:]])].append((id1, id2))
+                if np.all(row1[sameby_ix[1:]] == row2[sameby_ix[1:]]):
+                    pairs[(key, *row1[sameby_ix[1:]])].append((id1, id2))
         return dict(pairs)
 
-    def _get_all_pairs_single(self, groupby: Union[str, int],
+    def _get_all_pairs_single(self, sameby: Union[str, int],
                               diffby: Collection[str]):
         '''
         Get all valid pairs for a single column. It considers up to 5000
         samples per each value in the column to avoid memleaks.
         '''
-        if isinstance(groupby, str):
-            groupby = self.col_to_ix[groupby]
+        if isinstance(sameby, str):
+            sameby = self.col_to_ix[sameby]
         diffby_ix = [self.col_to_ix[col] for col in diffby]
-        index = self.reverse[groupby]
+        index = self.reverse[sameby]
         pairs = defaultdict(list)
         for key, rows in index.items():
             processed = set()
@@ -202,9 +202,9 @@ class SamplerMultilabel():
         self.original_index = dframe['__original_index']
         self.sampler = Sampler(dframe, columns, seed)
 
-    def get_all_pairs(self, groupby: Union[str, Collection[str]],
+    def get_all_pairs(self, sameby: Union[str, Collection[str]],
                       diffby: Collection[str]):
-        pairs = self.sampler.get_all_pairs(groupby, diffby)
+        pairs = self.sampler.get_all_pairs(sameby, diffby)
         for key, values in pairs.items():
             values = np.asarray(values)
             pairs[key] = list(
@@ -221,7 +221,7 @@ class SamplerMultilabel():
     def get_null_pairs(self, diffby: Collection[str], size: int, n_tries=5):
         null_pairs = []
         for _ in tqdm(range(size)):
-            null_pairs.append(self.sampler.sample_null_pair(diffby))
+            null_pairs.append(self.sampler.sample_null_pair(diffby, n_tries))
         null_pairs = np.array(null_pairs)
         null_pairs[:, 0] = self.original_index[null_pairs[:, 0]].values
         null_pairs[:, 1] = self.original_index[null_pairs[:, 1]].values
