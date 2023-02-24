@@ -3,7 +3,7 @@ from numpy.random import default_rng
 from copairs.replicating import corr_between_replicates, correlation_test, corr_from_pairs
 from copairs.sampler import Sampler
 
-from tests.helpers import create_dframe, simulate_plates
+from tests.helpers import create_dframe
 
 SEED = 0
 

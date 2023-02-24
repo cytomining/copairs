@@ -123,10 +123,12 @@ class Sampler():
         return items[pos]
 
     def get_all_pairs(self, groupby: Union[str, Collection[str]],
-                      diffby: Collection[str]):
+                      diffby: Union[str, Collection[str]]):
         '''
         Get all pairs with given params
         '''
+        if isinstance(diffby, str):
+            diffby = [diffby]
         if isinstance(groupby, str):
             groupby = [groupby]
         if set(groupby) & set(diffby):
