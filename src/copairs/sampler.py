@@ -12,6 +12,15 @@ from tqdm.auto import tqdm
 from copairs import logger
 
 
+def choice_from_set(elems: set, size: int, rng: np.random.Generator):
+    '''
+    Generates a random sample from a given set
+    '''
+    array = np.array(list(elems))
+    array = rng.choice(array, size)
+    return set(array)
+
+
 class UnpairedException(Exception):
     '''Exception raised when a row can not be paired with any other row in the
     data'''
@@ -20,11 +29,18 @@ class UnpairedException(Exception):
 class Sampler():
     '''Class to get pair of rows given contraints in the columns'''
 
-    def __init__(self, dframe: pd.DataFrame,
-                 columns: Union[Sequence[str], pd.Index], seed: int):
+    def __init__(self,
+                 dframe: pd.DataFrame,
+                 columns: Union[Sequence[str], pd.Index],
+                 seed: int,
+                 max_size: int = 5000):
+        '''
+        max_size: max number of rows to consider from the same value.
+        '''
         values = dframe[columns].to_numpy(copy=True)
         reverse = [defaultdict(set)
                    for _ in range(len(columns))]  # type: list[dict]
+
         # Create a reverse index to locate rows containing particular values
         for i, row in enumerate(values):
             for j, val in enumerate(row):
@@ -32,6 +48,16 @@ class Sampler():
                     continue
                 mapper = reverse[j]
                 mapper[val].add(i)
+
+        # Limit the number of elements to max_size by subsampling
+        rng = np.random.default_rng(seed)
+        for column, index in enumerate(reverse):
+            for key, rows_ix in index.items():
+                if len(rows_ix) <= max_size:
+                    logger.warning(
+                        f'Sampling {max_size} values from {key} in column {column}.'
+                    )
+                    index[key] = choice_from_set(rows_ix, max_size, rng)
 
         # Create a column order based on the number of potential row matches
         # Useful to solve queries with more than one groupby
@@ -45,7 +71,7 @@ class Sampler():
 
         self.values = values
         self.reverse = reverse
-        self.rng = np.random.default_rng(seed)
+        self.rng = rng
         self.frozen_valid = frozenset(range(len(self.values)))
         self.col_to_ix = {c: i for i, c in enumerate(columns)}
         self.columns = columns
@@ -128,7 +154,6 @@ class Sampler():
         Get all valid pairs for a single column. It considers up to 5000
         samples per each value in the column to avoid memleaks.
         '''
-        max_nunique = 5000  # Elements to pair require a limit to avoid memleak.
         if isinstance(groupby, str):
             groupby = self.col_to_ix[groupby]
         diffby_ix = [self.col_to_ix[col] for col in diffby]
@@ -136,13 +161,6 @@ class Sampler():
         pairs = defaultdict(list)
         for key, rows in index.items():
             processed = set()
-            if len(rows) >= max_nunique:
-                column = self.columns[groupby]
-                logger.warning(
-                    f'Sampling {max_nunique} values from {key} in column {column}.'
-                )
-                rows = set(self.rng.choice(np.array(list(rows)), max_nunique))
-
             for id1 in rows:
                 valid = set(rows)
                 processed.add(id1)
