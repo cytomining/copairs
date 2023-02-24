@@ -1,7 +1,7 @@
 from numpy.random import default_rng
 
+from copairs import Matcher
 from copairs.replicating import corr_between_replicates, correlation_test, corr_from_pairs
-from copairs.sampler import Sampler
 
 from tests.helpers import create_dframe
 
@@ -35,6 +35,6 @@ def test_corr_from_pairs():
     rng = default_rng(SEED)
     X = rng.normal(size=[num_samples, 6])
     meta = create_dframe(5, num_samples)
-    sampler = Sampler(meta, sameby + diffby, seed=0)
-    pairs = sampler.get_all_pairs(sameby, diffby)
+    matcher = Matcher(meta, sameby + diffby, seed=0)
+    pairs = matcher.get_all_pairs(sameby, diffby)
     corr_from_pairs(X, pairs, sameby)

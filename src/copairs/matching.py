@@ -1,6 +1,7 @@
 '''
 Sample pairs with given column restrictions
 '''
+import logging
 from collections import defaultdict
 from math import comb
 from typing import Collection, Sequence, Set, Union
@@ -9,7 +10,7 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
-from copairs import logger
+logger = logging.getLogger('copairs')
 
 
 def choice_from_set(elems: set, size: int, rng: np.random.Generator):
@@ -26,7 +27,7 @@ class UnpairedException(Exception):
     data'''
 
 
-class Sampler():
+class Matcher():
     '''Class to get pair of rows given contraints in the columns'''
 
     def __init__(self,
@@ -192,7 +193,7 @@ class Sampler():
         return valid
 
 
-class SamplerMultilabel():
+class MatcherMultilabel():
 
     def __init__(self, dframe: pd.DataFrame, columns: Union[Sequence[str],
                                                             pd.Index],
@@ -200,11 +201,11 @@ class SamplerMultilabel():
         dframe = dframe.explode(multilabel_col)
         dframe = dframe.reset_index(names='__original_index')
         self.original_index = dframe['__original_index']
-        self.sampler = Sampler(dframe, columns, seed)
+        self.matcher = Matcher(dframe, columns, seed)
 
     def get_all_pairs(self, sameby: Union[str, Collection[str]],
                       diffby: Collection[str]):
-        pairs = self.sampler.get_all_pairs(sameby, diffby)
+        pairs = self.matcher.get_all_pairs(sameby, diffby)
         for key, values in pairs.items():
             values = np.asarray(values)
             pairs[key] = list(
@@ -214,14 +215,14 @@ class SamplerMultilabel():
         return pairs
 
     def sample_null_pair(self, diffby: Collection[str], n_tries=5):
-        null_pair = self.sampler.sample_null_pair(diffby, n_tries)
+        null_pair = self.matcher.sample_null_pair(diffby, n_tries)
         id1, id2 = self.original_index[list(null_pair)].values
         return id1, id2
 
     def get_null_pairs(self, diffby: Collection[str], size: int, n_tries=5):
         null_pairs = []
         for _ in tqdm(range(size)):
-            null_pairs.append(self.sampler.sample_null_pair(diffby, n_tries))
+            null_pairs.append(self.matcher.sample_null_pair(diffby, n_tries))
         null_pairs = np.array(null_pairs)
         null_pairs[:, 0] = self.original_index[null_pairs[:, 0]].values
         null_pairs[:, 1] = self.original_index[null_pairs[:, 1]].values

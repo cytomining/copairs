@@ -59,9 +59,9 @@ To get pairs of samples that share the same `label` but comes from different
 `plate`s at different `well` positions: 
 
 ```python
-from copairs.sampler import Sampler
-sampler = Sampler(dframe, ['plate', 'well', 'label'], seed=0)
-pairs_dict = sampler.get_all_pairs(sameby=['label'], diffby=['plate', 'well'])
+from copairs import Matcher
+matcher = Matcher(dframe, ['plate', 'well', 'label'], seed=0)
+pairs_dict = matcher.get_all_pairs(sameby=['label'], diffby=['plate', 'well'])
 ```
 
 `pairs_dict` is a `label_id: pairs` dictionary containing the list of valid
@@ -77,7 +77,7 @@ pairs for every unique value of `labels`
 ### Getting valid pairs from a multilabel column
 
 For eficiency reasons, you may not want to have duplicated rows. You can
-group all the labels in a single row and use `SamplerMultilabel` to find the
+group all the labels in a single row and use `MatcherMultilabel` to find the
 corresponding pairs:
 
 ```python
@@ -99,12 +99,12 @@ dframe_multi = dframe.groupby(['plate', 'well'])['label'].unique().reset_index()
 | 10 | p3      | w5     | ['t2', 't4']       |
 
 ```python
-from copairs.sampler import SamplerMultilabel
-sampler_multi = SamplerMultilabel(dframe_multi,
+from copairs import MatcherMultilabel
+matcher_multi = MatcherMultilabel(dframe_multi,
                                   columns=['plate', 'well', 'label'],
                                   multilabel_col='label',
                                   seed=0)
-pairs_multi = sampler_multi.get_all_pairs(sameby=['label'],
+pairs_multi = matcher_multi.get_all_pairs(sameby=['label'],
                                           diffby=['plate', 'well'])
 ```
 
