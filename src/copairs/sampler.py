@@ -120,7 +120,7 @@ class Sampler():
                 row2 = self.values[id2]
                 if np.all(row1[groupby_ix[1:]] == row2[groupby_ix[1:]]):
                     pairs[(key, *row1[groupby_ix[1:]])].append((id1, id2))
-        return pairs
+        return dict(pairs)
 
     def _get_all_pairs_single(self, groupby: Union[str, int],
                               diffby: Collection[str]):
@@ -150,7 +150,7 @@ class Sampler():
                 valid = self._filter_diffby(id1, diffby_ix, valid)
                 if valid:
                     pairs[key].extend([(id1, id2) for id2 in valid])
-        return pairs
+        return dict(pairs)
 
     def _filter_diffby(self, idx: int, diffby: Collection[int],
                        valid: Set[int]):
