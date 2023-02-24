@@ -54,7 +54,7 @@ class Matcher():
         rng = np.random.default_rng(seed)
         for column, index in enumerate(reverse):
             for key, rows_ix in index.items():
-                if len(rows_ix) <= max_size:
+                if len(rows_ix) > max_size:
                     logger.warning(
                         f'Sampling {max_size} values from {key} in column {column}.'
                     )
