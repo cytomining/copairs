@@ -203,7 +203,7 @@ def test_multilabel_column_diffby():
     for pairs_id, pairs in pairs_dict.items():
         if pairs_id in pairs_dict_multi:
             pairs_multi = pairs_dict_multi[pairs_id].copy()
-        if pairs_id[::-1] in pairs_dict_multi:
+        elif pairs_id[::-1] in pairs_dict_multi:
             pairs_multi = pairs_dict_multi[pairs_id[::-1]].copy()
         else:
             raise AssertionError('Missing pairs for {pairs_id}')

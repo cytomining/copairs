@@ -4,13 +4,14 @@ Sample pairs with given column restrictions
 import logging
 from collections import defaultdict
 from math import comb
-from typing import Collection, Sequence, Set, Union
+from typing import Sequence, Set, Union
 
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
 logger = logging.getLogger('copairs')
+ColumnList = Union[Sequence[str], pd.Index]
 
 
 def choice_from_set(elems: set, size: int, rng: np.random.Generator):
@@ -32,43 +33,43 @@ class Matcher():
 
     def __init__(self,
                  dframe: pd.DataFrame,
-                 columns: Union[Sequence[str], pd.Index],
+                 columns: ColumnList,
                  seed: int,
                  max_size: int = 5000):
         '''
         max_size: max number of rows to consider from the same value.
         '''
         values = dframe[columns].to_numpy(copy=True)
-        reverse = [defaultdict(set)
-                   for _ in range(len(columns))]  # type: list[dict]
+        reverse = {col: defaultdict(set) for col in columns}
 
         # Create a reverse index to locate rows containing particular values
         for i, row in enumerate(values):
             for j, val in enumerate(row):
                 if pd.isna(val):
                     continue
-                mapper = reverse[j]
+                mapper = reverse[columns[j]]
                 mapper[val].add(i)
 
         # Limit the number of elements to max_size by subsampling
         rng = np.random.default_rng(seed)
-        for column, index in enumerate(reverse):
-            for key, rows_ix in index.items():
+        for column, mapper in reverse.items():
+            for key, rows_ix in mapper.items():
                 if len(rows_ix) > max_size:
                     logger.warning(
                         f'Sampling {max_size} values from {key} in column {column}.'
                     )
-                    index[key] = choice_from_set(rows_ix, max_size, rng)
+                    mapper[key] = choice_from_set(rows_ix, max_size, rng)
 
         # Create a column order based on the number of potential row matches
         # Useful to solve queries with more than one sameby
-        n_pairs = []
-        for mapper in reverse:
+        n_pairs = {}
+        for column, mapper in reverse.items():
             curr = 0
             for rows in mapper.values():
                 curr += comb(len(rows), 2)
-            n_pairs.append(curr)
-        self.col_order = np.argsort(n_pairs)
+            n_pairs[column] = curr
+        col_order = sorted(n_pairs, key=n_pairs.get)
+        self.col_order = {column: i for i, column in enumerate(col_order)}
 
         self.values = values
         self.reverse = reverse
@@ -79,15 +80,14 @@ class Matcher():
         self.n_pairs = n_pairs
         self.rand_iter = iter([])
 
-    def _null_sample(self, diffby: Collection[str]):
+    def _null_sample(self, diffby: ColumnList):
         '''
         Sample a pair from the frame.
         '''
         valid = set(self.frozen_valid)
         id1 = self.integers(0, len(valid) - 1)
         valid.remove(id1)
-        diffby_ix = [self.col_to_ix[col] for col in diffby]
-        valid = self._filter_diffby(id1, diffby_ix, valid)
+        valid = self._filter_diffby(id1, diffby, valid)
 
         if len(valid) == 0:
             # row1 = self.values[id1]
@@ -96,7 +96,7 @@ class Matcher():
         id2 = self.choice(list(valid))
         return id1, id2
 
-    def sample_null_pair(self, diffby: Collection[str], n_tries=5):
+    def sample_null_pair(self, diffby: ColumnList, n_tries=5):
         '''Sample pairs from the data. It tries multiple times before raising an error'''
         for _ in range(n_tries):
             try:
@@ -123,8 +123,8 @@ class Matcher():
         pos = self.integers(min_val, max_val)
         return items[pos]
 
-    def get_all_pairs(self, sameby: Union[str, Collection[str]],
-                      diffby: Union[str, Collection[str]]):
+    def get_all_pairs(self, sameby: Union[str, ColumnList],
+                      diffby: Union[str, ColumnList]):
         '''
         Get all pairs with given params
         '''
@@ -139,42 +139,38 @@ class Matcher():
             return self._get_all_pairs_single(key, diffby)
 
         # Multiple sameby. Ordering by minimum number of posible pairs
-        sameby_ix = [self.col_to_ix[col] for col in sameby]
-        sameby_ix = sorted(sameby_ix, key=lambda x: self.col_order[x])
+        sameby = sorted(sameby, key=self.col_order.get)
+        candidates = self._get_all_pairs_single(sameby[0], diffby)
+        col_ix = [self.col_to_ix[col] for col in sameby[1:]]
+
         pairs = defaultdict(list)
-        candidates = self._get_all_pairs_single(sameby_ix[0], diffby)
         for key, indices in candidates.items():
             for id1, id2 in indices:
                 row1 = self.values[id1]
                 row2 = self.values[id2]
-                if np.all(row1[sameby_ix[1:]] == row2[sameby_ix[1:]]):
-                    pairs[(key, *row1[sameby_ix[1:]])].append((id1, id2))
+                if np.all(row1[col_ix] == row2[col_ix]):
+                    pairs[(key, *row1[col_ix])].append((id1, id2))
         return dict(pairs)
 
-    def _get_all_pairs_single(self, sameby: Union[str, int],
-                              diffby: Collection[str]):
+    def _get_all_pairs_single(self, sameby: str, diffby: ColumnList):
         '''
         Get all valid pairs for a single column. It considers up to 5000
         samples per each value in the column to avoid memleaks.
         '''
-        if isinstance(sameby, str):
-            sameby = self.col_to_ix[sameby]
-        diffby_ix = [self.col_to_ix[col] for col in diffby]
-        index = self.reverse[sameby]
+        mapper = self.reverse[sameby]
         pairs = defaultdict(list)
-        for key, rows in index.items():
+        for key, rows in mapper.items():
             processed = set()
             for id1 in rows:
                 valid = set(rows)
                 processed.add(id1)
                 valid -= processed
-                valid = self._filter_diffby(id1, diffby_ix, valid)
+                valid = self._filter_diffby(id1, diffby, valid)
                 if valid:
                     pairs[key].extend([(id1, id2) for id2 in valid])
         return dict(pairs)
 
-    def _filter_diffby(self, idx: int, diffby: Collection[int],
-                       valid: Set[int]):
+    def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
         '''
         Remove from valid rows that have matches with idx in any of the diffby columns
         :idx: index of the row to be compared
@@ -185,7 +181,7 @@ class Matcher():
         '''
         row = self.values[idx]
         for col in diffby:
-            val = row[col]
+            val = row[self.col_to_ix[col]]
             if pd.isna(val):
                 continue
             mapper = self.reverse[col]
@@ -195,16 +191,15 @@ class Matcher():
 
 class MatcherMultilabel():
 
-    def __init__(self, dframe: pd.DataFrame, columns: Union[Sequence[str],
-                                                            pd.Index],
+    def __init__(self, dframe: pd.DataFrame, columns: ColumnList,
                  multilabel_col: str, seed: int):
         dframe = dframe.explode(multilabel_col)
         dframe = dframe.reset_index(names='__original_index')
         self.original_index = dframe['__original_index']
         self.matcher = Matcher(dframe, columns, seed)
 
-    def get_all_pairs(self, sameby: Union[str, Collection[str]],
-                      diffby: Collection[str]):
+    def get_all_pairs(self, sameby: Union[str, ColumnList],
+                      diffby: ColumnList):
         pairs = self.matcher.get_all_pairs(sameby, diffby)
         for key, values in pairs.items():
             values = np.asarray(values)
@@ -214,12 +209,12 @@ class MatcherMultilabel():
 
         return pairs
 
-    def sample_null_pair(self, diffby: Collection[str], n_tries=5):
+    def sample_null_pair(self, diffby: ColumnList, n_tries=5):
         null_pair = self.matcher.sample_null_pair(diffby, n_tries)
         id1, id2 = self.original_index[list(null_pair)].values
         return id1, id2
 
-    def get_null_pairs(self, diffby: Collection[str], size: int, n_tries=5):
+    def get_null_pairs(self, diffby: ColumnList, size: int, n_tries=5):
         null_pairs = []
         for _ in tqdm(range(size)):
             null_pairs.append(self.matcher.sample_null_pair(diffby, n_tries))
