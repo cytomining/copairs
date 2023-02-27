@@ -13,10 +13,7 @@ def test_corr_between_replicates():
     num_samples = 10
     X = rng.normal(size=[num_samples, 6])
     meta = create_dframe(5, num_samples)
-    corr_dist, median_num_repl = corr_between_replicates(X,
-                                                         meta,
-                                                         sameby=['c'],
-                                                         diffby=['p', 'w'])
+    corr_between_replicates(X, meta, sameby=['c'], diffby=['p', 'w'])
 
 
 def test_correlation_test():
@@ -25,7 +22,9 @@ def test_correlation_test():
     X = rng.normal(size=[num_samples, 6])
     meta = create_dframe(5, num_samples)
     result = correlation_test(X, meta, sameby=['c'], diffby=['p', 'w'])
-    print(result.percent_score_left())
+    result.percent_score_left()
+    result.percent_score_right()
+    result.percent_score_both()
 
 
 def test_corr_from_pairs():

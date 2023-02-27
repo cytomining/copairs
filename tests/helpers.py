@@ -1,6 +1,10 @@
 from itertools import product
+from typing import Dict
 
 import pandas as pd
+import numpy as np
+
+from copairs.matching import ColumnList
 
 SEED = 0
 
@@ -21,6 +25,35 @@ def simulate_plates(n_compounds, n_replicates, plate_size):
         wells.append(f'w{well_id}')
 
     dframe = pd.DataFrame({'c': compounds, 'p': plates, 'w': wells})
+    return dframe
+
+
+def simulate_random_plates(n_compounds: int,
+                           n_replicates: int,
+                           plate_size: int,
+                           sameby=ColumnList,
+                           diffby=ColumnList):
+    rng = np.random.default_rng(SEED)
+    dframe = simulate_plates(n_compounds, n_replicates, plate_size)
+    # Shuffle values
+    for col in dframe.columns:
+        rng.shuffle(dframe[col].values)
+    sort_cols = list(diffby) + list(sameby)
+    dframe = dframe.sort_values(sort_cols).reset_index(drop=True)
+    return dframe
+
+
+def simulate_random_dframe(length: int, vocab_size: Dict[str, int],
+                           sameby: ColumnList, diffby: ColumnList,
+                           rng: np.random.Generator):
+    dframe = pd.DataFrame(columns=list(vocab_size.keys()), index=range(length))
+    for col, size in vocab_size.items():
+        dframe[col] = rng.integers(1, size + 1, size=length)
+        dframe[col] = col + dframe[col].astype(str)
+
+    sort_cols = list(diffby) + list(sameby)
+    dframe = dframe.sort_values(sort_cols)
+    dframe = dframe.drop_duplicates().reset_index(drop=True)
     return dframe
 
 
