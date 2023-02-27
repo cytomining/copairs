@@ -2,7 +2,6 @@
 Sample pairs with given column restrictions
 '''
 import logging
-from collections import defaultdict
 from math import comb
 from typing import Sequence, Set, Union
 
@@ -12,6 +11,22 @@ from tqdm.auto import tqdm
 
 logger = logging.getLogger('copairs')
 ColumnList = Union[Sequence[str], pd.Index]
+
+
+def _upsert_dict_set(mapper, key, elem):
+    '''Mimic defaultdict behavior. defaultdict not used to return dict objects
+    instead'''
+    if key not in mapper:
+        mapper[key] = set()
+    mapper[key].add(elem)
+
+
+def _upsert_dict_list(mapper, key, elem):
+    '''Mimic defaultdict behavior. defaultdict not used to return dict objects
+    instead'''
+    if key not in mapper:
+        mapper[key] = list()
+    mapper[key].append(elem)
 
 
 def choice_from_set(elems: set, size: int, rng: np.random.Generator):
@@ -40,15 +55,16 @@ class Matcher():
         max_size: max number of rows to consider from the same value.
         '''
         values = dframe[columns].to_numpy(copy=True)
-        reverse = {col: defaultdict(set) for col in columns}
+        reverse = {col: dict() for col in columns}
 
         # Create a reverse index to locate rows containing particular values
-        for i, row in enumerate(values):
-            for j, val in enumerate(row):
-                if pd.isna(val):
+        for ix, row in enumerate(values):
+            for col_ix, key in enumerate(row):
+                if pd.isna(key):
                     continue
-                mapper = reverse[columns[j]]
-                mapper[val].add(i)
+                mapper = reverse[columns[col_ix]]
+                _upsert_dict_set(mapper, key, ix)
+                mapper[key].add(ix)
 
         # Limit the number of elements to max_size by subsampling
         rng = np.random.default_rng(seed)
@@ -143,22 +159,21 @@ class Matcher():
         candidates = self._get_all_pairs_single(sameby[0], diffby)
         col_ix = [self.col_to_ix[col] for col in sameby[1:]]
 
-        pairs = defaultdict(list)
+        pairs = dict()
         for key, indices in candidates.items():
             for id1, id2 in indices:
                 row1 = self.values[id1]
                 row2 = self.values[id2]
                 if np.all(row1[col_ix] == row2[col_ix]):
-                    pairs[(key, *row1[col_ix])].append((id1, id2))
-        return dict(pairs)
+                    key_tuple = (key, *row1[col_ix])
+                    pair = (id1, id2)
+                    _upsert_dict_list(pairs, key_tuple, pair)
+        return pairs
 
     def _get_all_pairs_single(self, sameby: str, diffby: ColumnList):
-        '''
-        Get all valid pairs for a single column. It considers up to 5000
-        samples per each value in the column to avoid memleaks.
-        '''
+        '''Get all valid pairs for a single column.'''
         mapper = self.reverse[sameby]
-        pairs = defaultdict(list)
+        pairs = dict()
         for key, rows in mapper.items():
             processed = set()
             for id1 in rows:
@@ -166,9 +181,10 @@ class Matcher():
                 processed.add(id1)
                 valid -= processed
                 valid = self._filter_diffby(id1, diffby, valid)
-                if valid:
-                    pairs[key].extend([(id1, id2) for id2 in valid])
-        return dict(pairs)
+                for id2 in valid:
+                    pair = (id1, id2)
+                    _upsert_dict_list(pairs, key, pair)
+        return pairs
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
         '''
