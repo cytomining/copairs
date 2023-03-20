@@ -3,7 +3,7 @@ Sample pairs with given column restrictions
 '''
 import logging
 from math import comb
-from typing import Sequence, Set, Union
+from typing import Sequence, Set, Union, Optional
 
 import numpy as np
 import pandas as pd
@@ -50,10 +50,11 @@ class Matcher():
                  dframe: pd.DataFrame,
                  columns: ColumnList,
                  seed: int,
-                 max_size: int = 5000):
+                 max_size: Optional[int] = None):
         '''
         max_size: max number of rows to consider from the same value.
         '''
+        rng = np.random.default_rng(seed)
         values = dframe[columns].to_numpy(copy=True)
         reverse = {col: dict() for col in columns}
 
@@ -67,14 +68,14 @@ class Matcher():
                 mapper[key].add(ix)
 
         # Limit the number of elements to max_size by subsampling
-        rng = np.random.default_rng(seed)
-        for column, mapper in reverse.items():
-            for key, rows_ix in mapper.items():
-                if len(rows_ix) > max_size:
-                    logger.warning(
-                        f'Sampling {max_size} values from {key} in column {column}.'
-                    )
-                    mapper[key] = choice_from_set(rows_ix, max_size, rng)
+        if max_size is not None:
+            for column, mapper in reverse.items():
+                for key, rows_ix in mapper.items():
+                    if len(rows_ix) > max_size:
+                        logger.warning(
+                            f'Sampling {max_size} values from {key} in column {column}.'
+                        )
+                        mapper[key] = choice_from_set(rows_ix, max_size, rng)
 
         # Create a column order based on the number of potential row matches
         # Useful to solve queries with more than one sameby
