@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from typing import Callable
+
 import numpy as np
 from tqdm.auto import tqdm
 
