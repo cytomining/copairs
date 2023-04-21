@@ -2,7 +2,7 @@ import logging
 from typing import Tuple
 import pandas as pd
 import numpy as np
-from functools import partial, cache
+from functools import partial, lru_cache
 import multiprocessing
 from copairs.matching import Matcher
 from copairs.compute import compute_similarities
@@ -40,7 +40,7 @@ def compute_ap(rel_k) -> np.ndarray:
     return ap
 
 
-@cache
+@lru_cache(maxsize=None)
 def random_ap(num_perm: int,
               num_pos: int,
               num_neg: int,
