@@ -11,7 +11,7 @@ from .matching import Matcher
 def corr_from_null_pairs(X: np.ndarray, null_pairs, n_replicates):
     """ Correlation from a given list of unnamed pairs.  """
     null_pairs = np.asarray(null_pairs, int)
-    corrs = corrcoef_indexed(X, null_pairs)
+    corrs = corrcoef_indexed(X, null_pairs, batch_size=20000)
     corrs = corrs.reshape(-1, n_replicates)
     null_dist = np.nanmedian(corrs, axis=1)
     return pd.Series(null_dist)
@@ -52,7 +52,7 @@ def corr_from_pairs(X: np.ndarray, pairs: dict, sameby: List[str]):
     list-like of correlation values and median of number of replicates
     '''
     pair_ix = np.vstack(list(pairs.values()))
-    corrs = corrcoef_indexed(X, pair_ix)
+    corrs = corrcoef_indexed(X, pair_ix, batch_size=20000)
     counts = [len(v) for v in pairs.values()]
 
     if len(sameby) == 1:
@@ -167,8 +167,7 @@ def correlation_test(X: np.ndarray,
     '''
     Generate Null and replicate distribution for replicate correlation analysis
     '''
-    corr_df, median_num_repl = corr_between_replicates(X, meta, sameby,
-                                                       diffby)
+    corr_df, median_num_repl = corr_between_replicates(X, meta, sameby, diffby)
 
     n_replicates = min(median_num_repl, 50)
     null_dist = corr_between_non_replicates(

@@ -1,10 +1,10 @@
 import pytest
 import numpy as np
 
-import copairs.compute_np as b_np
-from copairs.compute import TF_ENABLED
+from copairs import compute_np
+from copairs.compute import TF_ENABLED, TFP_ENABLED
 if TF_ENABLED:
-    import copairs.compute_tf as b_tf
+    from copairs import compute_tf
 
 SEED = 0
 rng = np.random.default_rng(SEED)
@@ -56,18 +56,18 @@ def _test_cosine(backend):
 
 
 def test_corrcoef_np():
-    _test_corrcoef(b_np)
+    _test_corrcoef(compute_np)
 
 
 def test_cosine_np():
-    _test_cosine(b_np)
+    _test_cosine(compute_np)
 
 
-@pytest.mark.skipif(not TF_ENABLED, reason="tensorflow_prob not installed")
+@pytest.mark.skipif(not TFP_ENABLED, reason="tensorflow_prob not installed")
 def test_corrcoef_tf():
-    _test_corrcoef(b_tf)
+    _test_corrcoef(compute_tf)
 
 
 @pytest.mark.skipif(not TF_ENABLED, reason="tensorflow_prob not installed")
 def test_cosine_tf():
-    _test_cosine(b_tf)
+    _test_cosine(compute_tf)

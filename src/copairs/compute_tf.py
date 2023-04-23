@@ -2,7 +2,6 @@ from typing import Callable
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_probability as tfp
 from tqdm.auto import tqdm
 
 
@@ -33,6 +32,7 @@ def pairwise_indexed(feats: np.ndarray, pairs: np.ndarray,
 
 
 def pairwise_corr(x_sample: tf.Tensor, y_sample: tf.Tensor) -> tf.Tensor:
+    import tensorflow_probability as tfp
     return tfp.stats.correlation(x_sample,
                                  y_sample,
                                  sample_axis=1,

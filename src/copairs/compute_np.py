@@ -1,7 +1,19 @@
+from functools import partial
 from typing import Callable
+from multiprocessing import Pool
 
 import numpy as np
 from tqdm.auto import tqdm
+
+NUM_PROC = 4
+
+
+def process_batch(i: int, batch_size: int, feats: np.ndarray,
+                  pair_ix: np.ndarray, batch_pairwise_op):
+    x_sample = feats[pair_ix[i:i + batch_size, 0]]
+    y_sample = feats[pair_ix[i:i + batch_size, 1]]
+    corr = batch_pairwise_op(x_sample, y_sample)
+    return corr
 
 
 def pairwise_indexed(feats: np.ndarray, pair_ix: np.ndarray,
@@ -11,11 +23,15 @@ def pairwise_indexed(feats: np.ndarray, pair_ix: np.ndarray,
     num_pairs = len(pair_ix)
 
     corrs = []
-    for i in tqdm(range(0, num_pairs, batch_size), leave=False):
-        x_sample = feats[pair_ix[i:i + batch_size, 0]]
-        y_sample = feats[pair_ix[i:i + batch_size, 1]]
-        corr = batch_pairwise_op(x_sample, y_sample)
-        corrs.append(corr)
+
+    par_func = partial(process_batch,
+                       batch_size=batch_size,
+                       feats=feats,
+                       pair_ix=pair_ix,
+                       batch_pairwise_op=batch_pairwise_op)
+    with Pool(NUM_PROC) as p:
+        idx = list(range(0, num_pairs, batch_size))
+        corrs = list(tqdm(p.imap(par_func, idx), total=len(idx), leave=False))
 
     corrs = np.concatenate(corrs)
     assert len(corrs) == num_pairs

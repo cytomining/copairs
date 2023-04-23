@@ -122,17 +122,23 @@ def results_to_dframe(meta, p_values, null_dists, aps):
     return result
 
 
-def run_pipeline(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby,
-                 null_size) -> pd.DataFrame:
+def run_pipeline(meta,
+                 feats,
+                 pos_sameby,
+                 pos_diffby,
+                 neg_sameby,
+                 neg_diffby,
+                 null_size,
+                 batch_size=20000) -> pd.DataFrame:
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
     logger.info('Finding positive and negative pairs...')
     pos_pairs, neg_pairs = find_pairs(meta, pos_sameby, pos_diffby, neg_sameby,
                                       neg_diffby)
     logger.info('Computing positive similarities...')
-    pos_dfs = compute_similarities(feats, pos_pairs, pos_sameby)
+    pos_dfs = compute_similarities(feats, pos_pairs, pos_sameby, batch_size)
     logger.info('Computing negative similarities...')
-    neg_dfs = compute_similarities(feats, neg_pairs, neg_sameby)
+    neg_dfs = compute_similarities(feats, neg_pairs, neg_sameby, batch_size)
     logger.info('Removing unpaired samples...')
     meta_filtered, neg_dfs = remove_unpaired(pos_pairs, neg_dfs, meta,
                                              pos_sameby)
