@@ -13,29 +13,9 @@ logger = logging.getLogger('copairs')
 ColumnList = Union[Sequence[str], pd.Index]
 
 
-def _upsert_dict_set(mapper, key, elem):
-    '''Mimic defaultdict behavior. defaultdict not used to return dict objects
-    instead'''
-    if key not in mapper:
-        mapper[key] = set()
-    mapper[key].add(elem)
-
-
-def _upsert_dict_list(mapper, key, elem):
-    '''Mimic defaultdict behavior. defaultdict not used to return dict objects
-    instead'''
-    if key not in mapper:
-        mapper[key] = list()
-    mapper[key].append(elem)
-
-
-def choice_from_set(elems: set, size: int, rng: np.random.Generator):
-    '''
-    Generates a random sample from a given set
-    '''
-    array = np.array(list(elems))
-    array = rng.choice(array, size)
-    return set(array)
+def reverse_index(col: pd.Series) -> pd.Series:
+    '''Build a reverse_index for a given column in the DataFrame'''
+    return pd.Series(col.groupby(col).indices, name=col.name)
 
 
 class UnpairedException(Exception):
@@ -55,41 +35,33 @@ class Matcher():
         max_size: max number of rows to consider from the same value.
         '''
         rng = np.random.default_rng(seed)
-        values = dframe[columns].to_numpy(copy=True)
-        reverse = {col: dict() for col in columns}
+        dframe = dframe[columns].reset_index(drop=True).copy()
+        dframe.index.name = '__copairs_ix'
 
-        # Create a reverse index to locate rows containing particular values
-        for ix, row in enumerate(values):
-            for col_ix, key in enumerate(row):
-                if pd.isna(key):
-                    continue
-                mapper = reverse[columns[col_ix]]
-                _upsert_dict_set(mapper, key, ix)
-                mapper[key].add(ix)
+        def clip_list(elems: np.ndarray) -> np.ndarray:
+            if max_size and elems.size > max_size:
+                logger.warning(f'Sampling {max_size} out of {elems.size}')
+                elems = rng.choice(elems, max_size)
+            return elems
 
-        # Limit the number of elements to max_size by subsampling
-        if max_size is not None:
-            for column, mapper in reverse.items():
-                for key, rows_ix in mapper.items():
-                    if len(rows_ix) > max_size:
-                        logger.warning(
-                            f'Sampling {max_size} values from {key} in column {column}.'
-                        )
-                        mapper[key] = choice_from_set(rows_ix, max_size, rng)
+        mappers = [
+            reverse_index(dframe[col]).apply(clip_list) for col in dframe
+        ]
 
         # Create a column order based on the number of potential row matches
         # Useful to solve queries with more than one sameby
         n_pairs = {}
-        for column, mapper in reverse.items():
-            curr = 0
-            for rows in mapper.values():
-                curr += comb(len(rows), 2)
-            n_pairs[column] = curr
+        for mapper in mappers:
+            n_combs = mapper.apply(lambda x: comb(len(x), 2)).sum()
+            n_pairs[mapper.name] = n_combs
         col_order = sorted(n_pairs, key=n_pairs.get)
         self.col_order = {column: i for i, column in enumerate(col_order)}
 
-        self.values = values
-        self.reverse = reverse
+        self.values = dframe[columns].values
+        self.reverse = {
+            mapper.name: mapper.apply(set).to_dict()
+            for mapper in mappers
+        }
         self.rng = rng
         self.frozen_valid = frozenset(range(len(self.values)))
         self.col_to_ix = {c: i for i, c in enumerate(columns)}
@@ -168,7 +140,7 @@ class Matcher():
                 if np.all(row1[col_ix] == row2[col_ix]):
                     key_tuple = (key, *row1[col_ix])
                     pair = (id1, id2)
-                    _upsert_dict_list(pairs, key_tuple, pair)
+                    pairs.setdefault(key_tuple, list()).append(pair)
         return pairs
 
     def _get_all_pairs_single(self, sameby: str, diffby: ColumnList):
@@ -184,7 +156,7 @@ class Matcher():
                 valid = self._filter_diffby(id1, diffby, valid)
                 for id2 in valid:
                     pair = (id1, id2)
-                    _upsert_dict_list(pairs, key, pair)
+                    pairs.setdefault(key, list()).append(pair)
         return pairs
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
