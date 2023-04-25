@@ -1,6 +1,7 @@
 '''
 Sample pairs with given column restrictions
 '''
+from collections import namedtuple
 import logging
 from math import comb
 from typing import Sequence, Set, Union, Optional
@@ -127,6 +128,7 @@ class Matcher():
             key = next(iter(sameby))
             return self._get_all_pairs_single(key, diffby)
 
+        ComposedKey = namedtuple('ComposedKey', sameby)
         # Multiple sameby. Ordering by minimum number of posible pairs
         sameby = sorted(sameby, key=self.col_order.get)
         candidates = self._get_all_pairs_single(sameby[0], diffby)
@@ -138,7 +140,8 @@ class Matcher():
                 row1 = self.values[id1]
                 row2 = self.values[id2]
                 if np.all(row1[col_ix] == row2[col_ix]):
-                    key_tuple = (key, *row1[col_ix])
+                    vals = key, *row1[col_ix]
+                    key_tuple = ComposedKey(**dict(zip(sameby, vals)))
                     pair = (id1, id2)
                     pairs.setdefault(key_tuple, list()).append(pair)
         return pairs

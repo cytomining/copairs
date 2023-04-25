@@ -61,6 +61,9 @@ def compute_p_values(null_dists, ap_scores, null_size):
 
 
 def build_rank_lists(pos_dfs, pos_sameby, neg_dfs, neg_sameby) -> pd.Series:
+    if isinstance(pos_sameby, list):
+        # All columns store the same value, pick the first column
+        pos_sameby = pos_sameby[0]
     pos_ids = pos_dfs.melt(value_vars=['ix1', 'ix2'],
                            id_vars=['dist', pos_sameby],
                            value_name='ix')
@@ -102,7 +105,13 @@ def remove_unpaired(pos_pairs, neg_dfs, meta,
                     pos_sameby) -> Tuple[pd.DataFrame, pd.DataFrame]:
     ''' Remove indices that do not have positive pairs in meta and negative distances'''
     found_jcpids = set(pos_pairs.keys())
-    miss_jcpid_ix = meta.query(f'{pos_sameby} not in @found_jcpids').index
+    if isinstance(pos_sameby, list):
+        found_jcpids = pd.DataFrame(found_jcpids)
+        found_ids = meta.merge(found_jcpids, on=pos_sameby).index
+        miss_jcpid_ix = meta.index.difference(found_ids)
+    else:
+        miss_jcpid_ix = meta.query(f'{pos_sameby} not in @found_jcpids').index
+    
     if len(miss_jcpid_ix) > 0:
         missing_jcpids = meta.loc[miss_jcpid_ix,
                                   pos_sameby].drop_duplicates().tolist()
