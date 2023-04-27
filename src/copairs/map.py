@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from functools import partial, lru_cache
 import multiprocessing
+from copairs.compute_np import NUM_PROC
 from copairs.matching import Matcher
 from copairs.compute import compute_similarities
 
@@ -61,15 +62,12 @@ def compute_p_values(null_dists, ap_scores, null_size):
 
 
 def build_rank_lists(pos_dfs, pos_sameby, neg_dfs, neg_sameby) -> pd.Series:
-    if isinstance(pos_sameby, list):
-        # All columns store the same value, pick the first column
-        pos_sameby = pos_sameby[0]
     pos_ids = pos_dfs.melt(value_vars=['ix1', 'ix2'],
-                           id_vars=['dist', pos_sameby],
+                           id_vars=['dist'],
                            value_name='ix')
     pos_ids['label'] = 1
     neg_ids = neg_dfs.melt(value_vars=['ix1', 'ix2'],
-                           id_vars=['dist', neg_sameby],
+                           id_vars=['dist'],
                            value_name='ix')
     neg_ids['label'] = 0
     dists = pd.concat([pos_ids, neg_ids])
@@ -87,7 +85,7 @@ def compute_null_dists(rel_k_list, null_size):
     for num_pos, num_neg in zip(num_pos_list, num_neg_list):
         key = null_size, num_pos, num_neg
         null_confs.append(key)
-    with multiprocessing.Pool(processes=8) as pool:
+    with multiprocessing.Pool(processes=NUM_PROC) as pool:
         null_dists = np.stack(pool.starmap(random_ap, null_confs))
     # null_dists = np.stack([random_ap(*key) for key in null_confs])
     return null_dists, null_size
@@ -96,25 +94,25 @@ def compute_null_dists(rel_k_list, null_size):
 def find_pairs(obs: pd.DataFrame, pos_sameby, pos_diffby, neg_sameby,
                neg_diffby):
     matcher = Matcher(obs, obs.columns, seed=0)
-    pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
-    neg_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
+    dict_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
+    pos_pairs = np.vstack(list(dict_pairs.values()))
+    dict_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
+    neg_pairs = np.vstack(list(dict_pairs.values()))
     return pos_pairs, neg_pairs
 
 
 def remove_unpaired(pos_pairs, neg_dfs, meta,
                     pos_sameby) -> Tuple[pd.DataFrame, pd.DataFrame]:
     ''' Remove indices that do not have positive pairs in meta and negative distances'''
-    found_jcpids = set(pos_pairs.keys())
-    if isinstance(pos_sameby, list):
-        found_jcpids = pd.DataFrame(found_jcpids)
-        found_ids = meta.merge(found_jcpids, on=pos_sameby).index
-        miss_jcpid_ix = meta.index.difference(found_ids)
+    if isinstance(pos_sameby, str):
+        found_keys = pd.DataFrame({pos_sameby: pos_pairs.keys()})
     else:
-        miss_jcpid_ix = meta.query(f'{pos_sameby} not in @found_jcpids').index
+        found_keys = pd.DataFrame(pos_pairs.keys())
+    found_index = meta.merge(found_keys, on=pos_sameby).index
+    miss_jcpid_ix = meta.index.difference(found_index)
     
     if len(miss_jcpid_ix) > 0:
-        missing_jcpids = meta.loc[miss_jcpid_ix,
-                                  pos_sameby].drop_duplicates().tolist()
+        missing_jcpids = meta.loc[miss_jcpid_ix, pos_sameby].drop_duplicates()
         logger.warning(f'Can\'t find a valid pair for:\n{missing_jcpids}')
         query = 'ix1 not in @miss_jcpid_ix and ix2 not in @miss_jcpid_ix'
         neg_dfs = neg_dfs.query(query)
@@ -145,12 +143,12 @@ def run_pipeline(meta,
     pos_pairs, neg_pairs = find_pairs(meta, pos_sameby, pos_diffby, neg_sameby,
                                       neg_diffby)
     logger.info('Computing positive similarities...')
-    pos_dfs = compute_similarities(feats, pos_pairs, pos_sameby, batch_size)
+    pos_dfs = compute_similarities(feats, pos_pairs, batch_size)
     logger.info('Computing negative similarities...')
-    neg_dfs = compute_similarities(feats, neg_pairs, neg_sameby, batch_size)
+    neg_dfs = compute_similarities(feats, neg_pairs, batch_size)
     logger.info('Removing unpaired samples...')
-    meta_filtered, neg_dfs = remove_unpaired(pos_pairs, neg_dfs, meta,
-                                             pos_sameby)
+    # meta_filtered, neg_dfs = remove_unpaired(pos_pairs, neg_dfs, meta,
+    #                                         pos_sameby)
     logger.info('Building rank lists...')
     rel_k_list = build_rank_lists(pos_dfs, pos_sameby, neg_dfs, neg_sameby)
     logger.info('Computing average precision...')
@@ -159,8 +157,9 @@ def run_pipeline(meta,
     logger.info('Computing null distributions...')
     null_dists, null_size = compute_null_dists(rel_k_list, null_size)
     logger.info('Computing P-values...')
+    
     p_values = compute_p_values(null_dists, ap_scores, null_size)
     logger.info('Creating result DataFrame...')
-    result = results_to_dframe(meta_filtered, p_values, null_dists, ap_scores)
+    result = results_to_dframe(meta, p_values, null_dists, ap_scores)
     logger.info('Finished.')
     return result
