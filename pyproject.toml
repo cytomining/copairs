@@ -11,7 +11,8 @@ authors = [
 ]
 dependencies = [
   "pandas",
-  "tqdm"
+  "tqdm",
+  "statsmodels"
 ]
 
 [project.optional-dependencies]

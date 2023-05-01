@@ -7,6 +7,7 @@ import pandas as pd
 from copairs.compute import compute_similarities
 import copairs.compute_np as backend
 from copairs.matching import Matcher
+from statsmodels.stats.multitest import multipletests
 
 logger = logging.getLogger('copairs')
 
@@ -44,6 +45,24 @@ def results_to_dframe(meta, p_values, null_dists, aps):
     result['null_dists'] = list(null_dists)
     result['average_precision'] = aps
     return result
+
+
+def aggregate(result: pd.DataFrame, sameby, threshold: float) -> pd.DataFrame:
+    agg_rs = result.groupby(sameby, as_index=False).agg({
+        'average_precision':
+        'mean',
+        'p_value':
+        lambda p_values: -np.log10(p_values).mean(),
+    })
+
+    reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
+        10**-agg_rs['p_value'], method='fdr_bh')
+    agg_rs['q_value'] = pvals_corrected
+    agg_rs['nlog10qvalue'] = (-np.log10(agg_rs['q_value']))
+    agg_rs.rename({'p_value': 'nlog10pvalue'}, axis=1, inplace=True)
+    agg_rs['above_p_threshold'] = agg_rs['nlog10pvalue'] > -np.log10(threshold)
+    agg_rs['above_q_threshold'] = agg_rs['nlog10qvalue'] > -np.log10(threshold)
+    return agg_rs
 
 
 def run_pipeline(meta,
