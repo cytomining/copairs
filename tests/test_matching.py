@@ -61,7 +61,7 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
     return pairs
 
 
-def check_naive(dframe, matcher, sameby, diffby):
+def check_naive(dframe, matcher: Matcher, sameby, diffby):
     '''Check Matcher and naive generate same pairs'''
     gt_pairs = get_naive_pairs(dframe, sameby, diffby)
     vals = matcher.get_all_pairs(sameby, diffby)
@@ -98,6 +98,21 @@ def test_stress_simulated_data():
         check_simulated_data(length, vocab_size, sameby, diffby, rng)
 
 
+def test_empty_sameby():
+    '''Test query without sameby'''
+    dframe = create_dframe(3, 10)
+    matcher = Matcher(dframe, dframe.columns, seed=SEED)
+    check_naive(dframe, matcher, sameby=[], diffby=['w', 'c'])
+
+
+def test_empty_diffby():
+    '''Test query without diffby'''
+    dframe = create_dframe(3, 10)
+    matcher = Matcher(dframe, dframe.columns, seed=SEED)
+    matcher.get_all_pairs(['c'], [])
+    check_naive(dframe, matcher, sameby=['c'], diffby=[])
+
+
 def test_raise_distjoint():
     '''Test check for disjoint sameby and diffby'''
     dframe = create_dframe(3, 10)
@@ -105,12 +120,14 @@ def test_raise_distjoint():
     with pytest.raises(ValueError, match='must be disjoint lists'):
         matcher.get_all_pairs('c', ['w', 'c'])
 
+
 def test_raise_no_params():
     '''Test check for at least one of sameby and diffby'''
     dframe = create_dframe(3, 10)
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     with pytest.raises(ValueError, match='at least one should be provided'):
         matcher.get_all_pairs([], [])
+
 
 def assert_sameby_diffby(dframe: pd.DataFrame, pairs_dict: dict, sameby,
                          diffby):

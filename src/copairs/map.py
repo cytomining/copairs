@@ -12,7 +12,7 @@ from statsmodels.stats.multitest import multipletests
 logger = logging.getLogger('copairs')
 
 
-def build_rank_lists(pos_dfs, pos_sameby, neg_dfs, neg_sameby) -> pd.Series:
+def build_rank_lists(pos_dfs, neg_dfs) -> pd.Series:
     pos_ids = pos_dfs.melt(value_vars=['ix1', 'ix2'],
                            id_vars=['dist'],
                            value_name='ix')
@@ -83,7 +83,7 @@ def run_pipeline(meta,
     logger.info('Computing negative similarities...')
     neg_dfs = compute_similarities(feats, neg_pairs, batch_size)
     logger.info('Building rank lists...')
-    rel_k_list = build_rank_lists(pos_dfs, pos_sameby, neg_dfs, neg_sameby)
+    rel_k_list = build_rank_lists(pos_dfs, neg_dfs)
     logger.info('Computing average precision...')
     ap_scores = rel_k_list.apply(backend.compute_ap)
     ap_scores = np.concatenate(ap_scores.values)

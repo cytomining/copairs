@@ -1,6 +1,7 @@
 '''
 Sample pairs with given column restrictions
 '''
+import itertools
 from collections import namedtuple
 import logging
 from math import comb
@@ -126,6 +127,8 @@ class Matcher():
             raise ValueError('sameby and diffby must be disjoint lists')
         if not sameby and not diffby:
             raise ValueError('sameby, diffby: at least one should be provided')
+        if not sameby:
+            return self._only_diffby(diffby)
         if len(sameby) == 1:
             key = next(iter(sameby))
             return self._get_all_pairs_single(key, diffby)
@@ -163,6 +166,28 @@ class Matcher():
                     pair = (id1, id2)
                     pairs.setdefault(key, list()).append(pair)
         return pairs
+
+    def _only_diffby(self, diffby: ColumnList):
+        '''Generate a dict with single NaN key containing all of the pairs
+        with different values in the column list'''
+        diffby = sorted(diffby, key=self.col_order.get)
+
+        # Cartesian product for one of the diffby columns
+        mapper = self.reverse[diffby[0]]
+        keys = list(mapper.keys())
+        pairs = []
+        for key_a, key_b in itertools.combinations(keys, 2):
+            pairs.extend(itertools.product(mapper[key_a], mapper[key_b]))
+        pairs = np.array(pairs)
+        num_pairs = len(pairs)
+        col_ix = [self.col_to_ix[col] for col in diffby[1:]]
+        vals_a = self.values[pairs[:, 0], col_ix].reshape([num_pairs, -1])
+        vals_b = self.values[pairs[:, 1], col_ix].reshape([num_pairs, -1])
+        valid = vals_a != vals_b
+        valid = np.all(valid, axis=1)
+
+        pairs = np.unique(pairs[valid], axis=0)
+        return {None: pairs.tolist()}
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
         '''
