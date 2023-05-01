@@ -105,6 +105,12 @@ def test_raise_distjoint():
     with pytest.raises(ValueError, match='must be disjoint lists'):
         matcher.get_all_pairs('c', ['w', 'c'])
 
+def test_raise_no_params():
+    '''Test check for at least one of sameby and diffby'''
+    dframe = create_dframe(3, 10)
+    matcher = Matcher(dframe, dframe.columns, seed=SEED)
+    with pytest.raises(ValueError, match='at least one should be provided'):
+        matcher.get_all_pairs([], [])
 
 def assert_sameby_diffby(dframe: pd.DataFrame, pairs_dict: dict, sameby,
                          diffby):

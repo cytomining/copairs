@@ -124,6 +124,8 @@ class Matcher():
             sameby = [sameby]
         if set(sameby) & set(diffby):
             raise ValueError('sameby and diffby must be disjoint lists')
+        if not sameby and not diffby:
+            raise ValueError('sameby, diffby: at least one should be provided')
         if len(sameby) == 1:
             key = next(iter(sameby))
             return self._get_all_pairs_single(key, diffby)
