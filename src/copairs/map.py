@@ -6,7 +6,7 @@ import pandas as pd
 
 from copairs.compute import compute_similarities
 import copairs.compute_np as backend
-from copairs.matching import Matcher
+from copairs.matching import Matcher, MatcherMultilabel
 from statsmodels.stats.multitest import multipletests
 
 logger = logging.getLogger('copairs')
@@ -30,12 +30,26 @@ def build_rank_lists(pos_dfs, neg_dfs) -> pd.Series:
 
 
 def find_pairs(obs: pd.DataFrame, pos_sameby, pos_diffby, neg_sameby,
-               neg_diffby):
-    matcher = Matcher(obs, obs.columns, seed=0)
+               neg_diffby, multilabel_col=None):
+    columns = set()
+    for col in pos_sameby, pos_diffby, neg_sameby, neg_diffby:
+        if isinstance(col, str):
+            columns.add(col)
+        else:
+            columns.update(col)
+    columns = list(columns)
+    if multilabel_col:
+        matcher = MatcherMultilabel(obs, columns, multilabel_col, seed=0)
+    else:
+        matcher = Matcher(obs, columns, seed=0)
+
     dict_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
     pos_pairs = np.vstack(list(dict_pairs.values()))
+    pos_pairs = np.unique(pos_pairs, axis=0)
+
     dict_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
     neg_pairs = np.vstack(list(dict_pairs.values()))
+    neg_pairs = np.unique(neg_pairs, axis=0)
     return pos_pairs, neg_pairs
 
 
@@ -72,12 +86,14 @@ def run_pipeline(meta,
                  neg_sameby,
                  neg_diffby,
                  null_size,
-                 batch_size=20000) -> pd.DataFrame:
+                 multilabel_col=None,
+                 batch_size=20000,
+                 ) -> pd.DataFrame:
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
     logger.info('Finding positive and negative pairs...')
     pos_pairs, neg_pairs = find_pairs(meta, pos_sameby, pos_diffby, neg_sameby,
-                                      neg_diffby)
+                                      neg_diffby, multilabel_col)
     logger.info('Computing positive similarities...')
     pos_dfs = compute_similarities(feats, pos_pairs, batch_size)
     logger.info('Computing negative similarities...')
