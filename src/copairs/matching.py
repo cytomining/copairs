@@ -214,6 +214,8 @@ class MatcherMultilabel():
 
     def __init__(self, dframe: pd.DataFrame, columns: ColumnList,
                  multilabel_col: str, seed: int):
+        self.multilabel_col = multilabel_col
+        self.multilabel_set = dframe[multilabel_col].apply(set)
         dframe = dframe.explode(multilabel_col)
         dframe = dframe.reset_index(names='__original_index')
         self.original_index = dframe['__original_index']
@@ -221,13 +223,24 @@ class MatcherMultilabel():
 
     def get_all_pairs(self, sameby: Union[str, ColumnList],
                       diffby: ColumnList):
+        diffby_multi = self.multilabel_col in diffby
+        if diffby_multi:
+            # Multilabel in diffby must be 'ALL' instead of 'ANY'
+            # Doing this filter afterwards
+            diffby = [col for col in diffby if self.multilabel_col != col]
         pairs = self.matcher.get_all_pairs(sameby, diffby)
         for key, values in pairs.items():
             values = np.asarray(values)
-            pairs[key] = list(
-                zip(self.original_index[values[:, 0]],
-                    self.original_index[values[:, 1]]))
-
+            # Map to original_index
+            values[:, 0] = self.original_index[values[:, 0]]
+            values[:, 1] = self.original_index[values[:, 1]]
+            # Check all of the values in the multilabel_col are different
+            if diffby_multi:
+                labels_a = self.multilabel_set.iloc[values[:, 0]]
+                labels_b = self.multilabel_set.iloc[values[:, 1]]
+                valid = [len(a&b)==0 for a,b in zip(labels_a, labels_b)]
+                values = values[valid]
+            pairs[key] = list(zip(*values.T))
         return pairs
 
     def sample_null_pair(self, diffby: ColumnList, n_tries=5):
