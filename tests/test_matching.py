@@ -103,6 +103,7 @@ def test_empty_sameby():
     dframe = create_dframe(3, 10)
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     check_naive(dframe, matcher, sameby=[], diffby=['w', 'c'])
+    check_naive(dframe, matcher, sameby=[], diffby=['w'])
 
 
 def test_empty_diffby():
@@ -111,6 +112,7 @@ def test_empty_diffby():
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     matcher.get_all_pairs(['c'], [])
     check_naive(dframe, matcher, sameby=['c'], diffby=[])
+    check_naive(dframe, matcher, sameby=['w', 'c'], diffby=[])
 
 
 def test_raise_distjoint():

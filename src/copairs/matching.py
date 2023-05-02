@@ -179,14 +179,16 @@ class Matcher():
         for key_a, key_b in itertools.combinations(keys, 2):
             pairs.extend(itertools.product(mapper[key_a], mapper[key_b]))
         pairs = np.array(pairs)
-        num_pairs = len(pairs)
-        col_ix = [self.col_to_ix[col] for col in diffby[1:]]
-        vals_a = self.values[pairs[:, 0], col_ix].reshape([num_pairs, -1])
-        vals_b = self.values[pairs[:, 1], col_ix].reshape([num_pairs, -1])
-        valid = vals_a != vals_b
-        valid = np.all(valid, axis=1)
+        if len(diffby) > 1:
+            num_pairs = len(pairs)
+            col_ix = [self.col_to_ix[col] for col in diffby[1:]]
+            vals_a = self.values[pairs[:, 0], col_ix].reshape([num_pairs, -1])
+            vals_b = self.values[pairs[:, 1], col_ix].reshape([num_pairs, -1])
+            valid = vals_a != vals_b
+            valid = np.all(valid, axis=1)
+            pairs = pairs[valid]
 
-        pairs = np.unique(pairs[valid], axis=0)
+        pairs = np.unique(pairs, axis=0)
         return {None: pairs.tolist()}
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
