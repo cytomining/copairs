@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 try:
     import tensorflow
     TF_ENABLED = True
@@ -31,11 +30,3 @@ def cosine_indexed(feats: np.ndarray, pairs: np.ndarray,
     backend = compute_tf if TF_ENABLED else compute_np
     return backend.pairwise_indexed(feats, pairs, backend.pairwise_cosine,
                                     batch_size)
-
-
-def compute_similarities(feats: np.ndarray, pairs_ix: np.ndarray,
-                         batch_size: int) -> pd.DataFrame:
-    dists = cosine_indexed(feats, pairs_ix, batch_size=batch_size)
-    dist_df = pd.DataFrame(pairs_ix, columns=['ix1', 'ix2'])
-    dist_df['dist'] = dists
-    return dist_df

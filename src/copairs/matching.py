@@ -20,6 +20,23 @@ def reverse_index(col: pd.Series) -> pd.Series:
     return pd.Series(col.groupby(col).indices, name=col.name)
 
 
+def dict_to_dframe(dict_pairs, sameby):
+    '''Convert the Matcher.get_all_pairs output to pd.DataFrame'''
+    if not dict_pairs:
+        raise ValueError('dict_pairs empty')
+    keys = list(dict_pairs.keys())
+    counts = [len(pairs) for pairs in dict_pairs.values()]
+    keys = np.repeat(keys, counts)
+    if keys[0] is namedtuple:
+        keys_df = pd.DataFrame(keys)
+    else:
+        keys_df = pd.DataFrame({sameby: keys})
+
+    pairs_ix = np.vstack(list(dict_pairs.values()))
+    pairs_df = pd.DataFrame(pairs_ix, columns=['ix1', 'ix2'])
+    return pd.concat([keys_df, pairs_df], axis=0)
+
+
 class UnpairedException(Exception):
     '''Exception raised when a row can not be paired with any other row in the
     data'''
@@ -238,7 +255,7 @@ class MatcherMultilabel():
             if diffby_multi:
                 labels_a = self.multilabel_set.iloc[values[:, 0]]
                 labels_b = self.multilabel_set.iloc[values[:, 1]]
-                valid = [len(a&b)==0 for a,b in zip(labels_a, labels_b)]
+                valid = [len(a & b) == 0 for a, b in zip(labels_a, labels_b)]
                 values = values[valid]
             pairs[key] = list(zip(*values.T))
         return pairs

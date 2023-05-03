@@ -13,7 +13,7 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby, multilabel_col: str):
                                        how='cross',
                                        suffixes=('_x', '_y'))
     # remove rows that pair themselves
-    cross = cross.query('index_x != index_y')
+    cross = cross.query('index_x != index_y').copy()
 
     def all_diff(row):
         return len(row[f'{multilabel_col}_x']

@@ -3,11 +3,11 @@ import logging
 
 import numpy as np
 import pandas as pd
-
-from copairs.compute import compute_similarities
-import copairs.compute_np as backend
-from copairs.matching import Matcher, MatcherMultilabel
 from statsmodels.stats.multitest import multipletests
+
+from copairs.compute import cosine_indexed
+import copairs.compute_np as backend
+from copairs.matching import Matcher, MatcherMultilabel, dict_to_dframe
 
 logger = logging.getLogger('copairs')
 
@@ -29,28 +29,28 @@ def build_rank_lists(pos_dfs, neg_dfs) -> pd.Series:
     return rel_k_list
 
 
-def find_pairs(obs: pd.DataFrame, pos_sameby, pos_diffby, neg_sameby,
-               neg_diffby, multilabel_col=None):
+def flatten_str_list(*args):
+    '''create a single list with all the params given'''
     columns = set()
-    for col in pos_sameby, pos_diffby, neg_sameby, neg_diffby:
+    for col in args:
         if isinstance(col, str):
             columns.add(col)
         else:
             columns.update(col)
     columns = list(columns)
+    return columns
+
+
+def create_matcher(obs: pd.DataFrame,
+                   pos_sameby,
+                   pos_diffby,
+                   neg_sameby,
+                   neg_diffby,
+                   multilabel_col=None):
+    columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     if multilabel_col:
-        matcher = MatcherMultilabel(obs, columns, multilabel_col, seed=0)
-    else:
-        matcher = Matcher(obs, columns, seed=0)
-
-    dict_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
-    pos_pairs = np.vstack(list(dict_pairs.values()))
-    pos_pairs = np.unique(pos_pairs, axis=0)
-
-    dict_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
-    neg_pairs = np.vstack(list(dict_pairs.values()))
-    neg_pairs = np.unique(neg_pairs, axis=0)
-    return pos_pairs, neg_pairs
+        return MatcherMultilabel(obs, columns, multilabel_col, seed=0)
+    return Matcher(obs, columns, seed=0)
 
 
 def results_to_dframe(meta, p_values, null_dists, aps):
@@ -58,6 +58,50 @@ def results_to_dframe(meta, p_values, null_dists, aps):
     result['p_value'] = p_values
     result['null_dists'] = list(null_dists)
     result['average_precision'] = aps
+    return result
+
+
+def run_pipeline(
+    meta,
+    feats,
+    pos_sameby,
+    pos_diffby,
+    neg_sameby,
+    neg_diffby,
+    null_size,
+    multilabel_col=None,
+    batch_size=20000,
+) -> pd.DataFrame:
+    # Critical!, otherwise the indexing wont work
+    meta = meta.reset_index(drop=True).copy()
+
+    logger.info('Indexing metadata...')
+    matcher = create_matcher(meta, pos_sameby, pos_diffby, neg_sameby,
+                             neg_diffby, multilabel_col)
+    logger.info('Finding positive pairs...')
+    dict_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
+    pos_pairs = dict_to_dframe(dict_pairs, pos_sameby)
+    logger.info('Finding negative pairs...')
+    dict_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
+    neg_pairs = dict_to_dframe(dict_pairs, pos_sameby)
+    logger.info('Computing positive similarities...')
+    pairs_ix = pos_pairs[['ix1', 'ix2']].values
+    pos_pairs['dist'] = cosine_indexed(feats, pairs_ix, batch_size)
+    logger.info('Computing negative similarities...')
+    pairs_ix = neg_pairs[['ix1', 'ix2']].values
+    pos_pairs['dist'] = cosine_indexed(feats, pairs_ix, batch_size)
+    logger.info('Building rank lists...')
+    rel_k_list = build_rank_lists(pos_pairs, neg_pairs)
+    logger.info('Computing average precision...')
+    ap_scores = rel_k_list.apply(backend.compute_ap)
+    ap_scores = np.concatenate(ap_scores.values)
+    logger.info('Computing null distributions...')
+    null_dists = backend.compute_null_dists(rel_k_list, null_size)
+    logger.info('Computing P-values...')
+    p_values = backend.compute_p_values(null_dists, ap_scores, null_size)
+    logger.info('Creating result DataFrame...')
+    result = results_to_dframe(meta, p_values, null_dists, ap_scores)
+    logger.info('Finished.')
     return result
 
 
@@ -77,37 +121,3 @@ def aggregate(result: pd.DataFrame, sameby, threshold: float) -> pd.DataFrame:
     agg_rs['above_p_threshold'] = agg_rs['nlog10pvalue'] > -np.log10(threshold)
     agg_rs['above_q_threshold'] = agg_rs['nlog10qvalue'] > -np.log10(threshold)
     return agg_rs
-
-
-def run_pipeline(meta,
-                 feats,
-                 pos_sameby,
-                 pos_diffby,
-                 neg_sameby,
-                 neg_diffby,
-                 null_size,
-                 multilabel_col=None,
-                 batch_size=20000,
-                 ) -> pd.DataFrame:
-    # Critical!, otherwise the indexing wont work
-    meta = meta.reset_index(drop=True).copy()
-    logger.info('Finding positive and negative pairs...')
-    pos_pairs, neg_pairs = find_pairs(meta, pos_sameby, pos_diffby, neg_sameby,
-                                      neg_diffby, multilabel_col)
-    logger.info('Computing positive similarities...')
-    pos_dfs = compute_similarities(feats, pos_pairs, batch_size)
-    logger.info('Computing negative similarities...')
-    neg_dfs = compute_similarities(feats, neg_pairs, batch_size)
-    logger.info('Building rank lists...')
-    rel_k_list = build_rank_lists(pos_dfs, neg_dfs)
-    logger.info('Computing average precision...')
-    ap_scores = rel_k_list.apply(backend.compute_ap)
-    ap_scores = np.concatenate(ap_scores.values)
-    logger.info('Computing null distributions...')
-    null_dists = backend.compute_null_dists(rel_k_list, null_size)
-    logger.info('Computing P-values...')
-    p_values = backend.compute_p_values(null_dists, ap_scores, null_size)
-    logger.info('Creating result DataFrame...')
-    result = results_to_dframe(meta, p_values, null_dists, ap_scores)
-    logger.info('Finished.')
-    return result
