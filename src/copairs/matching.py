@@ -30,11 +30,12 @@ def dict_to_dframe(dict_pairs, sameby):
 
     if keys.ndim > 1:
         # is a ComposedKey
-        keys_df = pd.DataFrame(keys, columns=sameby)
+        keys_df = pd.DataFrame(keys)  #, columns=sameby)
     else:
         keys_df = pd.DataFrame({sameby: keys})
 
-    pairs_ix = np.vstack(list(dict_pairs.values()))
+    # Concat all pairs
+    pairs_ix = itertools.chain.from_iterable(dict_pairs.values())
     pairs_df = pd.DataFrame(pairs_ix, columns=['ix1', 'ix2'])
     return pd.concat([keys_df, pairs_df], axis=1)
 
@@ -253,6 +254,7 @@ class MatcherMultilabel():
             # Map to original_index
             values[:, 0] = self.original_index[values[:, 0]]
             values[:, 1] = self.original_index[values[:, 1]]
+
             # Check all of the values in the multilabel_col are different
             if diffby_multi:
                 labels_a = self.multilabel_set.iloc[values[:, 0]]
