@@ -13,10 +13,13 @@ logger = logging.getLogger('copairs')
 
 
 def build_rank_lists(pos_dfs, neg_dfs) -> pd.Series:
+    pos_dfs = pos_dfs[['ix1', 'ix2', 'dist']]
     pos_ids = pos_dfs.melt(value_vars=['ix1', 'ix2'],
                            id_vars=['dist'],
                            value_name='ix')
     pos_ids['label'] = 1
+
+    neg_dfs = neg_dfs[['ix1', 'ix2', 'dist']]
     neg_ids = neg_dfs.melt(value_vars=['ix1', 'ix2'],
                            id_vars=['dist'],
                            value_name='ix')
@@ -83,13 +86,13 @@ def run_pipeline(
     pos_pairs = dict_to_dframe(dict_pairs, pos_sameby)
     logger.info('Finding negative pairs...')
     dict_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
-    neg_pairs = dict_to_dframe(dict_pairs, pos_sameby)
+    neg_pairs = dict_to_dframe(dict_pairs, neg_sameby)
     logger.info('Computing positive similarities...')
     pairs_ix = pos_pairs[['ix1', 'ix2']].values
     pos_pairs['dist'] = cosine_indexed(feats, pairs_ix, batch_size)
     logger.info('Computing negative similarities...')
     pairs_ix = neg_pairs[['ix1', 'ix2']].values
-    pos_pairs['dist'] = cosine_indexed(feats, pairs_ix, batch_size)
+    neg_pairs['dist'] = cosine_indexed(feats, pairs_ix, batch_size)
     logger.info('Building rank lists...')
     rel_k_list = build_rank_lists(pos_pairs, neg_pairs)
     logger.info('Computing average precision...')
