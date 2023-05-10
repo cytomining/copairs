@@ -235,6 +235,7 @@ class MatcherMultilabel():
     def __init__(self, dframe: pd.DataFrame, columns: ColumnList,
                  multilabel_col: str, seed: int):
         self.multilabel_col = multilabel_col
+        self.size = dframe.shape[0]
         self.multilabel_set = dframe[multilabel_col].apply(set)
         dframe = dframe.explode(multilabel_col)
         dframe = dframe.reset_index(names='__original_index')
@@ -248,6 +249,8 @@ class MatcherMultilabel():
             # Multilabel in diffby must be 'ALL' instead of 'ANY'
             # Doing this filter afterwards
             diffby = [col for col in diffby if self.multilabel_col != col]
+        if not diffby and not sameby and diffby_multi:
+            return self._only_diffby_multi()
         pairs = self.matcher.get_all_pairs(sameby, diffby)
         for key, values in pairs.items():
             values = np.asarray(values)
@@ -277,3 +280,12 @@ class MatcherMultilabel():
         null_pairs[:, 0] = self.original_index[null_pairs[:, 0]].values
         null_pairs[:, 1] = self.original_index[null_pairs[:, 1]].values
         return null_pairs
+
+    def _only_diffby_multi(self):
+        '''Special case when it is filter only by the diffby=multilabel_col'''
+        pairs = self.get_all_pairs(self.multilabel_col, [])
+        pairs = itertools.chain.from_iterable(pairs.values())
+        pairs = set(map(frozenset, pairs))
+        all_pairs = itertools.combinations(range(self.size), 2)
+        filter_fn = lambda x: set(x) not in pairs
+        return {None: list(filter(filter_fn, all_pairs))}
