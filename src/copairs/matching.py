@@ -20,7 +20,7 @@ def reverse_index(col: pd.Series) -> pd.Series:
     return pd.Series(col.groupby(col).indices, name=col.name)
 
 
-def dict_to_dframe(dict_pairs, sameby):
+def dict_to_dframe(dict_pairs, sameby: Union[str, list]):
     '''Convert the Matcher.get_all_pairs output to pd.DataFrame'''
     if not dict_pairs:
         raise ValueError('dict_pairs empty')
@@ -32,6 +32,8 @@ def dict_to_dframe(dict_pairs, sameby):
         # is a ComposedKey
         keys_df = pd.DataFrame(keys)  #, columns=sameby)
     else:
+        if isinstance(sameby, list):
+            sameby = sameby[0]
         keys_df = pd.DataFrame({sameby: keys})
 
     # Concat all pairs
