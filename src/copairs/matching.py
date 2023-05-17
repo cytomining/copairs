@@ -211,7 +211,7 @@ class Matcher():
             pairs = pairs[valid]
 
         pairs = np.unique(pairs, axis=0)
-        return {None: pairs.tolist()}
+        return {None: list(map(tuple, pairs))}
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
         '''
