@@ -19,9 +19,9 @@ dependencies = [
 plot = ["plotly"]
 
 [project.urls]
-"Homepage" = "https://github.com/johnarevalo/copairs"
-"Bug Reports" = "https://github.com/johnarevalo/copairs/issues"
-"Source" = "https://github.com/johnarevalo/copairs/"
+"Homepage" = "https://github.com/cytomining/copairs"
+"Bug Reports" = "https://github.com/cytomining/copairs/issues"
+"Source" = "https://github.com/cytomining/copairs/"
 
 [build-system]
 requires = ["setuptools"]
