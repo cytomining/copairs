@@ -149,6 +149,9 @@ class Matcher():
             raise ValueError('sameby and diffby must be disjoint lists')
         if not sameby and not diffby:
             raise ValueError('sameby, diffby: at least one should be provided')
+        if not set(sameby + diffby).issubset(self.columns):
+            missing = set(sameby + diffby) - set(self.columns)
+            raise ValueError(f'sameby, diffby: {missing} columns not in DataFrame')
         if not sameby:
             return self._only_diffby(diffby)
         if len(sameby) == 1:
