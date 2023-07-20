@@ -5,7 +5,7 @@ import itertools
 from collections import namedtuple
 import logging
 from math import comb
-from typing import Sequence, Set, Union, Optional
+from typing import Sequence, Set, Union, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ from tqdm.auto import tqdm
 
 logger = logging.getLogger('copairs')
 ColumnList = Union[Sequence[str], pd.Index]
+ColumnDict = Dict[str, ColumnList]
 
 
 def reverse_index(col: pd.Series) -> pd.Series:
@@ -136,28 +137,52 @@ class Matcher():
         pos = self.integers(min_val, max_val)
         return items[pos]
 
-    def get_all_pairs(self, sameby: Union[str, ColumnList],
-                      diffby: Union[str, ColumnList]):
+    def get_all_pairs(self, sameby: Union[str, ColumnList, ColumnDict],
+                      diffby: Union[str, ColumnList, ColumnDict], method=None):
         '''
         Get all pairs with given params
         '''
-        if isinstance(diffby, str):
-            diffby = [diffby]
-        if isinstance(sameby, str):
-            sameby = [sameby]
-        if set(sameby) & set(diffby):
+        if isinstance(sameby, dict):
+            sameby_all, sameby_any = sameby.get("all", []), sameby.get("any", [])
+            if len(sameby_any) == 1:
+                raise ValueError('sameby: any should have more than one column')
+        else:
+            sameby_all = [sameby] if isinstance(sameby, str) else sameby
+            sameby_any = []
+        
+        if isinstance(diffby, dict):
+            diffby_all, diffby_any = diffby.get("all", []), diffby.get("any", [])
+            if len(diffby_any) == 1:
+                raise ValueError('diffby: any should have more than one column')
+        else:
+            diffby_all = [diffby] if isinstance(diffby, str) else diffby
+            diffby_any = []
+        
+        if set(sameby_all) & set(sameby_any) & set(diffby_all) & set(diffby_any):
             raise ValueError('sameby and diffby must be disjoint lists')
-        if not sameby and not diffby:
-            raise ValueError('sameby, diffby: at least one should be provided')
-        if not set(sameby + diffby).issubset(self.columns):
-            missing = set(sameby + diffby) - set(self.columns)
+        if not sameby_all and not sameby_any and not diffby_all and not diffby_any:
+            raise ValueError('sameby, diffby: at least one column should be provided')
+        if not set(sameby_all + sameby_any + diffby_all + diffby_any).issubset(self.columns):
+            missing = set(sameby_all + sameby_any + diffby_all + diffby_any) - set(self.columns)
             raise ValueError(f'sameby, diffby: {missing} columns not in DataFrame')
-        if not sameby:
-            return self._only_diffby(diffby)
-        if len(sameby) == 1:
-            key = next(iter(sameby))
+        
+        if not sameby_all and not sameby_any:
+            if not diffby_any:
+                return self._only_diffby(diffby_all)
+            elif not diffby_all:
+                return self._only_diffby_any(diffby_any)
+            else:
+                return self._only_diffby_all_any(diffby_all, diffby_any)
+        
+        if len(sameby_all) == 1:
+            key = next(iter(sameby_all))
+            # TODO: needs to take sameby_any, diffby_all and diffby_any into account
             return self._get_all_pairs_single(key, diffby)
 
+        # TODO: modify to account for:
+        #  - multiple sameby_all cols
+        #  - and/or sameby_any cols
+        #  - with possibly with diffby_all and/or diffby_any
         ComposedKey = namedtuple('ComposedKey', sameby)
         # Multiple sameby. Ordering by minimum number of posible pairs
         sameby = sorted(sameby, key=self.col_order.get)
@@ -215,6 +240,30 @@ class Matcher():
 
         pairs = np.unique(pairs, axis=0)
         return {None: list(map(tuple, pairs))}
+    
+    def _only_diffby_any(self, diffby: ColumnList):
+        '''Generate a dict with single NaN key containing all of the pairs
+        with different values in any of specififed columns'''
+        diffby = sorted(diffby, key=self.col_order.get)
+
+        pairs = [] 
+        for diff_col in diffby:
+            mapper = self.reverse[diff_col]
+            for key_a, key_b in itertools.combinations(mapper.keys(), 2):
+                pairs.extend(itertools.product(mapper[key_a], mapper[key_b]))
+
+        pairs = np.sort(np.asarray(pairs))
+        pairs = np.unique(pairs, axis=0)
+        return {None: list(map(tuple, pairs))}
+    
+    def _only_diffby_all_any(self, diffby_all: ColumnList, diffby_any: ColumnList):
+        '''Generate a dict with single NaN key containing all of the pairs
+        with different values in any of specififed columns'''
+        # TODO: get any pairs first and then filter by all pairs
+        diffby_all_pairs = self._only_diffby(diffby_all)
+        diffby_any_pairs = self._only_diffby_any(diffby_any)
+
+        return {**diffby_all_pairs, **diffby_any_pairs}
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
         '''

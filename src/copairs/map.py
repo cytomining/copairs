@@ -73,6 +73,8 @@ def flatten_str_list(*args):
     for col in args:
         if isinstance(col, str):
             columns.add(col)
+        elif isinstance(col, dict):
+            columns.update(itertools.chain.from_iterable(col.values()))
         else:
             columns.update(col)
     columns = list(columns)
