@@ -224,18 +224,11 @@ class Matcher():
 
         # Cartesian product for one of the diffby columns
         mapper = self.reverse[diffby[0]]
-        keys = list(mapper.keys())
-        pairs = []
-        for key_a, key_b in itertools.combinations(keys, 2):
-            pairs.extend(itertools.product(mapper[key_a], mapper[key_b]))
-        pairs = np.array(pairs)
+        pairs = self._get_full_pairs(mapper)
+        
         if len(diffby) > 1:
-            col_ix = [self.col_to_ix[col] for col in diffby[1:]]
-            vals_a = self.values[pairs[:, 0]][:, col_ix]
-            vals_b = self.values[pairs[:, 1]][:, col_ix]
-            valid = np.all(vals_a != vals_b, axis=1)
-            pairs = pairs[valid]
-
+            pairs = self._filter_diffby_pairs(pairs, diffby[1:])
+        
         pairs = np.unique(pairs, axis=0)
         return {None: list(map(tuple, pairs))}
     
@@ -247,8 +240,7 @@ class Matcher():
         pairs = [] 
         for diff_col in diffby:
             mapper = self.reverse[diff_col]
-            for key_a, key_b in itertools.combinations(mapper.keys(), 2):
-                pairs.extend(itertools.product(mapper[key_a], mapper[key_b]))
+            pairs.extend(self._get_full_pairs(mapper))
 
         pairs = np.sort(np.asarray(pairs))
         pairs = np.unique(pairs, axis=0)
@@ -258,13 +250,7 @@ class Matcher():
         '''Generate a dict with single NaN key containing all of the pairs
         with different values in any of specififed columns'''
         diffby_any_pairs = np.asarray(self._only_diffby_any(diffby_any)[None])
-
-        col_ix = [self.col_to_ix[col] for col in diffby_all]
-        vals_a = self.values[diffby_any_pairs[:, 0]][:, col_ix]
-        vals_b = self.values[diffby_any_pairs[:, 1]][:, col_ix]
-        valid = np.all(vals_a != vals_b, axis=1)
-        diffby_any_pairs = diffby_any_pairs[valid]
-
+        diffby_any_pairs = self._filter_diffby_pairs(diffby_any_pairs, diffby_all)
         return {None: list(map(tuple, diffby_any_pairs))}
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
@@ -284,6 +270,22 @@ class Matcher():
             mapper = self.reverse[col]
             valid = valid - mapper[val]
         return valid
+
+
+    def _get_full_pairs(self, mapper):
+        pairs = []
+        for key_a, key_b in itertools.combinations(mapper.keys(), 2):
+            pairs.extend(itertools.product(mapper[key_a], mapper[key_b]))
+        pairs = np.array(pairs)
+        return pairs
+    
+
+    def _filter_diffby_pairs(self, pairs, diffby):
+        col_ix = [self.col_to_ix[col] for col in diffby]
+        vals_a = self.values[pairs[:, 0]][:, col_ix]
+        vals_b = self.values[pairs[:, 1]][:, col_ix]
+        valid = np.all(vals_a != vals_b, axis=1)
+        return pairs[valid]
 
 
 class MatcherMultilabel():
