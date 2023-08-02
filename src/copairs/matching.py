@@ -94,14 +94,14 @@ class Matcher():
         self.n_pairs = n_pairs
         self.rand_iter = iter([])
 
-    def _null_sample(self, diffby: ColumnList):
+    def _null_sample(self, diffby_all: ColumnList, diffby_any: ColumnList):
         '''
         Sample a pair from the frame.
         '''
         valid = set(self.frozen_valid)
         id1 = self.integers(0, len(valid) - 1)
         valid.remove(id1)
-        valid = self._filter_diffby(id1, diffby, valid)
+        valid = self._filter_diffby(id1, diffby_all, diffby_any, valid)
 
         if len(valid) == 0:
             # row1 = self.values[id1]
@@ -112,9 +112,17 @@ class Matcher():
 
     def sample_null_pair(self, diffby: ColumnList, n_tries=5):
         '''Sample pairs from the data. It tries multiple times before raising an error'''
+        if isinstance(diffby, dict):
+            diffby_all, diffby_any = diffby.get("all", []), diffby.get("any", [])
+            if len(diffby_any) == 1:
+                raise ValueError('diffby: any should have more than one column')
+        else:
+            diffby_all = [diffby] if isinstance(diffby, str) else diffby
+            diffby_any = []
+        
         for _ in range(n_tries):
             try:
-                return self._null_sample(diffby)
+                return self._null_sample(diffby_all, diffby_any)
             except UnpairedException:
                 pass
         raise ValueError(
@@ -138,7 +146,7 @@ class Matcher():
         return items[pos]
 
     def get_all_pairs(self, sameby: Union[str, ColumnList, ColumnDict],
-                      diffby: Union[str, ColumnList, ColumnDict], method=None):
+                      diffby: Union[str, ColumnList, ColumnDict]):
         '''
         Get all pairs with given params
         '''
@@ -168,40 +176,57 @@ class Matcher():
         
         if not sameby_all and not sameby_any:
             if not diffby_any:
-                return self._only_diffby(diffby_all)
+                return self._only_diffby_all(diffby_all)
             elif not diffby_all:
                 return self._only_diffby_any(diffby_any)
             else:
                 return self._only_diffby_all_any(diffby_all, diffby_any)
+            
+        if sameby_all:
+            if len(sameby_all) == 1:
+                key = next(iter(sameby_all))
+                # TODO: needs to take sameby_any into account
+                pairs = self._get_all_pairs_single(key, diffby_all, diffby_any)
+            else:
+                # TODO: modify to account for:
+                #  - and/or sameby_any cols
+                ComposedKey = namedtuple('ComposedKey', sameby_all)
+                # Multiple sameby. Ordering by minimum number of posible pairs
+                sameby_all = sorted(sameby_all, key=self.col_order.get)
+                candidates = self._get_all_pairs_single(sameby_all[0], diffby_all, diffby_any)
+                col_ix = [self.col_to_ix[col] for col in sameby_all[1:]]
+
+                pairs = dict()
+                for key, indices in candidates.items():
+                    for id1, id2 in indices:
+                        row1 = self.values[id1]
+                        row2 = self.values[id2]
+                        if np.all(row1[col_ix] == row2[col_ix]):
+                            vals = key, *row1[col_ix]
+                            key_tuple = ComposedKey(**dict(zip(sameby_all, vals)))
+                            pair = (id1, id2)
+                            pairs.setdefault(key_tuple, list()).append(pair)
+        else:
+            pairs = dict()
+
+        if sameby_any:
+            if pairs:
+                pair_values = np.asarray([v[0] for v in pairs.values()])
+                pairs_any = self._filter_pairs_by_condition(pair_values, sameby_any, condition="any_same")
+                pairs = {k: v for k, v in pairs.items() if v in pairs_any}
+            else:
+                pairs = set()
+                for col in sameby_any:
+                    col_pairs = self._get_all_pairs_single(col, diffby_all, diffby_any)
+                    pairs.update({tuple(v[0]) for v in col_pairs.values()})
+                pairs = list(pairs)
+                pairs.sort(key=lambda x: (x[0], x[1]))
+                pairs = {None: pairs}
+
         
-        if len(sameby_all) == 1:
-            key = next(iter(sameby_all))
-            # TODO: needs to take sameby_any, diffby_all and diffby_any into account
-            return self._get_all_pairs_single(key, diffby)
-
-        # TODO: modify to account for:
-        #  - multiple sameby_all cols
-        #  - and/or sameby_any cols
-        #  - with possibly with diffby_all and/or diffby_any
-        ComposedKey = namedtuple('ComposedKey', sameby)
-        # Multiple sameby. Ordering by minimum number of posible pairs
-        sameby = sorted(sameby, key=self.col_order.get)
-        candidates = self._get_all_pairs_single(sameby[0], diffby)
-        col_ix = [self.col_to_ix[col] for col in sameby[1:]]
-
-        pairs = dict()
-        for key, indices in candidates.items():
-            for id1, id2 in indices:
-                row1 = self.values[id1]
-                row2 = self.values[id2]
-                if np.all(row1[col_ix] == row2[col_ix]):
-                    vals = key, *row1[col_ix]
-                    key_tuple = ComposedKey(**dict(zip(sameby, vals)))
-                    pair = (id1, id2)
-                    pairs.setdefault(key_tuple, list()).append(pair)
         return pairs
 
-    def _get_all_pairs_single(self, sameby: str, diffby: ColumnList):
+    def _get_all_pairs_single(self, sameby: str, diffby_all: ColumnList, diffby_any: ColumnList):
         '''Get all valid pairs for a single column.'''
         mapper = self.reverse[sameby]
         pairs = dict()
@@ -211,23 +236,23 @@ class Matcher():
                 valid = set(rows)
                 processed.add(id1)
                 valid -= processed
-                valid = self._filter_diffby(id1, diffby, valid)
+                valid = self._filter_diffby(id1, diffby_all, diffby_any, valid)
                 for id2 in valid:
                     pair = (id1, id2)
                     pairs.setdefault(key, list()).append(pair)
         return pairs
 
-    def _only_diffby(self, diffby: ColumnList):
+    def _only_diffby_all(self, diffby_all: ColumnList):
         '''Generate a dict with single NaN key containing all of the pairs
         with different values in the column list'''
-        diffby = sorted(diffby, key=self.col_order.get)
+        diffby_all = sorted(diffby_all, key=self.col_order.get)
 
         # Cartesian product for one of the diffby columns
-        mapper = self.reverse[diffby[0]]
+        mapper = self.reverse[diffby_all[0]]
         pairs = self._get_full_pairs(mapper)
         
-        if len(diffby) > 1:
-            pairs = self._filter_diffby_pairs(pairs, diffby[1:])
+        if len(diffby_all) > 1:
+            pairs = self._filter_pairs_by_condition(pairs, diffby_all[1:], condition="all_diff")
         
         pairs = np.unique(pairs, axis=0)
         return {None: list(map(tuple, pairs))}
@@ -249,11 +274,11 @@ class Matcher():
     def _only_diffby_all_any(self, diffby_all: ColumnList, diffby_any: ColumnList):
         '''Generate a dict with single NaN key containing all of the pairs
         with different values in any of specififed columns'''
-        diffby_all_pairs = np.asarray(self._only_diffby(diffby_all)[None])
-        diffby_all_any = self._filter_diffby_pairs(diffby_all_pairs, diffby_all)
+        diffby_all_pairs = np.asarray(self._only_diffby_all(diffby_all)[None])
+        diffby_all_any = self._filter_pairs_by_condition(diffby_all_pairs, diffby_any, condition="any_diff")
         return {None: list(map(tuple, diffby_all_any))}
 
-    def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
+    def _filter_diffby(self, idx: int, diffby_all: ColumnList, diffby_any: ColumnList, valid: Set[int]):
         '''
         Remove from valid rows that have matches with idx in any of the diffby columns
         :idx: index of the row to be compared
@@ -263,12 +288,20 @@ class Matcher():
 
         '''
         row = self.values[idx]
-        for col in diffby:
+        for col in diffby_all:
             val = row[self.col_to_ix[col]]
             if pd.isna(val):
                 continue
             mapper = self.reverse[col]
             valid = valid - mapper[val]
+        if diffby_any:
+            for col in diffby_any:
+                val = row[self.col_to_ix[col]]
+                if pd.isna(val):
+                    break
+            else:
+                mapper = self.reverse[diffby_any[0]]
+                valid = valid - mapper[val]
         return valid
 
 
@@ -280,11 +313,21 @@ class Matcher():
         return pairs
     
 
-    def _filter_diffby_pairs(self, pairs, diffby):
-        col_ix = [self.col_to_ix[col] for col in diffby]
+    def _filter_pairs_by_condition(self, pairs, columns, condition="all_same"):
+        col_ix = [self.col_to_ix[col] for col in columns]
         vals_a = self.values[pairs[:, 0]][:, col_ix]
         vals_b = self.values[pairs[:, 1]][:, col_ix]
-        valid = np.any(vals_a != vals_b, axis=1)
+
+        if "same" in condition:
+            valid = vals_a == vals_b
+        elif "diff" in condition:
+            valid = vals_a != vals_b
+
+        if "all" in condition:
+            valid = np.all(valid, axis=1)
+        elif "any" in condition:
+            valid = np.any(valid, axis=1)
+
         return pairs[valid]
 
 
