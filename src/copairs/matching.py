@@ -185,7 +185,6 @@ class Matcher():
         if sameby_all:
             if len(sameby_all) == 1:
                 key = next(iter(sameby_all))
-                # TODO: needs to take sameby_any into account
                 pairs = self._get_all_pairs_single(key, diffby_all, diffby_any)
             else:
                 # TODO: modify to account for:
@@ -295,13 +294,14 @@ class Matcher():
             mapper = self.reverse[col]
             valid = valid - mapper[val]
         if diffby_any:
+            mapped = []
             for col in diffby_any:
                 val = row[self.col_to_ix[col]]
                 if pd.isna(val):
-                    break
-            else:
-                mapper = self.reverse[diffby_any[0]]
-                valid = valid - mapper[val]
+                    continue
+                mapper = self.reverse[col]
+                mapped.append(mapper[val])
+            valid = valid - set.intersection(*mapped)
         return valid
 
 
