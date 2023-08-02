@@ -249,9 +249,9 @@ class Matcher():
     def _only_diffby_all_any(self, diffby_all: ColumnList, diffby_any: ColumnList):
         '''Generate a dict with single NaN key containing all of the pairs
         with different values in any of specififed columns'''
-        diffby_any_pairs = np.asarray(self._only_diffby_any(diffby_any)[None])
-        diffby_any_pairs = self._filter_diffby_pairs(diffby_any_pairs, diffby_all)
-        return {None: list(map(tuple, diffby_any_pairs))}
+        diffby_all_pairs = np.asarray(self._only_diffby(diffby_all)[None])
+        diffby_all_any = self._filter_diffby_pairs(diffby_all_pairs, diffby_all)
+        return {None: list(map(tuple, diffby_all_any))}
 
     def _filter_diffby(self, idx: int, diffby: ColumnList, valid: Set[int]):
         '''
@@ -284,7 +284,7 @@ class Matcher():
         col_ix = [self.col_to_ix[col] for col in diffby]
         vals_a = self.values[pairs[:, 0]][:, col_ix]
         vals_b = self.values[pairs[:, 1]][:, col_ix]
-        valid = np.all(vals_a != vals_b, axis=1)
+        valid = np.any(vals_a != vals_b, axis=1)
         return pairs[valid]
 
 
