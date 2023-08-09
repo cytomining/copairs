@@ -1,10 +1,12 @@
 '''
 Sample pairs with given column restrictions
 '''
-import itertools
-from collections import namedtuple
+import re
 import logging
+import itertools
+
 from math import comb
+from collections import namedtuple
 from typing import Sequence, Set, Union, Dict, Optional
 
 import numpy as np
@@ -184,17 +186,43 @@ class Matcher():
         return tuple(result)
 
     def _validate_inputs(self, sameby, diffby):
+        def validate_condition(condition_dict):
+            new_condition_dict = {'all': [], 'any': []}
+            for key in ['all', 'any']:
+                for item in condition_dict[key]:
+                    evaluated_columns = self._evaluate_and_filter(item)
+                    new_condition_dict[key].extend(evaluated_columns)
+            return new_condition_dict
+
+        sameby = validate_condition(sameby)
+        diffby = validate_condition(diffby)
+
         if set(sameby["all"] + sameby["any"]) & set(diffby["all"] + diffby["any"]):
             raise ValueError('sameby and diffby must be disjoint lists')
         if not any([sameby["all"], sameby["any"], diffby["all"], diffby["any"]]):
             raise ValueError('sameby, diffby: at least one should be provided')
-        if not set(sameby["all"] + sameby["any"] + diffby["all"] + diffby["any"]).issubset(self.columns):
-            missing = set(sameby["all"] + sameby["any"] + diffby["all"] + diffby["any"]) - set(self.columns)
-            raise ValueError(f'sameby, diffby: {missing} columns not in DataFrame')
         if len(sameby["any"]) == 1:
             raise ValueError('sameby: any should have more than one column')
         if len(diffby["any"]) == 1:
             raise ValueError('diffby: any should have more than one column')
+
+    def _evaluate_and_filter(self, item: str) -> list:
+        if item in self.columns:
+            return [item]
+
+        column_names = re.findall(r'(\w+)\s*[=<>!]+', item)
+        valid_column_names = [col for col in column_names if col in self.columns]
+
+        if not valid_column_names:
+            raise ValueError(f"Invalid query or column name: {item}")
+
+        try:
+            self.values = pd.DataFrame(self.values, columns=self.columns).query(item).values
+        except:
+            raise ValueError(f"Invalid query expression: {item}")
+
+        return valid_column_names
+
 
     def _no_sameby(self, diffby):
         if not diffby["any"]:
