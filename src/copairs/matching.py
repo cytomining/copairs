@@ -62,7 +62,10 @@ class Matcher():
         max_size: max number of rows to consider from the same value.
         '''
         rng = np.random.default_rng(seed)
+        self.original_index = dframe.index
         dframe = dframe[columns].reset_index(drop=True).copy()
+        if (self.original_index == dframe.index).all():
+            self.original_index = None
         dframe.index.name = '__copairs_ix'
 
         def clip_list(elems: np.ndarray) -> np.ndarray:
@@ -147,24 +150,30 @@ class Matcher():
         pos = self.integers(min_val, max_val)
         return items[pos]
 
-    def get_all_pairs(self, sameby: Union[str, ColumnList, ColumnDict], diffby: Union[str, ColumnList, ColumnDict]):
+    def get_all_pairs(self, sameby: Union[str, ColumnList, ColumnDict], diffby: Union[str, ColumnList, ColumnDict], original_index: bool = True):
         '''
         Get all pairs with given params
         '''
         sameby, diffby = self._normalize_sameby_diffby(sameby, diffby)
-        self._validate_inputs(sameby, diffby)
+        sameby, diffby = self._validate_inputs(sameby, diffby)
 
         if not sameby["all"] and not sameby["any"]:
             return self._no_sameby(diffby)
 
         pairs = dict()
         if sameby["all"]:
-            pairs = self._sameby_all(sameby, diffby)
-
+            pairs = self._sameby_all(sameby, diffby)    
+        
         if sameby["any"]:
             pairs = self._sameby_any(sameby, diffby, pairs)
-
+        
+        if original_index and self.original_index is not None:
+            return self._get_original_index(pairs)
+        
         return pairs
+    
+    def _get_original_index(self, pairs):
+        return {k: [tuple(self.original_index[i] for i in p) for p in v] for k, v in pairs.items()}
 
     def _normalize_sameby_diffby(self, sameby, diffby):
         '''
@@ -205,6 +214,8 @@ class Matcher():
             raise ValueError('sameby: any should have more than one column')
         if len(diffby["any"]) == 1:
             raise ValueError('diffby: any should have more than one column')
+        
+        return sameby, diffby
 
     def _evaluate_and_filter(self, item: str) -> list:
         if item in self.columns:
@@ -212,17 +223,10 @@ class Matcher():
 
         column_names = re.findall(r'(\w+)\s*[=<>!]+', item)
         valid_column_names = [col for col in column_names if col in self.columns]
-
         if not valid_column_names:
             raise ValueError(f"Invalid query or column name: {item}")
 
-        try:
-            self.values = pd.DataFrame(self.values, columns=self.columns).query(item).values
-        except:
-            raise ValueError(f"Invalid query expression: {item}")
-
         return valid_column_names
-
 
     def _no_sameby(self, diffby):
         if not diffby["any"]:
