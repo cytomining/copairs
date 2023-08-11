@@ -261,12 +261,10 @@ class Matcher():
     
     def _sameby_any(self, sameby, diffby, pairs):
         if pairs:
-            #TODO: fix pair filtering for any_same
-            # pair_values = np.asarray([v[0] for v in pairs.values()])
             pair_values = list(set([item for sublist in pairs.values() for item in sublist]))
             pair_values = np.asarray([list(pair) for pair in pair_values])
             pairs_any = self._filter_pairs_by_condition(pair_values, sameby["any"], condition="any_same")
-            return {k: v for k, v in pairs.items() if v in pairs_any}
+            return {k: [p for p in v if p in set(map(tuple, pairs_any))] for k, v in pairs.items()}
         else:
             pairs = set()
             for col in sameby["any"]:
