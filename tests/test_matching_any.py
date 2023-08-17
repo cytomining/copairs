@@ -61,19 +61,22 @@ def check_simulated_data(length, vocab_size, sameby, diffby, rng):
     check_naive(dframe, matcher, sameby, diffby)
 
 
-def test_simulated_data_all_any():
+def test_stress_simulated_data_any_all():
     '''Run multiple tests using simulated data'''
     rng = np.random.default_rng(SEED)
+    num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
-    num_cols = 4
-    length = 10
-    cols = ascii_letters[:num_cols]
-    sizes = rng.integers(*vocab_size_range, size=num_cols)
-    vocab_size = dict(zip(cols, sizes))
-    ndiffby = np.clip(rng.integers(num_cols), 1, num_cols - 2)
-    diffby = {'all': list(cols[:ndiffby]), 'any': []}
-    sameby = {'all': [], 'any': list(cols[ndiffby:])}
-    check_simulated_data(length, vocab_size, sameby, diffby, rng)
+    length_range = [100, 500]
+    for _ in range(50):
+        num_cols = rng.integers(*num_cols_range)
+        length = rng.integers(*length_range)
+        cols = ascii_letters[:num_cols]
+        sizes = rng.integers(*vocab_size_range, size=num_cols)
+        vocab_size = dict(zip(cols, sizes))
+        ndiffby = np.clip(rng.integers(num_cols), 1, num_cols - 2)
+        sameby = {'all': [], 'any': list(cols[ndiffby:])}
+        diffby = {'all': list(cols[:ndiffby]), 'any': []}
+        check_simulated_data(length, vocab_size, sameby, diffby, rng)
 
 
 def test_stress_simulated_data_all_all():
@@ -91,4 +94,40 @@ def test_stress_simulated_data_all_all():
         ndiffby = np.clip(rng.integers(num_cols), 1, num_cols - 2)
         diffby = {'all': list(cols[:ndiffby]), 'any': []}
         sameby = {'all': list(cols[ndiffby:]), 'any': []}
+        check_simulated_data(length, vocab_size, sameby, diffby, rng)
+
+
+def test_stress_simulated_data_all_any():
+    '''Run multiple tests using simulated data'''
+    rng = np.random.default_rng(SEED)
+    num_cols_range = [2, 6]
+    vocab_size_range = [5, 10]
+    length_range = [100, 500]
+    for _ in range(50):
+        num_cols = rng.integers(*num_cols_range)
+        length = rng.integers(*length_range)
+        cols = ascii_letters[:num_cols]
+        sizes = rng.integers(*vocab_size_range, size=num_cols)
+        vocab_size = dict(zip(cols, sizes))
+        ndiffby = np.clip(rng.integers(num_cols), 2, num_cols - 2)
+        sameby = {'all': list(cols[ndiffby:]), 'any': []}
+        diffby = {'all': [], 'any': list(cols[:ndiffby])}
+        check_simulated_data(length, vocab_size, sameby, diffby, rng)
+
+
+def test_stress_simulated_data_any_any():
+    '''Run multiple tests using simulated data'''
+    rng = np.random.default_rng(SEED)
+    num_cols_range = [4, 6]
+    vocab_size_range = [5, 10]
+    length_range = [5, 10]
+    for _ in range(500):
+        num_cols = rng.integers(*num_cols_range)
+        length = rng.integers(*length_range)
+        cols = ascii_letters[:num_cols]
+        sizes = rng.integers(*vocab_size_range, size=num_cols)
+        vocab_size = dict(zip(cols, sizes))
+        ndiffby = np.clip(rng.integers(num_cols), 2, num_cols - 2)
+        diffby = {'all': [], 'any': list(cols[:ndiffby])}
+        sameby = {'all': [], 'any': list(cols[ndiffby:])}
         check_simulated_data(length, vocab_size, sameby, diffby, rng)
