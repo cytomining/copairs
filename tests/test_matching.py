@@ -85,7 +85,7 @@ def test_stress_simulated_data():
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
     length_range = [100, 500]
-    for _ in range(50):
+    for _ in range(100):
         num_cols = rng.integers(*num_cols_range)
         length = rng.integers(*length_range)
         cols = ascii_letters[:num_cols]

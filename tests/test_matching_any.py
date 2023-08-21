@@ -20,17 +20,16 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
     for col in diffby['all']:
         index_all = (cross[f'{col}_x'] != cross[f'{col}_y']) & index_all
 
-    index_any = False
+    index_same_by_any = (not sameby["any"])
     for col in sameby['any']:
-        index_any = (cross[f'{col}_x'] == cross[f'{col}_y']) | index_any
+        index_same_by_any = (cross[f'{col}_x'] == cross[f'{col}_y']) | index_same_by_any
+    
+    index_diff_by_any = (not diffby["any"])
     for col in diffby['any']:
-        index_any = (cross[f'{col}_x'] != cross[f'{col}_y']) | index_any
+        index_diff_by_any = (cross[f'{col}_x'] != cross[f'{col}_y']) | index_diff_by_any
+    index_any = index_same_by_any & index_diff_by_any
 
-    if not isinstance(index_any, pd.Series):
-        # There is not "any" columns, so all current columns are valid
-        index_any = True
     index = index_all & index_any
-
     pairs = cross.loc[index, ['index_x', 'index_y']]
 
     # remove rows that pair themselves
@@ -67,7 +66,7 @@ def test_stress_simulated_data_any_all():
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
     length_range = [100, 500]
-    for _ in range(50):
+    for _ in range(100):
         num_cols = rng.integers(*num_cols_range)
         length = rng.integers(*length_range)
         cols = ascii_letters[:num_cols]
@@ -85,7 +84,7 @@ def test_stress_simulated_data_all_all():
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
     length_range = [100, 500]
-    for _ in range(50):
+    for _ in range(100):
         num_cols = rng.integers(*num_cols_range)
         length = rng.integers(*length_range)
         cols = ascii_letters[:num_cols]
@@ -103,15 +102,15 @@ def test_stress_simulated_data_all_any():
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
     length_range = [100, 500]
-    for _ in range(50):
+    for _ in range(100):
         num_cols = rng.integers(*num_cols_range)
         length = rng.integers(*length_range)
         cols = ascii_letters[:num_cols]
         sizes = rng.integers(*vocab_size_range, size=num_cols)
         vocab_size = dict(zip(cols, sizes))
         ndiffby = np.clip(rng.integers(num_cols), 2, num_cols - 2)
-        sameby = {'all': list(cols[ndiffby:]), 'any': []}
-        diffby = {'all': [], 'any': list(cols[:ndiffby])}
+        sameby = {'all': list(cols[:ndiffby]), 'any': []}
+        diffby = {'all': [], 'any': list(cols[ndiffby:])}
         check_simulated_data(length, vocab_size, sameby, diffby, rng)
 
 
@@ -120,8 +119,8 @@ def test_stress_simulated_data_any_any():
     rng = np.random.default_rng(SEED)
     num_cols_range = [4, 6]
     vocab_size_range = [5, 10]
-    length_range = [5, 10]
-    for _ in range(500):
+    length_range = [100, 500]
+    for _ in range(100):
         num_cols = rng.integers(*num_cols_range)
         length = rng.integers(*length_range)
         cols = ascii_letters[:num_cols]
