@@ -23,7 +23,7 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
     index_same_by_any = (not sameby["any"])
     for col in sameby['any']:
         index_same_by_any = (cross[f'{col}_x'] == cross[f'{col}_y']) | index_same_by_any
-    
+
     index_diff_by_any = (not diffby["any"])
     for col in diffby['any']:
         index_diff_by_any = (cross[f'{col}_x'] != cross[f'{col}_y']) | index_diff_by_any

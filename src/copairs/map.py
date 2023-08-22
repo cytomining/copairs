@@ -1,7 +1,7 @@
-import re
-import logging
-import itertools
 from functools import partial
+import itertools
+import logging
+import re
 
 import numpy as np
 import pandas as pd
@@ -67,6 +67,7 @@ def build_rank_lists(pos_dfs, neg_dfs) -> pd.Series:
         partial(np.expand_dims, axis=0))
     return rel_k_list
 
+
 def evaluate_and_filter(df, columns) -> list:
     '''Evaluate the query and filter the dataframe'''
     parsed_cols = []
@@ -87,6 +88,7 @@ def evaluate_and_filter(df, columns) -> list:
             raise ValueError(f"Invalid query expression: {col}")
 
     return df, parsed_cols
+
 
 def flatten_str_list(*args):
     '''create a single list with all the params given'''
