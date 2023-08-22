@@ -1,6 +1,7 @@
 from functools import partial
 import itertools
 import logging
+import re
 
 import numpy as np
 import pandas as pd
@@ -67,12 +68,36 @@ def build_rank_lists(pos_dfs, neg_dfs) -> pd.Series:
     return rel_k_list
 
 
+def evaluate_and_filter(df, columns) -> list:
+    '''Evaluate the query and filter the dataframe'''
+    parsed_cols = []
+    for col in columns:
+        if col in df.columns:
+            parsed_cols.append(col)
+            continue
+
+        column_names = re.findall(r'(\w+)\s*[=<>!]+', col)
+        valid_column_names = [col for col in column_names if col in df.columns]
+        if not valid_column_names:
+            raise ValueError(f"Invalid query or column name: {col}")
+
+        try:
+            df = df.query(col)
+            parsed_cols.extend(valid_column_names)
+        except:
+            raise ValueError(f"Invalid query expression: {col}")
+
+    return df, parsed_cols
+
+
 def flatten_str_list(*args):
     '''create a single list with all the params given'''
     columns = set()
     for col in args:
         if isinstance(col, str):
             columns.add(col)
+        elif isinstance(col, dict):
+            columns.update(itertools.chain.from_iterable(col.values()))
         else:
             columns.update(col)
     columns = list(columns)
@@ -86,6 +111,7 @@ def create_matcher(obs: pd.DataFrame,
                    neg_diffby,
                    multilabel_col=None):
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    obs, columns = evaluate_and_filter(obs, columns)
     if multilabel_col:
         return MatcherMultilabel(obs, columns, multilabel_col, seed=0)
     return Matcher(obs, columns, seed=0)
