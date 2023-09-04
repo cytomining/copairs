@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score
-from copairs.compute_np import random_binary_matrix, compute_ap
+from copairs.compute_np import random_binary_matrix, compute_ap, compute_ap_contiguos
 
 SEED = 0
 
@@ -42,3 +42,35 @@ def test_compute_ap():
         lambda x: average_precision_score(x['y_true'], x['y_pred']), axis=1)
 
     assert np.allclose(ap_sklearn, ap)
+
+
+def test_compute_ap_contiguous():
+    num_pos_range = [2, 9]
+    num_neg_range = [10, 20]
+    num_samples_range = [5, 30]
+    rng = np.random.default_rng(seed=0)
+    for _ in range(30):
+        num_samples = rng.integers(*num_samples_range)
+        counts, rel_k_list = [], []
+        ground_truth = []
+        null_confs_gt = np.empty((num_samples, 2), dtype=int)
+        for j in range(num_samples):
+            num_pos = rng.integers(*num_pos_range)
+            num_neg = rng.integers(*num_neg_range)
+            total = num_pos + num_neg
+            y_true = np.zeros(total, dtype=int)
+            y_true[:num_pos] = 1
+            y_pred = np.random.uniform(0, 1, total)
+            ap_score = average_precision_score(y_true, y_pred)
+            ground_truth.append(ap_score)
+
+            rel_k = y_true[np.argsort(y_pred)[::-1]]
+            rel_k_list.append(rel_k)
+            counts.append(total)
+            null_confs_gt[j] = [num_pos, total]
+
+        rel_k_list = np.concatenate(rel_k_list)
+        counts = np.asarray(counts)
+        ap_scores, null_confs = compute_ap_contiguos(rel_k_list, counts)
+        assert np.allclose(null_confs_gt, null_confs)
+        assert np.allclose(ap_scores, ground_truth)

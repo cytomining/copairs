@@ -1,6 +1,7 @@
-from functools import partial, lru_cache
-from typing import Callable
+from functools import partial
 from multiprocessing import Pool
+from pathlib import Path
+from typing import Callable
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -75,27 +76,14 @@ def random_binary_matrix(n, m, k, rng):
     Returns:
     A: Random binary matrix of n*m with exactly k values in 1 per row.
     """
-
-    # Initialize the matrix.
     matrix = np.zeros((n, m), dtype=int)
     matrix[:, :k] = 1
-
-    # Shuffle inplace
-    np.apply_along_axis(rng.shuffle, axis=1, arr=matrix)
+    rng.permuted(matrix, axis=1, out=matrix)
     return matrix
 
 
-def compute_null_dists(rel_k_list, null_size):
-    num_pos_list = rel_k_list.apply(np.sum)
-    num_neg_list = rel_k_list.apply(np.size) - num_pos_list
-    null_confs = []
-    for num_pos, num_neg in zip(num_pos_list, num_neg_list):
-        key = null_size, num_pos, num_neg
-        null_confs.append(key)
-    with Pool(processes=NUM_PROC) as pool:
-        null_dists = np.stack(pool.starmap(random_ap, null_confs))
-    # null_dists = np.stack([random_ap(*key) for key in null_confs])
-    return null_dists
+def random_binomial_matrix(n, m, k, rng):
+    return rng.binomial(1, k / m, (n, m))
 
 
 def compute_ap(rel_k) -> np.ndarray:
@@ -106,6 +94,24 @@ def compute_ap(rel_k) -> np.ndarray:
     pr_k = tp / k
     ap = (pr_k * rel_k).sum(axis=1) / num_pos
     return ap
+
+
+def compute_ap_contiguos(rel_k_list, counts):
+    '''Compute average precision from a list of contiguous values'''
+    cutoffs = np.empty_like(counts)
+    cutoffs[0], cutoffs[1:] = 0, counts.cumsum()[:-1]
+
+    num_pos = np.add.reduceat(rel_k_list, cutoffs)
+    shift = np.empty_like(num_pos)
+    shift[0], shift[1:] = 0, num_pos[:-1]
+
+    tp = rel_k_list.cumsum() - np.repeat(shift.cumsum(), counts)
+    k = np.arange(1, len(rel_k_list) + 1) - np.repeat(cutoffs, counts)
+
+    pr_k = tp / k
+    ap_scores = np.add.reduceat(pr_k * rel_k_list, cutoffs) / num_pos
+    null_confs = np.stack([num_pos, counts], axis=1)
+    return ap_scores, null_confs
 
 
 @lru_cache(maxsize=None)
