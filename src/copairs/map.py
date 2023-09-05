@@ -111,6 +111,7 @@ def run_pipeline(
     null_size,
     multilabel_col=None,
     batch_size=20000,
+    seed=0
 ) -> pd.DataFrame:
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
@@ -143,7 +144,7 @@ def run_pipeline(
     ap_scores, null_confs = compute_np.compute_ap_contiguos(rel_k_list, counts)
 
     logger.info('Computing P-values...')
-    p_values = compute_np.compute_p_values(ap_scores, null_confs, null_size, seed=0, exact=True)
+    p_values = compute_np.compute_p_values(ap_scores, null_confs, null_size, seed=seed)
     logger.info('Creating result DataFrame...')
     result = results_to_dframe(meta, meta.index, p_values, ap_scores,
                                multilabel_col)

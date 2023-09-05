@@ -82,10 +82,6 @@ def random_binary_matrix(n, m, k, rng):
     return matrix
 
 
-def random_binomial_matrix(n, m, k, rng):
-    return rng.binomial(1, k / m, (n, m))
-
-
 def compute_ap(rel_k) -> np.ndarray:
     '''Compute average precision based on binary list sorted by relevance'''
     tp = np.cumsum(rel_k, axis=1)
@@ -114,51 +110,44 @@ def compute_ap_contiguos(rel_k_list, counts):
     return ap_scores, null_confs
 
 
-def _random_ap(num_perm: int, num_pos: int, total: int, seed,
-               exact: bool) -> np.ndarray:
+def _random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
     '''Compute multiple average_precision scores generated at random'''
     rng = np.random.default_rng(seed)
-    if exact:
-        rel_k = random_binary_matrix(num_perm, total, num_pos, rng)
-    else:
-        rel_k = random_binomial_matrix(num_perm, total, num_pos, rng)
+    rel_k = random_binary_matrix(num_perm, total, num_pos, rng)
     return compute_ap(rel_k)
 
 
-def null_dist_cached(total, num_pos, null_size, seed, exact, cache_dir):
-    if exact and seed is not None:
+def null_dist_cached(total, num_pos, null_size, seed, cache_dir):
+    if seed is not None:
         cache_file = cache_dir / f'n{total}_k{num_pos}.npy'
         if cache_file.is_file():
             null_dist = np.load(cache_file)
         else:
-            null_dist = _random_ap(null_size, num_pos, total, seed, exact)
+            null_dist = _random_ap(null_size, num_pos, total, seed)
             null_dist.sort()
             np.save(cache_file, null_dist)
     else:
-        null_dist = _random_ap(null_size, num_pos, total, seed, exact)
+        null_dist = _random_ap(null_size, num_pos, total, seed)
     return null_dist
 
 
-def get_null_dists(confs, null_size, seed, exact):
+def get_null_dists(confs, null_size, seed):
     cache_dir = Path.home() / f'.copairs/seed{seed}/ns{null_size}'
     cache_dir.mkdir(parents=True, exist_ok=True)
     par_func = partial(null_dist_cached,
                        cache_dir=cache_dir,
-                       null_size=null_size,
-                       seed=seed,
-                       exact=exact)
+                       null_size=null_size)
     null_dists = np.empty([len(confs), null_size])
+    rng = np.random.default_rng(seed)
+    seeds = rng.integers(8096, size=len(confs))
     for i, (num_pos, total) in enumerate(tqdm(confs)):
-        null_dists[i] = par_func(
-            total,
-            num_pos,
-        )
+        null_dists[i] = par_func(total, num_pos, seed=seeds[i])
     return null_dists
 
 
-def compute_p_values(ap_scores, null_confs, null_size: int, seed, exact: bool):
+def compute_p_values(ap_scores, null_confs, null_size: int, seed):
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
-    null_dists = get_null_dists(confs, null_size, seed, exact)
+    null_dists = get_null_dists(confs, null_size, seed)
     p_values = np.empty(len(ap_scores), dtype=np.float32)
     for i, (ap_score, ix) in enumerate(zip(ap_scores, rev_ix)):
         # Reverse to get from hi to low
