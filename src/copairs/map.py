@@ -20,39 +20,31 @@ def get_rel_k_list(row):
     return np.expand_dims(label[np.argsort(dist)[::-1]], axis=0)
 
 
-def build_rank_list_multi(pos_dfs, neg_dfs, multilabel_col) -> pd.Series:
-    '''Build a rank list for every (index, label) pair.'''
-    pos_dfs = pos_dfs[[multilabel_col, 'ix1', 'ix2', 'dist']]
-    pos_ids = pos_dfs.melt(value_vars=['ix1', 'ix2'],
-                           id_vars=[multilabel_col, 'dist'],
-                           value_name='ix')
+def build_rank_lists_multi(pos_pairs, neg_pairs, pos_dists, neg_dists, multilabel_ix, pos_counts):
+    raise NotImplementedError('Incomplete impl')
+    cutoffs = np.empty_like(pos_counts)
+    cutoffs[0], cutoffs[1:] = 0, pos_counts.cumsum()[:-1]
+    for mpos_pairs in np.split(pos_pairs, cutoffs):
+        # TODO: Complete
+        rel_k_list, counts = build_rank_lists(mpos_pairs, neg_pairs, pos_dists, neg_dists)
 
-    neg_dfs = neg_dfs[['ix1', 'ix2', 'dist']]
-    neg_ids = neg_dfs.melt(value_vars=['ix1', 'ix2'],
-                           id_vars=['dist'],
-                           value_name='ix')
+    for mlabel, mcounts in zip(multilabel_ix, pos_counts):
+        mpos_pairs = pos_pairs
+    multilabel_ix = np.repeat(multilabel_ix, pos_counts)
+    labels = np.concatenate([np.ones(pos_pairs.size, dtype=np.int32),
+                             np.zeros(neg_pairs.size, dtype=np.int32)])
+    pos_ix = pos_pairs.ravel()
+    multilabel_ix = np.repeat(multilabel_ix, 2)
+    pos_dists = np.repeat(pos_dists, 2)
 
-    dists = pos_ids.groupby([multilabel_col, 'ix'])['dist'].apply(list)
-    dists.name = 'pos_dist'
-    dists = dists.reset_index()
-
-    neg_ids = neg_ids.groupby('ix')['dist'].apply(list)
-    dists['neg_dist'] = dists['ix'].map(neg_ids)
-    del pos_ids, neg_ids
-
-    dists['rel_k_list'] = dists.apply(get_rel_k_list, axis=1)
-    rel_k_list = dists.set_index([multilabel_col, 'ix']).rel_k_list
-
-    return rel_k_list
-
+    neg_ix = neg_pairs.ravel()
+    neg_dists = np.repeat(neg_dists, 2)
 
 def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
     labels = np.concatenate([np.ones(pos_pairs.size, dtype=np.int32),
                              np.zeros(neg_pairs.size, dtype=np.int32)])
     ix = np.concatenate([pos_pairs.ravel(), neg_pairs.ravel()])
-    # del pos_pairs, neg_pairs
     dist_all = np.concatenate([np.repeat(pos_dists, 2), np.repeat(neg_dists, 2)])
-    # del pos_dists, neg_dists
     ix_sort = np.lexsort([1 - dist_all, ix])
     rel_k_list = labels[ix_sort]
     _, counts = np.unique(ix, return_counts=True)
@@ -121,10 +113,13 @@ def run_pipeline(
                              neg_diffby, multilabel_col)
     logger.info('Finding positive pairs...')
     pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
-    total_pos = sum(len(p) for p in pos_pairs.values())
+    if multilabel_col:
+        multilabel_ix = np.fromiter(pos_pairs.keys(), dtype=np.int32)
+    pos_counts = np.fromiter(map(len, pos_pairs.values()), dtype=np.int32)
+    pos_total = sum(pos_counts)
     pos_pairs = np.fromiter(itertools.chain.from_iterable(pos_pairs.values()),
                             dtype=np.dtype((np.int32, 2)),
-                            count=total_pos)
+                            count=pos_total)
 
     logger.info('Finding negative pairs...')
     neg_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
@@ -132,6 +127,9 @@ def run_pipeline(
     neg_pairs = np.fromiter(itertools.chain.from_iterable(neg_pairs.values()),
                             dtype=np.dtype((np.int32, 2)),
                             count=total_neg)
+    if multilabel_col:
+        logger.info('Dropping dups in negative pairs...')
+        neg_pairs = np.unique(neg_pairs, axis=0)
 
     logger.info('Computing positive similarities...')
     pos_dists = cosine_indexed(feats, pos_pairs, batch_size)
@@ -139,7 +137,10 @@ def run_pipeline(
     neg_dists = cosine_indexed(feats, neg_pairs, batch_size)
 
     logger.info('Building rank lists...')
-    rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists)
+    if multilabel_col:
+        build_rank_lists_multi(pos_pairs, neg_pairs, pos_dists, neg_dists, multilabel_ix, pos_counts)
+    else:
+        rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists)
     logger.info('Computing average precision...')
     ap_scores, null_confs = compute_np.compute_ap_contiguos(rel_k_list, counts)
 
