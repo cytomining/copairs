@@ -1,4 +1,3 @@
-from functools import partial
 import itertools
 import logging
 
@@ -7,8 +6,8 @@ import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
 from copairs.compute import cosine_indexed
-import copairs.compute_np as backend
-from copairs.matching import Matcher, MatcherMultilabel, dict_to_dframe
+from copairs import compute_np
+from copairs.matching import Matcher, MatcherMultilabel
 
 logger = logging.getLogger('copairs')
 
@@ -47,24 +46,17 @@ def build_rank_list_multi(pos_dfs, neg_dfs, multilabel_col) -> pd.Series:
     return rel_k_list
 
 
-def build_rank_lists(pos_dfs, neg_dfs) -> pd.Series:
-    pos_dfs = pos_dfs[['ix1', 'ix2', 'dist']]
-    pos_ids = pos_dfs.melt(value_vars=['ix1', 'ix2'],
-                           id_vars=['dist'],
-                           value_name='ix')
-    pos_ids['label'] = 1
-
-    neg_dfs = neg_dfs[['ix1', 'ix2', 'dist']]
-    neg_ids = neg_dfs.melt(value_vars=['ix1', 'ix2'],
-                           id_vars=['dist'],
-                           value_name='ix')
-    neg_ids['label'] = 0
-    dists = pd.concat([pos_ids, neg_ids])
-    del pos_ids, neg_ids
-    dists = dists.sort_values(['ix', 'dist'], ascending=[True, False])
-    rel_k_list = dists.groupby('ix', sort=False)['label'].apply(
-        partial(np.expand_dims, axis=0))
-    return rel_k_list
+def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
+    labels = np.concatenate([np.ones(pos_pairs.size, dtype=np.int32),
+                             np.zeros(neg_pairs.size, dtype=np.int32)])
+    ix = np.concatenate([pos_pairs.ravel(), neg_pairs.ravel()])
+    # del pos_pairs, neg_pairs
+    dist_all = np.concatenate([np.repeat(pos_dists, 2), np.repeat(neg_dists, 2)])
+    # del pos_dists, neg_dists
+    ix_sort = np.lexsort([1 - dist_all, ix])
+    rel_k_list = labels[ix_sort]
+    _, counts = np.unique(ix, return_counts=True)
+    return rel_k_list, counts
 
 
 def flatten_str_list(*args):
@@ -98,12 +90,9 @@ def compute_similarities(pairs, feats, batch_size):
 
 
 def results_to_dframe(meta, index, p_values, ap_scores, multilabel_col):
-    scores = pd.DataFrame({
-        'p_value': p_values,
-        'average_precision': ap_scores
-    },
+    scores = pd.DataFrame({'average_precision': ap_scores, 'p_value': p_values},
                           index=index)
-    if multilabel_col not in scores.index.names:
+    if multilabel_col is None or multilabel_col not in scores.index.names:
         result = meta.join(scores)
         return result
     meta = meta.drop(multilabel_col, axis=1)
@@ -129,35 +118,34 @@ def run_pipeline(
     logger.info('Indexing metadata...')
     matcher = create_matcher(meta, pos_sameby, pos_diffby, neg_sameby,
                              neg_diffby, multilabel_col)
-
     logger.info('Finding positive pairs...')
-    dict_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
-    logger.info('dropping dups...')
-    pos_pairs = dict_to_dframe(dict_pairs, pos_sameby)
+    pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
+    total_pos = sum(len(p) for p in pos_pairs.values())
+    pos_pairs = np.fromiter(itertools.chain.from_iterable(pos_pairs.values()),
+                            dtype=np.dtype((np.int32, 2)),
+                            count=total_pos)
+
     logger.info('Finding negative pairs...')
-    dict_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
-    logger.info('dropping dups...')
-    neg_pairs = set(itertools.chain.from_iterable(dict_pairs.values()))
-    neg_pairs = pd.DataFrame(neg_pairs, columns=['ix1', 'ix2'])
+    neg_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
+    total_neg = sum(len(p) for p in neg_pairs.values())
+    neg_pairs = np.fromiter(itertools.chain.from_iterable(neg_pairs.values()),
+                            dtype=np.dtype((np.int32, 2)),
+                            count=total_neg)
+
     logger.info('Computing positive similarities...')
-    pos_pairs = compute_similarities(pos_pairs, feats, batch_size)
+    pos_dists = cosine_indexed(feats, pos_pairs, batch_size)
     logger.info('Computing negative similarities...')
-    neg_pairs = compute_similarities(neg_pairs, feats, batch_size)
+    neg_dists = cosine_indexed(feats, neg_pairs, batch_size)
+
     logger.info('Building rank lists...')
-    if multilabel_col and multilabel_col in pos_sameby:
-        rel_k_list = build_rank_list_multi(pos_pairs, neg_pairs,
-                                           multilabel_col)
-    else:
-        rel_k_list = build_rank_lists(pos_pairs, neg_pairs)
+    rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists)
     logger.info('Computing average precision...')
-    ap_scores = rel_k_list.apply(backend.compute_ap)
-    ap_scores = np.concatenate(ap_scores.values)
-    logger.info('Computing null distributions...')
-    null_dists = backend.compute_null_dists(rel_k_list, null_size)
+    ap_scores, null_confs = compute_np.compute_ap_contiguos(rel_k_list, counts)
+
     logger.info('Computing P-values...')
-    p_values = backend.compute_p_values(null_dists, ap_scores, null_size)
+    p_values = compute_np.compute_p_values(ap_scores, null_confs, null_size, seed=0, exact=True)
     logger.info('Creating result DataFrame...')
-    result = results_to_dframe(meta, rel_k_list.index, p_values, ap_scores,
+    result = results_to_dframe(meta, meta.index, p_values, ap_scores,
                                multilabel_col)
     logger.info('Finished.')
     return result

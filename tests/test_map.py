@@ -2,12 +2,13 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score
 from copairs.compute_np import random_binary_matrix, compute_ap, compute_ap_contiguos
+from copairs.map import run_pipeline
+from tests.helpers import simulate_random_dframe
 
 SEED = 0
 
 
 def test_random_binary_matrix():
-
     rng = np.random.default_rng(SEED)
     # Test with n=3, m=4, k=2
     A = random_binary_matrix(3, 4, 2, rng)
@@ -74,3 +75,20 @@ def test_compute_ap_contiguous():
         ap_scores, null_confs = compute_ap_contiguos(rel_k_list, counts)
         assert np.allclose(null_confs_gt, null_confs)
         assert np.allclose(ap_scores, ground_truth)
+
+
+def test_pipeline():
+    length = 10
+    vocab_size = {'p': 5, 'w': 3, 'l': 4}
+    n_feats = 5
+    pos_sameby = ['l']
+    pos_diffby = ['p']
+    neg_sameby = []
+    neg_diffby = ['l']
+    null_size = 4000
+    rng = np.random.default_rng(0)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
+                                  rng)
+    feats = rng.uniform(size=(length, n_feats))
+    run_pipeline(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby,
+                 null_size)
