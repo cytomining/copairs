@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score
-from copairs.compute_np import random_binary_matrix, compute_ap, compute_ap_contiguos
-from copairs.map import run_pipeline
+
+from copairs.compute_np import compute_ap, compute_ap_contiguos, random_binary_matrix
+from copairs.map import run_pipeline, run_pipeline_multilabel
 from tests.helpers import simulate_random_dframe
 
 SEED = 0
@@ -49,7 +50,7 @@ def test_compute_ap_contiguous():
     num_pos_range = [2, 9]
     num_neg_range = [10, 20]
     num_samples_range = [5, 30]
-    rng = np.random.default_rng(seed=0)
+    rng = np.random.default_rng(SEED)
     for _ in range(30):
         num_samples = rng.integers(*num_samples_range)
         counts, rel_k_list = [], []
@@ -86,9 +87,32 @@ def test_pipeline():
     neg_sameby = []
     neg_diffby = ['l']
     null_size = 4000
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(SEED)
     meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
                                   rng)
     feats = rng.uniform(size=(length, n_feats))
     run_pipeline(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby,
                  null_size)
+
+
+def test_pipeline_multilabel():
+    '''Check the multilabel implementation with for mAP calculation'''
+    length = 10
+    vocab_size = {'p': 3, 'w': 5, 'l': 4}
+    n_feats = 8
+    multilabel_col = 'l'
+    pos_sameby = ['l']
+    pos_diffby = []
+    neg_sameby = []
+    neg_diffby = ['l']
+    null_size = 4000
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
+                                  rng)
+    meta = meta.groupby(['p', 'w'])['l'].unique().reset_index()
+    length = len(meta)
+    feats = rng.uniform(size=(length, n_feats))
+
+    run_pipeline_multilabel(meta, feats, pos_sameby, pos_diffby,
+                            neg_sameby, neg_diffby, null_size,
+                            multilabel_col)

@@ -1,3 +1,4 @@
+import itertools
 from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
@@ -94,8 +95,7 @@ def compute_ap(rel_k) -> np.ndarray:
 
 def compute_ap_contiguos(rel_k_list, counts):
     '''Compute average precision from a list of contiguous values'''
-    cutoffs = np.empty_like(counts)
-    cutoffs[0], cutoffs[1:] = 0, counts.cumsum()[:-1]
+    cutoffs = to_cutoffs(counts)
 
     num_pos = np.add.reduceat(rel_k_list, cutoffs)
     shift = np.empty_like(num_pos)
@@ -154,3 +154,19 @@ def compute_p_values(ap_scores, null_confs, null_size: int, seed):
         num = null_size - np.searchsorted(null_dists[ix], ap_score)
         p_values[i] = (num + 1) / (null_size + 1)
     return p_values
+
+
+def concat_ranges(start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    '''Create a 1-d array concatenating multiple ranges'''
+    slices = map(range, start, end)
+    slices = itertools.chain.from_iterable(slices)
+    count = (end - start).sum()
+    mask = np.fromiter(slices, dtype=np.int32, count=count)
+    return mask
+
+
+def to_cutoffs(counts: np.ndarray):
+    '''Convert a list of counts into cutoff indices.'''
+    cutoffs = np.empty_like(counts)
+    cutoffs[0], cutoffs[1:] = 0, counts.cumsum()[:-1]
+    return cutoffs
