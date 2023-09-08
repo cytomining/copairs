@@ -95,10 +95,10 @@ def run_pipeline(
                             count=total_neg)
 
     logger.info('Computing positive similarities...')
-    pos_dists = cosine_indexed(feats, pos_pairs, batch_size)
+    pos_dists = cosine_indexed(feats, pos_pairs, batch_size).astype(np.float32)
 
     logger.info('Computing negative similarities...')
-    neg_dists = cosine_indexed(feats, neg_pairs, batch_size)
+    neg_dists = cosine_indexed(feats, neg_pairs, batch_size).astype(np.float32)
 
     logger.info('Building rank lists...')
     rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists)
@@ -120,8 +120,11 @@ def create_neg_query_solver(neg_pairs, neg_dists):
     # Melting and sorting by ix. neg_cutoffs splits the contiguous array
     neg_ix = neg_pairs.ravel()
     neg_dists = np.repeat(neg_dists, 2)
-    neg_ix, neg_inv, neg_counts = np.unique(neg_ix, return_inverse=True, return_counts=True)
-    neg_dists = neg_dists[neg_inv]
+
+    sort_ix = np.argsort(neg_ix)
+    neg_dists = neg_dists[sort_ix]
+
+    neg_ix, neg_counts = np.unique(neg_ix, return_counts=True)
     neg_cutoffs = compute_np.to_cutoffs(neg_counts)
 
     def negs_for(query: np.ndarray):
@@ -201,10 +204,10 @@ def run_pipeline_multilabel(
     neg_pairs = np.unique(neg_pairs, axis=0)
 
     logger.info('Computing positive similarities...')
-    pos_dists = cosine_indexed(feats, pos_pairs, batch_size)
+    pos_dists = cosine_indexed(feats, pos_pairs, batch_size).astype(np.float32)
 
     logger.info('Computing negative similarities...')
-    neg_dists = cosine_indexed(feats, neg_pairs, batch_size)
+    neg_dists = cosine_indexed(feats, neg_pairs, batch_size).astype(np.float32)
 
     logger.info('Computing mAP and p-values per label...')
     negs_for = create_neg_query_solver(neg_pairs, neg_dists)
@@ -228,6 +231,7 @@ def run_pipeline_multilabel(
             result[multilabel_col] = key
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
-    results = results.merge(meta.drop(multilabel_col, axis=1), left_on='ix', right_index=True)
+    meta = meta.drop(multilabel_col, axis=1)
+    results = meta.merge(results, right_on='ix', left_index=True).drop('ix', axis=1)
     logger.info('Finished.')
     return results
