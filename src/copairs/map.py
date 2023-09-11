@@ -50,6 +50,7 @@ def aggregate(result: pd.DataFrame, sameby, threshold: float) -> pd.DataFrame:
     agg_rs.rename({'p_value': 'nlog10pvalue'}, axis=1, inplace=True)
     agg_rs['above_p_threshold'] = agg_rs['nlog10pvalue'] > -np.log10(threshold)
     agg_rs['above_q_threshold'] = agg_rs['nlog10qvalue'] > -np.log10(threshold)
+    agg_rs.rename(columns={'average_precision': 'mean_average_precision'}, inplace=True)
     return agg_rs
 
 

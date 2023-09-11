@@ -140,7 +140,7 @@ def get_null_dists(confs, null_size, seed):
     null_dists = np.empty([len(confs), null_size])
     rng = np.random.default_rng(seed)
     seeds = rng.integers(8096, size=len(confs))
-    for i, (num_pos, total) in enumerate(tqdm(confs)):
+    for i, (num_pos, total) in enumerate(tqdm(confs, leave=False)):
         null_dists[i] = par_func(total, num_pos, seed=seeds[i])
     return null_dists
 
