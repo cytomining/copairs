@@ -200,7 +200,7 @@ def run_pipeline_multilabel(
     neg_pairs = np.fromiter(itertools.chain.from_iterable(neg_pairs.values()),
                             dtype=np.dtype((np.int32, 2)),
                             count=total_neg)
-    
+
     logger.info('Dropping dups in negative pairs...')
     neg_pairs = np.unique(neg_pairs, axis=0)
 

@@ -1,5 +1,5 @@
-import itertools
 from functools import partial
+import itertools
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Callable
@@ -117,7 +117,7 @@ def _random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
     return compute_ap(rel_k)
 
 
-def null_dist_cached(total, num_pos, null_size, seed, cache_dir):
+def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
     if seed is not None:
         cache_file = cache_dir / f'n{total}_k{num_pos}.npy'
         if cache_file.is_file():
@@ -135,13 +135,13 @@ def get_null_dists(confs, null_size, seed):
     cache_dir = Path.home() / f'.copairs/seed{seed}/ns{null_size}'
     cache_dir.mkdir(parents=True, exist_ok=True)
     par_func = partial(null_dist_cached,
-                       cache_dir=cache_dir,
-                       null_size=null_size)
-    null_dists = np.empty([len(confs), null_size])
+                       null_size=null_size,
+                       cache_dir=cache_dir)
+    null_dists = np.empty([len(confs), null_size], dtype=np.float32)
     rng = np.random.default_rng(seed)
     seeds = rng.integers(8096, size=len(confs))
     for i, (num_pos, total) in enumerate(tqdm(confs, leave=False)):
-        null_dists[i] = par_func(total, num_pos, seed=seeds[i])
+        null_dists[i] = par_func(num_pos, total, seeds[i])
     return null_dists
 
 
