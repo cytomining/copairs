@@ -110,11 +110,13 @@ def compute_ap_contiguos(rel_k_list, counts):
     return ap_scores, null_confs
 
 
-def _random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
+def random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
     '''Compute multiple average_precision scores generated at random'''
     rng = np.random.default_rng(seed)
     rel_k = random_binary_matrix(num_perm, total, num_pos, rng)
-    return compute_ap(rel_k)
+    null_dist = compute_ap(rel_k)
+    null_dist.sort()
+    return null_dist
 
 
 def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
@@ -123,11 +125,10 @@ def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
         if cache_file.is_file():
             null_dist = np.load(cache_file)
         else:
-            null_dist = _random_ap(null_size, num_pos, total, seed)
-            null_dist.sort()
+            null_dist = random_ap(null_size, num_pos, total, seed)
             np.save(cache_file, null_dist)
     else:
-        null_dist = _random_ap(null_size, num_pos, total, seed)
+        null_dist = random_ap(null_size, num_pos, total, seed)
     return null_dist
 
 
