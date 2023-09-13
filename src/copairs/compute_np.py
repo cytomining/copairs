@@ -1,43 +1,31 @@
-from functools import partial
 import itertools
-from multiprocessing import Pool
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from tqdm.auto import tqdm
-
-NUM_PROC = 4
-
-
-def process_batch(i: int, batch_size: int, feats: np.ndarray,
-                  pair_ix: np.ndarray, batch_pairwise_op):
-    x_sample = feats[pair_ix[i:i + batch_size, 0]]
-    y_sample = feats[pair_ix[i:i + batch_size, 1]]
-    corr = batch_pairwise_op(x_sample, y_sample)
-    return corr
+from tqdm.autonotebook import tqdm
 
 
 def pairwise_indexed(feats: np.ndarray, pair_ix: np.ndarray,
-                     batch_pairwise_op: Callable[[np.ndarray, np.ndarray],
+                     pairwise_op: Callable[[np.ndarray, np.ndarray],
                                                  np.ndarray], batch_size):
-    '''Get pairwise correlation using a list of paired indices'''
+    '''Compute pairwise op in batches with multithreading using a list of paired indices'''
     num_pairs = len(pair_ix)
 
-    corrs = []
+    result = np.empty(num_pairs, dtype=np.float32)
+    def par_func(i):
+        x_sample = feats[pair_ix[i:i + batch_size, 0]]
+        y_sample = feats[pair_ix[i:i + batch_size, 1]]
+        result[i:i + len(x_sample)] = pairwise_op(x_sample, y_sample)
 
-    par_func = partial(process_batch,
-                       batch_size=batch_size,
-                       feats=feats,
-                       pair_ix=pair_ix,
-                       batch_pairwise_op=batch_pairwise_op)
-    with Pool(NUM_PROC) as p:
-        idx = list(range(0, num_pairs, batch_size))
-        corrs = list(tqdm(p.imap(par_func, idx), total=len(idx), leave=False))
+    with ThreadPool() as pool:
+        idx = np.arange(0, num_pairs, batch_size)
+        tasks = pool.imap_unordered(par_func, idx)
+        for _ in tqdm(tasks, total=len(idx), leave=False):
+            pass
 
-    corrs = np.concatenate(corrs)
-    assert len(corrs) == num_pairs
-    return corrs
+    return result
 
 
 def pairwise_corr(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
@@ -135,14 +123,19 @@ def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
 def get_null_dists(confs, null_size, seed):
     cache_dir = Path.home() / f'.copairs/seed{seed}/ns{null_size}'
     cache_dir.mkdir(parents=True, exist_ok=True)
-    par_func = partial(null_dist_cached,
-                       null_size=null_size,
-                       cache_dir=cache_dir)
-    null_dists = np.empty([len(confs), null_size], dtype=np.float32)
+    num_confs = len(confs)
     rng = np.random.default_rng(seed)
-    seeds = rng.integers(8096, size=len(confs))
-    for i, (num_pos, total) in enumerate(tqdm(confs, leave=False)):
-        null_dists[i] = par_func(num_pos, total, seeds[i])
+    seeds = rng.integers(8096, size=num_confs)
+
+    null_dists = np.empty([len(confs), null_size], dtype=np.float32)
+    def par_func(i):
+        num_pos, total = confs[i]
+        null_dists[i] = null_dist_cached(num_pos, total, seeds[i],
+                                         null_size, cache_dir)
+    with ThreadPool() as pool:
+        tasks = pool.imap_unordered(par_func, range(num_confs))
+        for _ in tqdm(tasks, total=num_confs, leave=False):
+            pass
     return null_dists
 
 
