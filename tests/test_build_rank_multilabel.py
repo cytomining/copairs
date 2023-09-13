@@ -1,6 +1,6 @@
 import numpy as np
 
-from copairs.compute_np import concat_ranges
+from copairs.compute import concat_ranges
 
 
 def naive_concat_ranges(start: np.ndarray, end: np.ndarray):

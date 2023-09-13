@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score
 
-from copairs.compute_np import compute_ap, compute_ap_contiguos, random_binary_matrix
+from copairs.compute import compute_ap, compute_ap_contiguos, random_binary_matrix
 from copairs.map import run_pipeline, run_pipeline_multilabel
 from tests.helpers import simulate_random_dframe
 

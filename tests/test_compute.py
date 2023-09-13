@@ -1,10 +1,7 @@
 import pytest
 import numpy as np
 
-from copairs import compute_np
-from copairs.compute import TF_ENABLED, TFP_ENABLED
-if TF_ENABLED:
-    from copairs import compute_tf
+from copairs import compute
 
 SEED = 0
 rng = np.random.default_rng(SEED)
@@ -27,7 +24,7 @@ def cosine_naive(feats, pairs):
     return cosine
 
 
-def _test_corrcoef(backend):
+def test_corrcoef():
     n_samples = 10
     n_pairs = 20
     n_feats = 5
@@ -36,12 +33,11 @@ def _test_corrcoef(backend):
     pairs = rng.integers(0, n_samples - 1, [n_pairs, 2])
 
     corr_gt = corrcoef_naive(feats, pairs)
-    corr = backend.pairwise_indexed(feats, pairs, backend.pairwise_corr,
-                                    batch_size)
+    corr = compute.pairwise_corr(feats, pairs, batch_size)
     assert np.allclose(corr_gt, corr)
 
 
-def _test_cosine(backend):
+def test_cosine():
     n_samples = 10
     n_pairs = 20
     n_feats = 5
@@ -50,24 +46,5 @@ def _test_cosine(backend):
     pairs = rng.integers(0, n_samples - 1, [n_pairs, 2])
 
     cosine_gt = cosine_naive(feats, pairs)
-    cosine = backend.pairwise_indexed(feats, pairs, backend.pairwise_cosine,
-                                      batch_size)
+    cosine = compute.pairwise_cosine(feats, pairs, batch_size)
     assert np.allclose(cosine_gt, cosine)
-
-
-def test_corrcoef_np():
-    _test_corrcoef(compute_np)
-
-
-def test_cosine_np():
-    _test_cosine(compute_np)
-
-
-@pytest.mark.skipif(not TFP_ENABLED, reason="tensorflow_prob not installed")
-def test_corrcoef_tf():
-    _test_corrcoef(compute_tf)
-
-
-@pytest.mark.skipif(not TF_ENABLED, reason="tensorflow_prob not installed")
-def test_cosine_tf():
-    _test_cosine(compute_tf)
