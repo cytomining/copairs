@@ -1,3 +1,4 @@
+import os
 import itertools
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
@@ -5,6 +6,16 @@ from typing import Callable
 
 import numpy as np
 from tqdm.autonotebook import tqdm
+
+def parallel_map(par_func, items):
+    '''Execute par_func(i) for every i in items using ThreadPool and tqdm.'''
+    num_items = len(items)
+    pool_size = min(num_items, os.cpu_count())
+    chunksize = num_items // pool_size
+    with ThreadPool(pool_size) as pool:
+        tasks = pool.imap_unordered(par_func, items, chunksize=chunksize)
+        for _ in tqdm(tasks, total=len(items), leave=False):
+            pass
 
 
 def pairwise_indexed(feats: np.ndarray, pair_ix: np.ndarray,
@@ -19,11 +30,7 @@ def pairwise_indexed(feats: np.ndarray, pair_ix: np.ndarray,
         y_sample = feats[pair_ix[i:i + batch_size, 1]]
         result[i:i + len(x_sample)] = pairwise_op(x_sample, y_sample)
 
-    with ThreadPool() as pool:
-        idx = np.arange(0, num_pairs, batch_size)
-        tasks = pool.imap_unordered(par_func, idx)
-        for _ in tqdm(tasks, total=len(idx), leave=False):
-            pass
+    parallel_map(par_func, np.arange(0, num_pairs, batch_size))
 
     return result
 
@@ -132,10 +139,7 @@ def get_null_dists(confs, null_size, seed):
         num_pos, total = confs[i]
         null_dists[i] = null_dist_cached(num_pos, total, seeds[i],
                                          null_size, cache_dir)
-    with ThreadPool() as pool:
-        tasks = pool.imap_unordered(par_func, range(num_confs))
-        for _ in tqdm(tasks, total=num_confs, leave=False):
-            pass
+    parallel_map(par_func, np.arange(num_confs))
     return null_dists
 
 
