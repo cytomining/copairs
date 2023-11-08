@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score
 
-from copairs.compute import compute_ap, compute_ap_contiguos, random_binary_matrix
+from copairs.compute import compute_ap, compute_ap_contiguous, random_binary_matrix
 from copairs.map import run_pipeline, run_pipeline_multilabel
 from tests.helpers import simulate_random_dframe
 
@@ -73,7 +73,7 @@ def test_compute_ap_contiguous():
 
         rel_k_list = np.concatenate(rel_k_list)
         counts = np.asarray(counts)
-        ap_scores, null_confs = compute_ap_contiguos(rel_k_list, counts)
+        ap_scores, null_confs = compute_ap_contiguous(rel_k_list, counts)
         assert np.allclose(null_confs_gt, null_confs)
         assert np.allclose(ap_scores, ground_truth)
 

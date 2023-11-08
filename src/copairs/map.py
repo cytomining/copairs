@@ -130,7 +130,7 @@ def run_pipeline(
     rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists)
 
     logger.info('Computing average precision...')
-    ap_scores, null_confs = compute.compute_ap_contiguos(rel_k_list, counts)
+    ap_scores, null_confs = compute.compute_ap_contiguous(rel_k_list, counts)
 
     logger.info('Computing p-values...')
     p_values = compute.compute_p_values(ap_scores, null_confs, null_size, seed=seed)
@@ -183,7 +183,7 @@ def build_rank_lists_multi(pos_pairs, pos_dists, pos_counts, negs_for, null_size
         ix_sort = np.lexsort([1 - dist_all, ix])
         rel_k_list = labels[ix_sort]
         _, counts = np.unique(ix, return_counts=True)
-        ap_scores, null_confs = compute.compute_ap_contiguos(rel_k_list, counts)
+        ap_scores, null_confs = compute.compute_ap_contiguous(rel_k_list, counts)
         p_values = compute.compute_p_values(ap_scores, null_confs, null_size, seed=seed)
 
         ap_scores_list.append(ap_scores)
