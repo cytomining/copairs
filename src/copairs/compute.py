@@ -90,7 +90,7 @@ def compute_ap(rel_k) -> np.ndarray:
     return ap
 
 
-def compute_ap_contiguos(rel_k_list, counts):
+def compute_ap_contiguous(rel_k_list, counts):
     '''Compute average precision from a list of contiguous values'''
     cutoffs = to_cutoffs(counts)
 
