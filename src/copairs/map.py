@@ -62,7 +62,7 @@ def create_matcher(obs: pd.DataFrame,
 
 
 def aggregate(result: pd.DataFrame, sameby, threshold: float) -> pd.DataFrame:
-    agg_rs = result.groupby(sameby, as_index=False).agg({
+    agg_rs = result.groupby(sameby, as_index=False, observed=True).agg({
         'average_precision':
         'mean',
         'p_value':
