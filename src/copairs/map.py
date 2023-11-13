@@ -102,6 +102,9 @@ def run_pipeline(
     seed=0
 ) -> pd.DataFrame:
     # Critical!, otherwise the indexing wont work
+    columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    if meta[columns].isna().any(axis=None):
+        raise ValueError('metadata columns should not have null values.')
     meta = meta.reset_index(drop=True).copy()
     logger.info('Indexing metadata...')
     matcher = create_matcher(meta, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
