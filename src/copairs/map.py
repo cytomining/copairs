@@ -138,6 +138,8 @@ def run_pipeline(
     logger.info('Creating result DataFrame...')
     meta['average_precision'] = ap_scores
     meta['p_value'] = p_values
+    meta["n_pos_pairs"] = null_confs[:, 0]
+    meta["n_total_pairs"] = null_confs[:, 1]
     logger.info('Finished.')
     return meta
 
