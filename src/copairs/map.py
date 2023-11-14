@@ -37,17 +37,20 @@ def extract_filters(columns, df_columns) -> list:
 
 
 def apply_filters(df, query_list):
-    '''Apply filters to dataframe'''
-    for query in query_list:
-        try:
-            df = df.query(query)
-        except:
-            raise ValueError(f"Invalid query expression: {query}")
+    '''Combine and apply filters to dataframe'''
+    if not query_list:
+        return df
 
-        if df.empty:
-            raise ValueError(f"Empty dataframe after processing query: {query}")
-    
-    return df
+    combined_query = " & ".join(f"({query})" for query in query_list)
+    try:
+        df_filtered = df.query(combined_query)
+    except Exception as e:
+        raise ValueError(f"Invalid combined query expression: {combined_query}. Error: {e}")
+
+    if df_filtered.empty:
+        raise ValueError(f"Empty dataframe after processing combined query: {combined_query}")
+
+    return df_filtered
 
 
 def flatten_str_list(*args):
