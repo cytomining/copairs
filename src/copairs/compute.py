@@ -151,7 +151,7 @@ def compute_p_values(ap_scores, null_confs, null_size: int, seed):
     p_values = np.empty(len(ap_scores), dtype=np.float32)
     for i, (ap_score, ix) in enumerate(zip(ap_scores, rev_ix)):
         # Reverse to get from hi to low
-        num = null_size - np.searchsorted(null_dists[ix], ap_score)
+        num = null_size - np.searchsorted(null_dists[ix], ap_score, side='right')
         p_values[i] = (num + 1) / (null_size + 1)
     return p_values
 
