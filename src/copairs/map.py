@@ -91,8 +91,8 @@ def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
          np.repeat(neg_dists, 2)])
     ix_sort = np.lexsort([1 - dist_all, ix])
     rel_k_list = labels[ix_sort]
-    _, counts = np.unique(ix, return_counts=True)
-    return rel_k_list, counts
+    paired_ix, counts = np.unique(ix, return_counts=True)
+    return paired_ix, rel_k_list, counts
 
 
 def validate_pipeline_input(meta, feats, columns):
@@ -141,8 +141,8 @@ def run_pipeline(meta,
     neg_dists = compute.pairwise_cosine(feats, neg_pairs, batch_size)
 
     logger.info('Building rank lists...')
-    rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs, pos_dists,
-                                          neg_dists)
+    paired_ix, rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs,
+                                                     pos_dists, neg_dists)
 
     logger.info('Computing average precision...')
     ap_scores, null_confs = compute.compute_ap_contiguous(rel_k_list, counts)
@@ -154,10 +154,10 @@ def run_pipeline(meta,
                                         seed=seed)
 
     logger.info('Creating result DataFrame...')
-    meta['average_precision'] = ap_scores
-    meta['p_value'] = p_values
-    meta["n_pos_pairs"] = null_confs[:, 0]
-    meta["n_total_pairs"] = null_confs[:, 1]
+    meta.loc[paired_ix, 'average_precision'] = ap_scores
+    meta.loc[paired_ix, 'p_value'] = p_values
+    meta.loc[paired_ix, "n_pos_pairs"] = null_confs[:, 0]
+    meta.loc[paired_ix, "n_total_pairs"] = null_confs[:, 1]
     logger.info('Finished.')
     return meta
 
