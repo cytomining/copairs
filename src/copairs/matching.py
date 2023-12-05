@@ -19,7 +19,7 @@ ColumnDict = Dict[str, ColumnList]
 
 def reverse_index(col: pd.Series) -> pd.Series:
     '''Build a reverse_index for a given column in the DataFrame'''
-    return pd.Series(col.groupby(col).indices, name=col.name)
+    return pd.Series(col.groupby(col, observed=True).indices, name=col.name)
 
 
 def dict_to_dframe(dict_pairs, sameby: Union[str, list]):
