@@ -3,7 +3,8 @@ import pandas as pd
 from sklearn.metrics import average_precision_score
 
 from copairs.compute import compute_ap, compute_ap_contiguous, random_binary_matrix
-from copairs.map import run_pipeline, run_pipeline_multilabel
+from copairs.map import average_precision
+from copairs.map.multilabel import average_precision as multilabel_average_precision
 from tests.helpers import simulate_random_dframe
 
 SEED = 0
@@ -86,13 +87,12 @@ def test_pipeline():
     pos_diffby = ['p']
     neg_sameby = []
     neg_diffby = ['l']
-    null_size = 4000
     rng = np.random.default_rng(SEED)
     meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
                                   rng)
     feats = rng.uniform(size=(length, n_feats))
-    run_pipeline(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby,
-                 null_size)
+    average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby,
+                      neg_diffby)
 
 
 def test_pipeline_multilabel():
@@ -113,6 +113,6 @@ def test_pipeline_multilabel():
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
 
-    run_pipeline_multilabel(meta, feats, pos_sameby, pos_diffby,
-                            neg_sameby, neg_diffby, null_size,
-                            multilabel_col)
+    multilabel_average_precision(meta, feats, pos_sameby, pos_diffby,
+                                 neg_sameby, neg_diffby, null_size,
+                                 multilabel_col)
