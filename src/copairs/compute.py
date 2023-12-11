@@ -7,6 +7,7 @@ from typing import Callable
 import numpy as np
 from tqdm.autonotebook import tqdm
 
+
 def parallel_map(par_func, items):
     '''Execute par_func(i) for every i in items using ThreadPool and tqdm.'''
     num_items = len(items)
@@ -18,12 +19,14 @@ def parallel_map(par_func, items):
             pass
 
 
-def batch_processing(pairwise_op: Callable[[np.ndarray, np.ndarray],np.ndarray],):
+def batch_processing(pairwise_op: Callable[[np.ndarray, np.ndarray],
+                                           np.ndarray], ):
     '''Decorator adding the batch_size param to run the function with multithreading using a list of paired indices'''
 
     def batched_fn(feats: np.ndarray, pair_ix: np.ndarray, batch_size: int):
         num_pairs = len(pair_ix)
         result = np.empty(num_pairs, dtype=np.float32)
+
         def par_func(i):
             x_sample = feats[pair_ix[i:i + batch_size, 0]]
             y_sample = feats[pair_ix[i:i + batch_size, 1]]
@@ -32,6 +35,7 @@ def batch_processing(pairwise_op: Callable[[np.ndarray, np.ndarray],np.ndarray],
         parallel_map(par_func, np.arange(0, num_pairs, batch_size))
 
         return result
+
     return batched_fn
 
 
@@ -112,7 +116,6 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
     rng = np.random.default_rng(seed)
     rel_k = random_binary_matrix(num_perm, total, num_pos, rng)
     null_dist = compute_ap(rel_k)
-    null_dist.sort()
     return null_dist
 
 
@@ -137,10 +140,12 @@ def get_null_dists(confs, null_size, seed):
     seeds = rng.integers(8096, size=num_confs)
 
     null_dists = np.empty([len(confs), null_size], dtype=np.float32)
+
     def par_func(i):
         num_pos, total = confs[i]
-        null_dists[i] = null_dist_cached(num_pos, total, seeds[i],
-                                         null_size, cache_dir)
+        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size,
+                                         cache_dir)
+
     parallel_map(par_func, np.arange(num_confs))
     return null_dists
 

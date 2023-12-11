@@ -8,6 +8,7 @@ from statsmodels.stats.multitest import multipletests
 
 from copairs import compute
 from copairs.matching import Matcher, MatcherMultilabel
+from tqdm.contrib.concurrent import thread_map
 
 logger = logging.getLogger('copairs')
 
@@ -61,23 +62,40 @@ def create_matcher(obs: pd.DataFrame,
     return Matcher(obs, columns, seed=0)
 
 
-def aggregate(result: pd.DataFrame, sameby, threshold: float) -> pd.DataFrame:
-    agg_rs = result.groupby(sameby, as_index=False, observed=True).agg({
-        'average_precision':
-        'mean',
-        'p_value':
-        lambda p_values: -np.log10(p_values).mean(),
-    })
+def aggregate(ap_scores: pd.DataFrame, sameby, null_size: int,
+              threshold: float, seed: int) -> pd.DataFrame:
+    ap_scores = ap_scores.reset_index()
+
+    logger.info('Computing null_dist...')
+    null_confs = ap_scores[['n_pos_pairs', 'n_total_pairs']].values
+    null_confs, rev_ix = np.unique(null_confs, return_inverse=True)
+    null_dists = compute.get_null_dists(null_confs, null_size, seed=seed)
+    ap_scores['null_ix'] = rev_ix
+
+    def get_p_value(params):
+        map_score, indices = params
+        null_dist = null_dists[indices].mean(axis=0)
+        num = (null_dist > map_score).sum()
+        p_value = (num + 1) / (null_size + 1)
+        return p_value
+
+    logger.info('Computing p-values...')
+
+    def g(df):
+        return df['average_precision'].agg(['mean', lambda x: list(x.index)])
+
+    map_scores = ap_scores.groupby(sameby).agg(g)
+    map_scores.columns = ['mean_average_precision', 'indices']
+
+    params = map_scores[['mean_average_precision', 'indices']]
+    map_scores['p_value'] = thread_map(get_p_value, params.values)
     reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
-        10**-agg_rs['p_value'], method='fdr_bh')
-    agg_rs['q_value'] = pvals_corrected
-    agg_rs['nlog10qvalue'] = (-np.log10(agg_rs['q_value']))
-    agg_rs.rename({'p_value': 'nlog10pvalue'}, axis=1, inplace=True)
-    agg_rs['above_p_threshold'] = agg_rs['nlog10pvalue'] > -np.log10(threshold)
-    agg_rs['above_q_threshold'] = agg_rs['nlog10qvalue'] > -np.log10(threshold)
-    agg_rs.rename(columns={'average_precision': 'mean_average_precision'},
-                  inplace=True)
-    return agg_rs
+        map_scores['p_value'], method='fdr_bh')
+    map_scores['corrected_p_value'] = pvals_corrected
+    map_scores['below_p'] = map_scores['p_value'] > threshold
+    map_scores['below_corrected_p'] = map_scores[
+        'corrected_p_value'] > threshold
+    return map_scores
 
 
 def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
@@ -108,7 +126,6 @@ def run_pipeline(meta,
                  pos_diffby,
                  neg_sameby,
                  neg_diffby,
-                 null_size,
                  batch_size=20000,
                  seed=0) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
@@ -147,15 +164,8 @@ def run_pipeline(meta,
     logger.info('Computing average precision...')
     ap_scores, null_confs = compute.compute_ap_contiguous(rel_k_list, counts)
 
-    logger.info('Computing p-values...')
-    p_values = compute.compute_p_values(ap_scores,
-                                        null_confs,
-                                        null_size,
-                                        seed=seed)
-
     logger.info('Creating result DataFrame...')
     meta.loc[paired_ix, 'average_precision'] = ap_scores
-    meta.loc[paired_ix, 'p_value'] = p_values
     meta.loc[paired_ix, "n_pos_pairs"] = null_confs[:, 0]
     meta.loc[paired_ix, "n_total_pairs"] = null_confs[:, 1]
     logger.info('Finished.')
