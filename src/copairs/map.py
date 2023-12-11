@@ -95,10 +95,11 @@ def aggregate(ap_scores: pd.DataFrame, sameby, null_size: int,
     reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
         map_scores['p_value'], method='fdr_bh')
     map_scores['corrected_p_value'] = pvals_corrected
-    map_scores['below_p'] = map_scores['p_value'] > threshold
+    map_scores['below_p'] = map_scores['p_value'] < threshold
     map_scores['below_corrected_p'] = map_scores[
-        'corrected_p_value'] > threshold
+        'corrected_p_value'] < threshold
     map_scores.drop(columns=['indices'], inplace=True)
+    map_scores.reset_index(inplace=True)
     return map_scores
 
 
