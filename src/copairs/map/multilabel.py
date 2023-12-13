@@ -42,9 +42,8 @@ def create_neg_query_solver(neg_pairs, neg_dists):
     return negs_for
 
 
-def build_rank_lists_multi(pos_pairs, pos_dists, pos_counts, negs_for,
-                           null_size, seed):
-    ap_scores_list, p_values_list, ix_list = [], [], []
+def build_rank_lists_multi(pos_pairs, pos_dists, pos_counts, negs_for):
+    ap_scores_list, null_confs_list, ix_list = [], [], []
 
     start = 0
     for end in pos_counts.cumsum():
@@ -66,15 +65,10 @@ def build_rank_lists_multi(pos_pairs, pos_dists, pos_counts, negs_for,
         _, counts = np.unique(ix, return_counts=True)
         ap_scores, null_confs = compute.compute_ap_contiguous(
             rel_k_list, counts)
-        p_values = compute.compute_p_values(ap_scores,
-                                            null_confs,
-                                            null_size,
-                                            seed=seed)
-
         ap_scores_list.append(ap_scores)
-        p_values_list.append(p_values)
+        null_confs_list.append(null_confs)
         ix_list.append(query)
-    return ap_scores_list, p_values_list, ix_list
+    return ap_scores_list, null_confs_list, ix_list
 
 
 def average_precision(meta,
@@ -122,15 +116,16 @@ def average_precision(meta,
 
     logger.info('Computing mAP and p-values per label...')
     negs_for = create_neg_query_solver(neg_pairs, neg_dists)
-    ap_scores_list, p_values_list, ix_list = build_rank_lists_multi(
-        pos_pairs, pos_dists, pos_counts, negs_for, null_size, seed)
+    ap_scores_list, null_confs_list, ix_list = build_rank_lists_multi(
+        pos_pairs, pos_dists, pos_counts, negs_for)
 
     logger.info('Creating result DataFrame...')
     results = []
     for i, key in enumerate(pos_keys):
         result = pd.DataFrame({
             'average_precision': ap_scores_list[i],
-            'p_value': p_values_list[i],
+            'n_pos_pairs': null_confs_list[i][:, 0],
+            'n_total_pairs': null_confs_list[i][:, 1],
             'ix': ix_list[i],
         })
         if isinstance(key, tuple):
