@@ -67,11 +67,23 @@ def average_precision(meta,
                                                      pos_dists, neg_dists)
 
     logger.info('Computing average precision...')
-    ap_scores, null_confs = compute.compute_ap_contiguous(rel_k_list, counts)
+    ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
 
     logger.info('Creating result DataFrame...')
+    meta["n_pos_pairs"] = 0
+    meta["n_total_pairs"] = 0
     meta.loc[paired_ix, 'average_precision'] = ap_scores
     meta.loc[paired_ix, "n_pos_pairs"] = null_confs[:, 0]
     meta.loc[paired_ix, "n_total_pairs"] = null_confs[:, 1]
     logger.info('Finished.')
     return meta
+
+
+def p_values(dframe: pd.DataFrame, null_size: int, seed: int):
+    '''Compute p-values'''
+    mask = dframe['n_pos_pairs'] > 0
+    pvals = np.full(len(dframe), np.nan, dtype=np.float32)
+    scores = dframe.loc[mask, 'average_precision'].values
+    null_confs = dframe.loc[mask, ['n_pos_pairs', 'n_total_pairs']].values
+    pvals[mask] = compute.p_values(scores, null_confs, null_size, seed)
+    return pvals

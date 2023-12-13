@@ -12,11 +12,8 @@ logger = logging.getLogger('copairs')
 
 def mean_average_precision(ap_scores: pd.DataFrame, sameby, null_size: int,
                            threshold: float, seed: int) -> pd.DataFrame:
-    ap_scores = ap_scores.dropna(
-        subset=['n_pos_pairs', 'n_total_pairs', 'average_precision'],
-        how='any').reset_index(drop=True).copy()
-    ap_scores['n_pos_pairs'] = ap_scores['n_pos_pairs'].astype(np.int32)
-    ap_scores['n_total_pairs'] = ap_scores['n_total_pairs'].astype(np.int32)
+    ap_scores = ap_scores.query('~average_precision.isna() and n_pos_pairs > 0')
+    ap_scores = ap_scores.reset_index(drop=True).copy()
 
     logger.info('Computing null_dist...')
     null_confs = ap_scores[['n_pos_pairs', 'n_total_pairs']].values
@@ -39,7 +36,7 @@ def mean_average_precision(ap_scores: pd.DataFrame, sameby, null_size: int,
     map_scores.columns = ['mean_average_precision', 'indices']
 
     params = map_scores[['mean_average_precision', 'indices']]
-    map_scores['p_value'] = thread_map(get_p_value, params.values)
+    map_scores['p_value'] = thread_map(get_p_value, params.values, leave=False)
     reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
         map_scores['p_value'], method='fdr_bh')
     map_scores['corrected_p_value'] = pvals_corrected

@@ -56,8 +56,7 @@ def build_rank_lists_multi(pos_pairs, pos_dists, pos_counts, negs_for):
         ix_sort = np.lexsort([1 - dist_all, ix])
         rel_k_list = labels[ix_sort]
         _, counts = np.unique(ix, return_counts=True)
-        ap_scores, null_confs = compute.compute_ap_contiguous(
-            rel_k_list, counts)
+        ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
         ap_scores_list.append(ap_scores)
         null_confs_list.append(null_confs)
         ix_list.append(query)
@@ -106,7 +105,7 @@ def average_precision(meta,
     logger.info('Computing negative similarities...')
     neg_dists = compute.pairwise_cosine(feats, neg_pairs, batch_size)
 
-    logger.info('Computing mAP and p-values per label...')
+    logger.info('Computing AP per label...')
     negs_for = create_neg_query_solver(neg_pairs, neg_dists)
     ap_scores_list, null_confs_list, ix_list = build_rank_lists_multi(
         pos_pairs, pos_dists, pos_counts, negs_for)
@@ -131,5 +130,7 @@ def average_precision(meta,
     meta = meta.drop(multilabel_col, axis=1)
     results = meta.merge(results, right_on='ix', left_index=True).drop('ix',
                                                                        axis=1)
+    results['n_pos_pairs'] = results['n_pos_pairs'].fillna(0).astype(np.int32)
+    results['n_total_pairs'] = results['n_total_pairs'].fillna(0).astype(np.int32)
     logger.info('Finished.')
     return results

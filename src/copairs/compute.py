@@ -21,7 +21,8 @@ def parallel_map(par_func, items):
 
 def batch_processing(pairwise_op: Callable[[np.ndarray, np.ndarray],
                                            np.ndarray], ):
-    '''Decorator adding the batch_size param to run the function with multithreading using a list of paired indices'''
+    '''Decorator adding the batch_size param to run the function with
+    multithreading using a list of paired indices'''
 
     def batched_fn(feats: np.ndarray, pair_ix: np.ndarray, batch_size: int):
         num_pairs = len(pair_ix)
@@ -84,7 +85,7 @@ def random_binary_matrix(n, m, k, rng):
     return matrix
 
 
-def compute_ap(rel_k) -> np.ndarray:
+def average_precision(rel_k) -> np.ndarray:
     '''Compute average precision based on binary list sorted by relevance'''
     tp = np.cumsum(rel_k, axis=1)
     num_pos = tp[:, -1]
@@ -94,7 +95,7 @@ def compute_ap(rel_k) -> np.ndarray:
     return ap
 
 
-def compute_ap_contiguous(rel_k_list, counts):
+def ap_contiguous(rel_k_list, counts):
     '''Compute average precision from a list of contiguous values'''
     cutoffs = to_cutoffs(counts)
 
@@ -115,7 +116,7 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
     '''Compute multiple average_precision scores generated at random'''
     rng = np.random.default_rng(seed)
     rel_k = random_binary_matrix(num_perm, total, num_pos, rng)
-    null_dist = compute_ap(rel_k)
+    null_dist = average_precision(rel_k)
     return null_dist
 
 
@@ -150,15 +151,16 @@ def get_null_dists(confs, null_size, seed):
     return null_dists
 
 
-def compute_p_values(ap_scores, null_confs, null_size: int, seed):
+def p_values(ap_scores, null_confs, null_size: int, seed):
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
     null_dists = get_null_dists(confs, null_size, seed)
-    p_values = np.empty(len(ap_scores), dtype=np.float32)
+    null_dists.sort(axis=1)
+    pvals = np.empty(len(ap_scores), dtype=np.float32)
     for i, (ap_score, ix) in enumerate(zip(ap_scores, rev_ix)):
         # Reverse to get from hi to low
         num = null_size - np.searchsorted(null_dists[ix], ap_score)
-        p_values[i] = (num + 1) / (null_size + 1)
-    return p_values
+        pvals[i] = (num + 1) / (null_size + 1)
+    return pvals
 
 
 def concat_ranges(start: np.ndarray, end: np.ndarray) -> np.ndarray:
