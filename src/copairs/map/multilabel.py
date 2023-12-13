@@ -12,13 +12,6 @@ from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_inp
 logger = logging.getLogger('copairs')
 
 
-def create_matcher(obs: pd.DataFrame, pos_sameby, pos_diffby, neg_sameby,
-                   neg_diffby, multilabel_col):
-    columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
-    obs, columns = evaluate_and_filter(obs, columns)
-    return MatcherMultilabel(obs, columns, multilabel_col, seed=0)
-
-
 def create_neg_query_solver(neg_pairs, neg_dists):
     # Melting and sorting by ix. neg_cutoffs splits the contiguous array
     neg_ix = neg_pairs.ravel()
@@ -77,18 +70,17 @@ def average_precision(meta,
                       pos_diffby,
                       neg_sameby,
                       neg_diffby,
-                      null_size,
                       multilabel_col,
-                      batch_size=20000,
-                      seed=0) -> pd.DataFrame:
+                      batch_size=20000) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     validate_pipeline_input(meta, feats, columns)
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 
     logger.info('Indexing metadata...')
-    matcher = create_matcher(meta, pos_sameby, pos_diffby, neg_sameby,
-                             neg_diffby, multilabel_col)
+    matcher = MatcherMultilabel(*evaluate_and_filter(meta, columns),
+                                multilabel_col=multilabel_col, seed=0)
+
     logger.info('Finding positive pairs...')
     pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
     pos_keys = pos_pairs.keys()

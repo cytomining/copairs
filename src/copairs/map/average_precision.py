@@ -12,18 +12,6 @@ from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_inp
 logger = logging.getLogger('copairs')
 
 
-def create_matcher(
-    obs: pd.DataFrame,
-    pos_sameby,
-    pos_diffby,
-    neg_sameby,
-    neg_diffby,
-):
-    columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
-    obs, columns = evaluate_and_filter(obs, columns)
-    return Matcher(obs, columns, seed=0)
-
-
 def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
     labels = np.concatenate([
         np.ones(pos_pairs.size, dtype=np.int32),
@@ -52,8 +40,7 @@ def average_precision(meta,
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
     logger.info('Indexing metadata...')
-    matcher = create_matcher(meta, pos_sameby, pos_diffby, neg_sameby,
-                             neg_diffby)
+    matcher = Matcher(*evaluate_and_filter(meta, columns), seed=0)
 
     logger.info('Finding positive pairs...')
     pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)

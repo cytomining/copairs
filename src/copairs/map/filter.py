@@ -1,4 +1,5 @@
 import re
+import pandas as pd
 
 
 def validate_pipeline_input(meta, feats, columns):
@@ -22,7 +23,7 @@ def flatten_str_list(*args):
     return columns
 
 
-def evaluate_and_filter(df, columns) -> list:
+def evaluate_and_filter(df, columns) -> tuple[pd.DataFrame, list[str]]:
     '''Evaluate the query and filter the dataframe'''
     parsed_cols = []
     for col in columns:

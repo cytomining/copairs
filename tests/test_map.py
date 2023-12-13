@@ -105,7 +105,6 @@ def test_pipeline_multilabel():
     pos_diffby = []
     neg_sameby = []
     neg_diffby = ['l']
-    null_size = 4000
     rng = np.random.default_rng(SEED)
     meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
                                   rng)
@@ -114,5 +113,4 @@ def test_pipeline_multilabel():
     feats = rng.uniform(size=(length, n_feats))
 
     multilabel_average_precision(meta, feats, pos_sameby, pos_diffby,
-                                 neg_sameby, neg_diffby, null_size,
-                                 multilabel_col)
+                                 neg_sameby, neg_diffby, multilabel_col)
