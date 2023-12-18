@@ -12,13 +12,13 @@ from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_inp
 logger = logging.getLogger('copairs')
 
 
-def create_neg_query_solver(neg_pairs, neg_dists):
+def create_neg_query_solver(neg_pairs, neg_sims):
     # Melting and sorting by ix. neg_cutoffs splits the contiguous array
     neg_ix = neg_pairs.ravel()
-    neg_dists = np.repeat(neg_dists, 2)
+    neg_sims = np.repeat(neg_sims, 2)
 
     sort_ix = np.argsort(neg_ix)
-    neg_dists = neg_dists[sort_ix]
+    neg_sims = neg_sims[sort_ix]
 
     neg_ix, neg_counts = np.unique(neg_ix, return_counts=True)
     neg_cutoffs = compute.to_cutoffs(neg_counts)
@@ -29,31 +29,31 @@ def create_neg_query_solver(neg_pairs, neg_dists):
         start = neg_cutoffs[locs]
         end = start + sizes
         slices = compute.concat_ranges(start, end)
-        batch_dists = neg_dists[slices]
-        return batch_dists, sizes
+        batch_sims = neg_sims[slices]
+        return batch_sims, sizes
 
     return negs_for
 
 
-def build_rank_lists_multi(pos_pairs, pos_dists, pos_counts, negs_for):
+def build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
     ap_scores_list, null_confs_list, ix_list = [], [], []
 
     start = 0
     for end in pos_counts.cumsum():
         mpos_pairs = pos_pairs[start:end]
-        mpos_dists = pos_dists[start:end]
+        mpos_sims = pos_sims[start:end]
         start = end
         query = np.unique(mpos_pairs)
-        neg_dists, neg_counts = negs_for(query)
+        neg_sims, neg_counts = negs_for(query)
         neg_ix = np.repeat(query, neg_counts)
         labels = np.concatenate([
             np.ones(mpos_pairs.size, dtype=np.int32),
-            np.zeros(len(neg_dists), dtype=np.int32)
+            np.zeros(len(neg_sims), dtype=np.int32)
         ])
 
         ix = np.concatenate([mpos_pairs.ravel(), neg_ix])
-        dist_all = np.concatenate([np.repeat(mpos_dists, 2), neg_dists])
-        ix_sort = np.lexsort([1 - dist_all, ix])
+        sim_all = np.concatenate([np.repeat(mpos_sims, 2), neg_sims])
+        ix_sort = np.lexsort([1 - sim_all, ix])
         rel_k_list = labels[ix_sort]
         _, counts = np.unique(ix, return_counts=True)
         ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
@@ -104,15 +104,15 @@ def average_precision(meta,
     neg_pairs = np.unique(neg_pairs, axis=0)
 
     logger.info('Computing positive similarities...')
-    pos_dists = compute.pairwise_cosine(feats, pos_pairs, batch_size)
+    pos_sims = compute.pairwise_cosine(feats, pos_pairs, batch_size)
 
     logger.info('Computing negative similarities...')
-    neg_dists = compute.pairwise_cosine(feats, neg_pairs, batch_size)
+    neg_sims = compute.pairwise_cosine(feats, neg_pairs, batch_size)
 
     logger.info('Computing AP per label...')
-    negs_for = create_neg_query_solver(neg_pairs, neg_dists)
+    negs_for = create_neg_query_solver(neg_pairs, neg_sims)
     ap_scores_list, null_confs_list, ix_list = build_rank_lists_multi(
-        pos_pairs, pos_dists, pos_counts, negs_for)
+        pos_pairs, pos_sims, pos_counts, negs_for)
 
     logger.info('Creating result DataFrame...')
     results = []

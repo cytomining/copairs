@@ -65,8 +65,8 @@ def pairwise_corr(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
 def pairwise_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     x_norm = x_sample / np.linalg.norm(x_sample, axis=1)[:, np.newaxis]
     y_norm = y_sample / np.linalg.norm(y_sample, axis=1)[:, np.newaxis]
-    c_dist = np.sum(x_norm * y_norm, axis=1)
-    return c_dist
+    c_sim = np.sum(x_norm * y_norm, axis=1)
+    return c_sim
 
 
 def random_binary_matrix(n, m, k, rng):

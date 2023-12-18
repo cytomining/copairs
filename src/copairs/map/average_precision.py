@@ -12,16 +12,14 @@ from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_inp
 logger = logging.getLogger('copairs')
 
 
-def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
+def build_rank_lists(pos_pairs, neg_pairs, pos_sims, neg_sims):
     labels = np.concatenate([
         np.ones(pos_pairs.size, dtype=np.int32),
         np.zeros(neg_pairs.size, dtype=np.int32)
     ])
     ix = np.concatenate([pos_pairs.ravel(), neg_pairs.ravel()])
-    dist_all = np.concatenate(
-        [np.repeat(pos_dists, 2),
-         np.repeat(neg_dists, 2)])
-    ix_sort = np.lexsort([1 - dist_all, ix])
+    sim_all = np.concatenate([np.repeat(pos_sims, 2), np.repeat(neg_sims, 2)])
+    ix_sort = np.lexsort([1 - sim_all, ix])
     rel_k_list = labels[ix_sort]
     paired_ix, counts = np.unique(ix, return_counts=True)
     return paired_ix, rel_k_list, counts
@@ -61,14 +59,14 @@ def average_precision(meta,
                             count=neg_total)
 
     logger.info('Computing positive similarities...')
-    pos_dists = compute.pairwise_cosine(feats, pos_pairs, batch_size)
+    pos_sims = compute.pairwise_cosine(feats, pos_pairs, batch_size)
 
     logger.info('Computing negative similarities...')
-    neg_dists = compute.pairwise_cosine(feats, neg_pairs, batch_size)
+    neg_sims = compute.pairwise_cosine(feats, neg_pairs, batch_size)
 
     logger.info('Building rank lists...')
     paired_ix, rel_k_list, counts = build_rank_lists(pos_pairs, neg_pairs,
-                                                     pos_dists, neg_dists)
+                                                     pos_sims, neg_sims)
 
     logger.info('Computing average precision...')
     ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
