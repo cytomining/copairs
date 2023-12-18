@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.matching import MatcherMultilabel
+from copairs.matching import MatcherMultilabel, UnpairedException
 
 from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_input
 
@@ -85,16 +85,20 @@ def average_precision(meta,
     pos_keys = pos_pairs.keys()
     pos_counts = np.fromiter(map(len, pos_pairs.values()), dtype=np.int32)
     pos_total = sum(pos_counts)
+    if pos_total == 0:
+        raise UnpairedException('Unable to find positive pairs.')
     pos_pairs = np.fromiter(itertools.chain.from_iterable(pos_pairs.values()),
                             dtype=np.dtype((np.int32, 2)),
                             count=pos_total)
 
     logger.info('Finding negative pairs...')
     neg_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
-    total_neg = sum(len(p) for p in neg_pairs.values())
+    neg_total = sum(len(p) for p in neg_pairs.values())
+    if neg_total == 0:
+        raise UnpairedException('Unable to find any negative pairs.')
     neg_pairs = np.fromiter(itertools.chain.from_iterable(neg_pairs.values()),
                             dtype=np.dtype((np.int32, 2)),
-                            count=total_neg)
+                            count=neg_total)
 
     logger.info('Dropping dups in negative pairs...')
     neg_pairs = np.unique(neg_pairs, axis=0)

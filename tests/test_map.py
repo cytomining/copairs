@@ -1,10 +1,12 @@
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.metrics import average_precision_score
 
 from copairs import compute
 from copairs.map import average_precision
 from copairs.map.multilabel import average_precision as multilabel_average_precision
+from copairs.matching import UnpairedException
 from tests.helpers import simulate_random_dframe
 
 SEED = 0
@@ -90,6 +92,7 @@ def test_pipeline():
     rng = np.random.default_rng(SEED)
     meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
                                   rng)
+    length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
     average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby,
                       neg_diffby)
@@ -114,3 +117,26 @@ def test_pipeline_multilabel():
 
     multilabel_average_precision(meta, feats, pos_sameby, pos_diffby,
                                  neg_sameby, neg_diffby, multilabel_col)
+
+
+def test_raise_no_pairs():
+    length = 10
+    vocab_size = {'p': 3, 'w': 3, 'l': 10}
+    n_feats = 5
+    pos_sameby = ['l']
+    pos_diffby = ['p']
+    neg_sameby = []
+    neg_diffby = ['l']
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
+                                  rng)
+    meta.drop_duplicates(subset=pos_sameby, inplace=True)
+    length = len(meta)
+    feats = rng.uniform(size=(length, n_feats))
+    with pytest.raises(UnpairedException,
+                       match='Unable to find positive pairs.'):
+        average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby,
+                          neg_diffby)
+    with pytest.raises(UnpairedException,
+                       match='Unable to find negative pairs.'):
+        average_precision(meta, feats, pos_diffby, [], pos_sameby, [])
