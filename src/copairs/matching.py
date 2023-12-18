@@ -6,7 +6,7 @@ import itertools
 import logging
 from math import comb
 import re
-from typing import Dict, Optional, Sequence, Set, Union
+from typing import Dict, Sequence, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -52,11 +52,7 @@ class UnpairedException(Exception):
 class Matcher():
     '''Class to get pair of rows given contraints in the columns'''
 
-    def __init__(self,
-                 dframe: pd.DataFrame,
-                 columns: ColumnList,
-                 seed: int,
-                 max_size: Optional[int] = None):
+    def __init__(self, dframe: pd.DataFrame, columns: ColumnList, seed: int):
         '''
         max_size: max number of rows to consider from the same value.
         '''
@@ -67,15 +63,7 @@ class Matcher():
             self.original_index = None
         dframe.index.name = '__copairs_ix'
 
-        def clip_list(elems: np.ndarray) -> np.ndarray:
-            if max_size and elems.size > max_size:
-                logger.warning(f'Sampling {max_size} out of {elems.size}')
-                elems = rng.choice(elems, max_size)
-            return elems
-
-        mappers = [
-            reverse_index(dframe[col]).apply(clip_list) for col in dframe
-        ]
+        mappers = [reverse_index(dframe[col]) for col in dframe]
 
         # Create a column order based on the number of potential row matches
         # Useful to solve queries with more than one sameby
