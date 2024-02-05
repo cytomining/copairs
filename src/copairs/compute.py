@@ -9,7 +9,7 @@ from tqdm.autonotebook import tqdm
 
 
 def parallel_map(par_func, items):
-    '''Execute par_func(i) for every i in items using ThreadPool and tqdm.'''
+    """Execute par_func(i) for every i in items using ThreadPool and tqdm."""
     num_items = len(items)
     pool_size = min(num_items, os.cpu_count())
     chunksize = num_items // pool_size
@@ -19,19 +19,20 @@ def parallel_map(par_func, items):
             pass
 
 
-def batch_processing(pairwise_op: Callable[[np.ndarray, np.ndarray],
-                                           np.ndarray], ):
-    '''Decorator adding the batch_size param to run the function with
-    multithreading using a list of paired indices'''
+def batch_processing(
+    pairwise_op: Callable[[np.ndarray, np.ndarray], np.ndarray],
+):
+    """Decorator adding the batch_size param to run the function with
+    multithreading using a list of paired indices"""
 
     def batched_fn(feats: np.ndarray, pair_ix: np.ndarray, batch_size: int):
         num_pairs = len(pair_ix)
         result = np.empty(num_pairs, dtype=np.float32)
 
         def par_func(i):
-            x_sample = feats[pair_ix[i:i + batch_size, 0]]
-            y_sample = feats[pair_ix[i:i + batch_size, 1]]
-            result[i:i + len(x_sample)] = pairwise_op(x_sample, y_sample)
+            x_sample = feats[pair_ix[i : i + batch_size, 0]]
+            y_sample = feats[pair_ix[i : i + batch_size, 1]]
+            result[i : i + len(x_sample)] = pairwise_op(x_sample, y_sample)
 
         parallel_map(par_func, np.arange(0, num_pairs, batch_size))
 
@@ -42,10 +43,10 @@ def batch_processing(pairwise_op: Callable[[np.ndarray, np.ndarray],
 
 @batch_processing
 def pairwise_corr(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
-    '''
+    """
     Compute pearson correlation between two matrices in a paired row-wise
     fashion. `x_sample` and `y_sample` must be of the same shape.
-    '''
+    """
     x_mean = x_sample.mean(axis=1, keepdims=True)
     y_mean = y_sample.mean(axis=1, keepdims=True)
 
@@ -86,7 +87,7 @@ def random_binary_matrix(n, m, k, rng):
 
 
 def average_precision(rel_k) -> np.ndarray:
-    '''Compute average precision based on binary list sorted by relevance'''
+    """Compute average precision based on binary list sorted by relevance"""
     tp = np.cumsum(rel_k, axis=1)
     num_pos = tp[:, -1]
     k = np.arange(1, rel_k.shape[1] + 1)
@@ -96,7 +97,7 @@ def average_precision(rel_k) -> np.ndarray:
 
 
 def ap_contiguous(rel_k_list, counts):
-    '''Compute average precision from a list of contiguous values'''
+    """Compute average precision from a list of contiguous values"""
     cutoffs = to_cutoffs(counts)
 
     num_pos = np.add.reduceat(rel_k_list, cutoffs)
@@ -113,7 +114,7 @@ def ap_contiguous(rel_k_list, counts):
 
 
 def random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
-    '''Compute multiple average_precision scores generated at random'''
+    """Compute multiple average_precision scores generated at random"""
     rng = np.random.default_rng(seed)
     rel_k = random_binary_matrix(num_perm, total, num_pos, rng)
     null_dist = average_precision(rel_k)
@@ -122,7 +123,7 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed) -> np.ndarray:
 
 def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
     if seed is not None:
-        cache_file = cache_dir / f'n{total}_k{num_pos}.npy'
+        cache_file = cache_dir / f"n{total}_k{num_pos}.npy"
         if cache_file.is_file():
             null_dist = np.load(cache_file)
         else:
@@ -134,7 +135,7 @@ def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
 
 
 def get_null_dists(confs, null_size, seed):
-    cache_dir = Path.home() / f'.copairs/seed{seed}/ns{null_size}'
+    cache_dir = Path.home() / f".copairs/seed{seed}/ns{null_size}"
     cache_dir.mkdir(parents=True, exist_ok=True)
     num_confs = len(confs)
     rng = np.random.default_rng(seed)
@@ -144,8 +145,7 @@ def get_null_dists(confs, null_size, seed):
 
     def par_func(i):
         num_pos, total = confs[i]
-        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size,
-                                         cache_dir)
+        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
 
     parallel_map(par_func, np.arange(num_confs))
     return null_dists
@@ -164,7 +164,7 @@ def p_values(ap_scores, null_confs, null_size: int, seed):
 
 
 def concat_ranges(start: np.ndarray, end: np.ndarray) -> np.ndarray:
-    '''Create a 1-d array concatenating multiple ranges'''
+    """Create a 1-d array concatenating multiple ranges"""
     slices = map(range, start, end)
     slices = itertools.chain.from_iterable(slices)
     count = (end - start).sum()
@@ -173,7 +173,7 @@ def concat_ranges(start: np.ndarray, end: np.ndarray) -> np.ndarray:
 
 
 def to_cutoffs(counts: np.ndarray):
-    '''Convert a list of counts into cutoff indices.'''
+    """Convert a list of counts into cutoff indices."""
     cutoffs = np.empty_like(counts)
     cutoffs[0], cutoffs[1:] = 0, counts.cumsum()[:-1]
     return cutoffs

@@ -34,17 +34,23 @@ def test_compute_ap():
     y_true = np.zeros((num_perm, total), dtype=int)
     y_true[:, :num_pos] = 1
     y_pred = np.random.uniform(0, 1, [num_perm, total])
-    df = pd.DataFrame({
-        'y_true': y_true.tolist(),
-        'y_pred': y_pred.tolist(),
-    })
-    rel_k = df['y_pred'].apply(lambda x: np.argsort(x)[::-1]).apply(
-        lambda x: np.array(df.y_true[0])[x])
+    df = pd.DataFrame(
+        {
+            "y_true": y_true.tolist(),
+            "y_pred": y_pred.tolist(),
+        }
+    )
+    rel_k = (
+        df["y_pred"]
+        .apply(lambda x: np.argsort(x)[::-1])
+        .apply(lambda x: np.array(df.y_true[0])[x])
+    )
     rel_k = np.stack(rel_k)
     ap = compute.average_precision(rel_k)
 
     ap_sklearn = df.apply(
-        lambda x: average_precision_score(x['y_true'], x['y_pred']), axis=1)
+        lambda x: average_precision_score(x["y_true"], x["y_pred"]), axis=1
+    )
 
     assert np.allclose(ap_sklearn, ap)
 
@@ -83,60 +89,54 @@ def test_compute_ap_contiguous():
 
 def test_pipeline():
     length = 10
-    vocab_size = {'p': 5, 'w': 3, 'l': 4}
+    vocab_size = {"p": 5, "w": 3, "l": 4}
     n_feats = 5
-    pos_sameby = ['l']
-    pos_diffby = ['p']
+    pos_sameby = ["l"]
+    pos_diffby = ["p"]
     neg_sameby = []
-    neg_diffby = ['l']
+    neg_diffby = ["l"]
     rng = np.random.default_rng(SEED)
-    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
-                                  rng)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
-    average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby,
-                      neg_diffby)
+    average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
 
 
 def test_pipeline_multilabel():
-    '''Check the multilabel implementation with for mAP calculation'''
+    """Check the multilabel implementation with for mAP calculation"""
     length = 10
-    vocab_size = {'p': 3, 'w': 5, 'l': 4}
+    vocab_size = {"p": 3, "w": 5, "l": 4}
     n_feats = 8
-    multilabel_col = 'l'
-    pos_sameby = ['l']
+    multilabel_col = "l"
+    pos_sameby = ["l"]
     pos_diffby = []
     neg_sameby = []
-    neg_diffby = ['l']
+    neg_diffby = ["l"]
     rng = np.random.default_rng(SEED)
-    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
-                                  rng)
-    meta = meta.groupby(['p', 'w'])['l'].unique().reset_index()
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
+    meta = meta.groupby(["p", "w"])["l"].unique().reset_index()
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
 
-    multilabel_average_precision(meta, feats, pos_sameby, pos_diffby,
-                                 neg_sameby, neg_diffby, multilabel_col)
+    multilabel_average_precision(
+        meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, multilabel_col
+    )
 
 
 def test_raise_no_pairs():
     length = 10
-    vocab_size = {'p': 3, 'w': 3, 'l': 10}
+    vocab_size = {"p": 3, "w": 3, "l": 10}
     n_feats = 5
-    pos_sameby = ['l']
-    pos_diffby = ['p']
+    pos_sameby = ["l"]
+    pos_diffby = ["p"]
     neg_sameby = []
-    neg_diffby = ['l']
+    neg_diffby = ["l"]
     rng = np.random.default_rng(SEED)
-    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby,
-                                  rng)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
     meta.drop_duplicates(subset=pos_sameby, inplace=True)
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
-    with pytest.raises(UnpairedException,
-                       match='Unable to find positive pairs.'):
-        average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby,
-                          neg_diffby)
-    with pytest.raises(UnpairedException,
-                       match='Unable to find negative pairs.'):
+    with pytest.raises(UnpairedException, match="Unable to find positive pairs."):
+        average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    with pytest.raises(UnpairedException, match="Unable to find negative pairs."):
         average_precision(meta, feats, pos_diffby, [], pos_sameby, [])
