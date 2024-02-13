@@ -64,6 +64,12 @@ def pairwise_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     return c_dist
 
 
+@batch_processing
+def pairwise_euclidean(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
+    e_dist = np.sqrt(np.sum((x_sample - y_sample) ** 2, axis=1))
+    return 1 - e_dist
+
+
 def random_binary_matrix(n, m, k, rng):
     """Generate a random binary matrix of n*m with exactly k values in 1 per row.
     Args:
