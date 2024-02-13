@@ -151,7 +151,27 @@ def get_null_dists(confs, null_size, seed):
     return null_dists
 
 
-def p_values(ap_scores, null_confs, null_size: int, seed):
+def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed: int):
+    """Calculate p values for an array of ap_scores and null configurations. It uses the path
+    folder to cache null calculations.
+
+    Parameters
+    ----------
+    ap_scores : np.ndarray
+        Ap scores for which to calculate p value.
+    null_confs : np.ndarray
+        Number of average precisions calculated. It serves as an indicator of
+        how relevant is the resultant score.
+    null_size : int
+    seed : int
+        Random initializing value.
+
+    Examples
+    --------
+    FIXME: Add docs.
+
+
+    """
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
     null_dists = get_null_dists(confs, null_size, seed)
     null_dists.sort(axis=1)
