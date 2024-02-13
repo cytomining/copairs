@@ -135,7 +135,7 @@ def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
 
 
 def get_null_dists(confs, null_size, seed):
-    cache_dir = Path.home() / f".copairs/seed{seed}/ns{null_size}"
+    cache_dir = Path.home() / ".copairs" / f"seed{seed}" / f"ns{null_size}"
     cache_dir.mkdir(parents=True, exist_ok=True)
     num_confs = len(confs)
     rng = np.random.default_rng(seed)
