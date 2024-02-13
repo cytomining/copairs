@@ -101,7 +101,7 @@ def aggregate(result: pd.DataFrame, sameby, threshold: float) -> pd.DataFrame:
     return agg_rs
 
 
-def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
+def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists, return_unique=False):
     labels = np.concatenate([
         np.ones(pos_pairs.size, dtype=np.int32),
         np.zeros(neg_pairs.size, dtype=np.int32)
@@ -112,7 +112,9 @@ def build_rank_lists(pos_pairs, neg_pairs, pos_dists, neg_dists):
          np.repeat(neg_dists, 2)])
     ix_sort = np.lexsort([1 - dist_all, ix])
     rel_k_list = labels[ix_sort]
-    _, counts = np.unique(ix, return_counts=True)
+    unique_ids, counts = np.unique(ix, return_counts=True)
+    if return_unique:
+        return rel_k_list, counts, unique_ids
     return rel_k_list, counts
 
 
