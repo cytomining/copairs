@@ -1,5 +1,5 @@
-import os
 import itertools
+import os
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from typing import Callable
