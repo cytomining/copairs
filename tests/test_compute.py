@@ -8,14 +8,14 @@ rng = np.random.default_rng(SEED)
 
 
 def corrcoef_naive(feats, pairs):
-    corr = np.empty((len(pairs), ))
+    corr = np.empty((len(pairs),))
     for pos, (i, j) in enumerate(pairs):
         corr[pos] = np.corrcoef(feats[i], feats[j])[0, 1]
     return corr
 
 
 def cosine_naive(feats, pairs):
-    cosine = np.empty((len(pairs), ))
+    cosine = np.empty((len(pairs),))
     for pos, (i, j) in enumerate(pairs):
         a, b = feats[i], feats[j]
         norm_a = np.linalg.norm(a)

@@ -19,5 +19,6 @@ def test_concat_ranges():
         num = rng.integers(*num_range)
         start = rng.integers(*start_range, size=num)
         end = start + rng.integers(*size_range, size=num)
-        assert np.array_equal(concat_ranges(start, end),
-                              naive_concat_ranges(start, end))
+        assert np.array_equal(
+            concat_ranges(start, end), naive_concat_ranges(start, end)
+        )
