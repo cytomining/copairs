@@ -26,9 +26,8 @@ def build_rank_lists(pos_pairs, neg_pairs, pos_sims, neg_sims):
     paired_ix, counts = np.unique(ix, return_counts=True)
     return paired_ix, rel_k_list, counts
 
-
 def average_precision(
-    meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, batch_size=20000
+    meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, batch_size=20000, sample_neg: bool = False, sample_factor: float = 10
 ) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     validate_pipeline_input(meta, feats, columns)
@@ -59,6 +58,13 @@ def average_precision(
         dtype=np.dtype((np.int32, 2)),
         count=neg_total,
     )
+
+    # if sample_neg not equal to 1, randomly sample negative pairs
+    if sample_neg:
+        sample_size = pos_pairs.shape[0]*sample_factor
+        if sample_size < neg_pairs.shape[0]:
+            sampled_rows = np.random.choice(neg_pairs.shape[0], size=sample_size, replace=False)
+            neg_pairs = neg_pairs[sampled_rows]
 
     logger.info("Computing positive similarities...")
     pos_sims = compute.pairwise_cosine(feats, pos_pairs, batch_size)
