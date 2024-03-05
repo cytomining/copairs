@@ -1,7 +1,7 @@
-import numpy as np
 import pandas as pd
 import pytest
 from sklearn.metrics import average_precision_score
+import numpy as np
 
 from copairs import compute
 from copairs.map import average_precision
@@ -140,3 +140,28 @@ def test_raise_no_pairs():
         average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     with pytest.raises(UnpairedException, match="Unable to find negative pairs."):
         average_precision(meta, feats, pos_diffby, [], pos_sameby, [])
+        
+        
+def test_raise_nan_error():
+    length = 10
+    vocab_size = {"p": 5, "w": 3, "l": 4}
+    n_feats = 8
+    pos_sameby = ["l"]
+    pos_diffby = ["p"]
+    neg_sameby = []
+    neg_diffby = ["l"]
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
+    length = len(meta)
+    feats = rng.uniform(size=(length, n_feats))
+    
+    # add null values
+    feats_nan = feats.copy()
+    feats_nan[2,2] = None
+    meta_nan = meta.copy()
+    meta_nan.loc[1,"p"] = None
+    
+    with pytest.raises(ValueError, match="features should not have null values."):
+        average_precision(meta, feats_nan, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    with pytest.raises(ValueError, match="metadata columns should not have null values."):
+        average_precision(meta_nan, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
