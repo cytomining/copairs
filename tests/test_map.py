@@ -161,7 +161,7 @@ def test_raise_nan_error():
     meta_nan = meta.copy()
     meta_nan.loc[1,"p"] = None
     
-    with pytest.raises(UnpairedException, match="features should not have null values."):
+    with pytest.raises(ValueError, match="features should not have null values."):
         average_precision(meta, feats_nan, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
-    with pytest.raises(UnpairedException, match="metadata columns should not have null values."):
+    with pytest.raises(ValueError, match="metadata columns should not have null values."):
         average_precision(meta_nan, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
