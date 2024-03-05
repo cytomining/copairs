@@ -1,5 +1,5 @@
-import os
 import itertools
+import os
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from typing import Callable
@@ -135,7 +135,7 @@ def null_dist_cached(num_pos, total, seed, null_size, cache_dir):
 
 
 def get_null_dists(confs, null_size, seed):
-    cache_dir = Path.home() / f".copairs/seed{seed}/ns{null_size}"
+    cache_dir = Path.home() / ".copairs" / f"seed{seed}" / f"ns{null_size}"
     cache_dir.mkdir(parents=True, exist_ok=True)
     num_confs = len(confs)
     rng = np.random.default_rng(seed)
@@ -151,7 +151,27 @@ def get_null_dists(confs, null_size, seed):
     return null_dists
 
 
-def p_values(ap_scores, null_confs, null_size: int, seed):
+def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed: int):
+    """Calculate p values for an array of ap_scores and null configurations. It uses the path
+    folder to cache null calculations.
+
+    Parameters
+    ----------
+    ap_scores : np.ndarray
+        Ap scores for which to calculate p value.
+    null_confs : np.ndarray
+        Number of average precisions calculated. It serves as an indicator of
+        how relevant is the resultant score.
+    null_size : int
+    seed : int
+        Random initializing value.
+
+    Examples
+    --------
+    FIXME: Add docs.
+
+
+    """
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
     null_dists = get_null_dists(confs, null_size, seed)
     null_dists.sort(axis=1)
