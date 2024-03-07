@@ -5,7 +5,7 @@ Find pairs and compute metrics between them.
 ## Installation
 
 ```bash
-pip install git+https://github.com/cytomining/copairs.git@v0.4.0
+pip install git+https://github.com/cytomining/copairs.git@v0.4.1
 ```
 
 ## Usage
