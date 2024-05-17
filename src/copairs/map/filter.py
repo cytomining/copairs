@@ -3,6 +3,7 @@ import re
 from typing import List, Tuple
 
 import pandas as pd
+import numpy as np
 
 
 def validate_pipeline_input(meta, feats, columns):
@@ -10,6 +11,8 @@ def validate_pipeline_input(meta, feats, columns):
         raise ValueError("metadata columns should not have null values.")
     if len(meta) != len(feats):
         raise ValueError("meta and feats have different number of rows")
+    if np.isnan(feats).any():
+        raise ValueError("features should not have null values.")
 
 
 def flatten_str_list(*args):
