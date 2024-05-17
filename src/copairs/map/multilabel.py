@@ -76,13 +76,14 @@ def average_precision(
     batch_size=20000,
 ) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 
     logger.info("Indexing metadata...")
     matcher = MatcherMultilabel(
-        *evaluate_and_filter(meta, columns), multilabel_col=multilabel_col, seed=0
+        meta, columns, multilabel_col=multilabel_col, seed=0
     )
 
     logger.info("Finding positive pairs...")

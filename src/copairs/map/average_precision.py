@@ -31,12 +31,13 @@ def average_precision(
     meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, batch_size=20000
 ) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
 
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
     logger.info("Indexing metadata...")
-    matcher = Matcher(*evaluate_and_filter(meta, columns), seed=0)
+    matcher = Matcher(meta, columns, seed=0)
 
     logger.info("Finding positive pairs...")
     pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
