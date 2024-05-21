@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 plot = ["plotly"]
+demo = ["notebook", "matplotlib"]
 
 [project.urls]
 "Homepage" = "https://github.com/cytomining/copairs"
