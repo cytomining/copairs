@@ -4,14 +4,15 @@ from typing import List, Literal
 import numpy as np
 import pandas as pd
 
-from copairs.compute import pairwise_corr
+from copairs.compute import get_distance_fn
 from .matching import Matcher
 
 
 def corr_from_null_pairs(X: np.ndarray, null_pairs, n_replicates):
     """Correlation from a given list of unnamed pairs."""
     null_pairs = np.asarray(null_pairs, int)
-    corrs = pairwise_corr(X, null_pairs, batch_size=20000)
+    corr_fn = get_distance_fn("correlation")
+    corrs = corr_fn(X, null_pairs, batch_size=20000)
     corrs = corrs.reshape(-1, n_replicates)
     null_dist = np.nanmedian(corrs, axis=1)
     return pd.Series(null_dist)
@@ -56,7 +57,8 @@ def corr_from_pairs(X: np.ndarray, pairs: dict, sameby: List[str]):
     list-like of correlation values and median of number of replicates
     """
     pair_ix = np.vstack(list(pairs.values()))
-    corrs = pairwise_corr(X, pair_ix, batch_size=20000)
+    corr_fn = get_distance_fn("correlation")
+    corrs = corr_fn(X, pair_ix, batch_size=20000)
     counts = [len(v) for v in pairs.values()]
 
     if len(sameby) == 1:

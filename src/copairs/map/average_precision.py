@@ -28,11 +28,12 @@ def build_rank_lists(pos_pairs, neg_pairs, pos_sims, neg_sims):
 
 
 def average_precision(
-    meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, batch_size=20000
+    meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, batch_size=20000, distance="cosine"
 ) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
+    distance_fn = compute.get_distance_fn(distance)
 
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
@@ -62,10 +63,10 @@ def average_precision(
     )
 
     logger.info("Computing positive similarities...")
-    pos_sims = compute.pairwise_cosine(feats, pos_pairs, batch_size)
+    pos_sims = distance_fn(feats, pos_pairs, batch_size)
 
     logger.info("Computing negative similarities...")
-    neg_sims = compute.pairwise_cosine(feats, neg_pairs, batch_size)
+    neg_sims = distance_fn(feats, neg_pairs, batch_size)
 
     logger.info("Building rank lists...")
     paired_ix, rel_k_list, counts = build_rank_lists(
