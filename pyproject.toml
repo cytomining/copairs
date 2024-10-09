@@ -3,11 +3,12 @@ name = "copairs"
 version = "0.4.2"
 description = "Find pairs and compute metrics between them"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {file = "LICENSE.txt"}
 keywords = ["pairwise", "replication"]
 authors = [
-  {name = "John Arevalo", email = "johnarevalo@gmail.com" }
+  { name = "John Arevalo", email = "johnarevalo@gmail.com" },
+  { name = "Alexandr Kalinin", email = "akalinin@broadinstitute.org" }
 ]
 dependencies = [
   "pandas",
