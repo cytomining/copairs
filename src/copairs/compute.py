@@ -77,12 +77,24 @@ def pairwise_euclidean(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
     return 1 / (1 + e_dist)
 
 
+def pairwise_manhattan(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
+    m_dist = np.sum(np.abs(x_sample - y_sample), axis=1)
+    return 1 / (1 + m_dist)
+
+
+def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
+    c_dist = np.max(np.abs(x_sample - y_sample), axis=1)
+    return 1 / (1 + c_dist)
+
+
 def get_distance_fn(distance):
     distance_metrics = {
         "abs_cosine": pairwise_abs_cosine,
         "cosine": pairwise_cosine,
         "correlation": pairwise_corr,
         "euclidean": pairwise_euclidean,
+        "manhattan": pairwise_manhattan,
+        "chebyshev": pairwise_chebyshev,
     }
 
     if isinstance(distance, str):
