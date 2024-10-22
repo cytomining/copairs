@@ -1,11 +1,12 @@
 """
 Sample pairs with given column restrictions
 """
-from collections import namedtuple
+
 import itertools
 import logging
-from math import comb
 import re
+from collections import namedtuple
+from math import comb
 from typing import Dict, Sequence, Set, Union
 
 import numpy as np
@@ -442,5 +443,8 @@ class MatcherMultilabel:
         pairs = itertools.chain.from_iterable(pairs.values())
         pairs = set(map(frozenset, pairs))
         all_pairs = itertools.combinations(range(self.size), 2)
-        filter_fn = lambda x: set(x) not in pairs
+
+        def filter_fn(x):
+            return set(x) not in pairs
+
         return {None: list(filter(filter_fn, all_pairs))}

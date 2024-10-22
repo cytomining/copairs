@@ -74,16 +74,17 @@ def average_precision(
     neg_diffby,
     multilabel_col,
     batch_size=20000,
+    distance="cosine",
 ) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
+    distance_fn = compute.get_distance_fn(distance)
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 
     logger.info("Indexing metadata...")
-    matcher = MatcherMultilabel(
-        *evaluate_and_filter(meta, columns), multilabel_col=multilabel_col, seed=0
-    )
+    matcher = MatcherMultilabel(meta, columns, multilabel_col=multilabel_col, seed=0)
 
     logger.info("Finding positive pairs...")
     pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
@@ -113,10 +114,10 @@ def average_precision(
     neg_pairs = np.unique(neg_pairs, axis=0)
 
     logger.info("Computing positive similarities...")
-    pos_sims = compute.pairwise_cosine(feats, pos_pairs, batch_size)
+    pos_sims = distance_fn(feats, pos_pairs, batch_size)
 
     logger.info("Computing negative similarities...")
-    neg_sims = compute.pairwise_cosine(feats, neg_pairs, batch_size)
+    neg_sims = distance_fn(feats, neg_pairs, batch_size)
 
     logger.info("Computing AP per label...")
     negs_for = create_neg_query_solver(neg_pairs, neg_sims)

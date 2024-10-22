@@ -41,7 +41,6 @@ def batch_processing(
     return batched_fn
 
 
-@batch_processing
 def pairwise_corr(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     """
     Compute pearson correlation between two matrices in a paired row-wise
@@ -62,12 +61,54 @@ def pairwise_corr(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     return corrs
 
 
-@batch_processing
 def pairwise_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     x_norm = x_sample / np.linalg.norm(x_sample, axis=1)[:, np.newaxis]
     y_norm = y_sample / np.linalg.norm(y_sample, axis=1)[:, np.newaxis]
     c_sim = np.sum(x_norm * y_norm, axis=1)
     return c_sim
+
+
+def pairwise_abs_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
+    return np.abs(pairwise_cosine(x_sample, y_sample))
+
+
+def pairwise_euclidean(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
+    e_dist = np.sqrt(np.sum((x_sample - y_sample) ** 2, axis=1))
+    return 1 / (1 + e_dist)
+
+
+def pairwise_manhattan(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
+    m_dist = np.sum(np.abs(x_sample - y_sample), axis=1)
+    return 1 / (1 + m_dist)
+
+
+def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
+    c_dist = np.max(np.abs(x_sample - y_sample), axis=1)
+    return 1 / (1 + c_dist)
+
+
+def get_distance_fn(distance):
+    distance_metrics = {
+        "abs_cosine": pairwise_abs_cosine,
+        "cosine": pairwise_cosine,
+        "correlation": pairwise_corr,
+        "euclidean": pairwise_euclidean,
+        "manhattan": pairwise_manhattan,
+        "chebyshev": pairwise_chebyshev,
+    }
+
+    if isinstance(distance, str):
+        if distance not in distance_metrics:
+            raise ValueError(
+                f"Unsupported distance metric: {distance}. Supported metrics are: {list(distance_metrics.keys())}"
+            )
+        distance_fn = distance_metrics[distance]
+    elif callable(distance):
+        distance_fn = distance
+    else:
+        raise ValueError("Distance must be either a string or a callable object.")
+
+    return batch_processing(distance_fn)
 
 
 def random_binary_matrix(n, m, k, rng):

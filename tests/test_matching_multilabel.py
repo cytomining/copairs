@@ -1,4 +1,5 @@
 import pandas as pd
+
 from copairs.matching import MatcherMultilabel
 from tests.helpers import simulate_random_plates
 

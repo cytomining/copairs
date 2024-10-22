@@ -2,8 +2,8 @@ import itertools
 import re
 from typing import List, Tuple
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def validate_pipeline_input(meta, feats, columns):
@@ -30,22 +30,49 @@ def flatten_str_list(*args):
 
 
 def evaluate_and_filter(df, columns) -> Tuple[pd.DataFrame, List[str]]:
-    """Evaluate the query and filter the dataframe"""
+    """Evaluate queries and filter the dataframe"""
+    query_list, columns = extract_filters(columns, df.columns)
+    df = apply_filters(df, query_list)
+    return df, columns
+
+
+def extract_filters(columns, df_columns) -> Tuple[List[str], List[str]]:
+    """Extract and validate filters from columns"""
     parsed_cols = []
+    queries_to_eval = []
+
     for col in columns:
-        if col in df.columns:
+        if col in df_columns:
             parsed_cols.append(col)
             continue
-
         column_names = re.findall(r"(\w+)\s*[=<>!]+", col)
-        valid_column_names = [col for col in column_names if col in df.columns]
+
+        valid_column_names = [col for col in column_names if col in df_columns]
         if not valid_column_names:
             raise ValueError(f"Invalid query or column name: {col}")
 
-        try:
-            df = df.query(col)
-            parsed_cols.extend(valid_column_names)
-        except:
-            raise ValueError(f"Invalid query expression: {col}")
+        queries_to_eval.append(col)
+        parsed_cols.extend(valid_column_names)
 
-    return df, parsed_cols
+        if len(parsed_cols) != len(set(parsed_cols)):
+            raise ValueError(f"Duplicate queries for column: {col}")
+
+    return queries_to_eval, parsed_cols
+
+
+def apply_filters(df, query_list):
+    """Combine and apply filters to dataframe"""
+    if not query_list:
+        return df
+
+    combined_query = " & ".join(f"({query})" for query in query_list)
+    try:
+        df_filtered = df.query(combined_query)
+        if df_filtered.empty:
+            raise ValueError(f"No data matched the query: {combined_query}")
+    except Exception as e:
+        raise ValueError(
+            f"Invalid combined query expression: {combined_query}. Error: {e}"
+        )
+
+    return df_filtered

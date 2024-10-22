@@ -1,8 +1,8 @@
 from itertools import product
 from typing import Dict
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from copairs.matching import ColumnList
 
