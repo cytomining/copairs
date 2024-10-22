@@ -1,4 +1,5 @@
 """Test functions for Matcher"""
+
 from string import ascii_letters
 
 import numpy as np

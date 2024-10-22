@@ -1,6 +1,5 @@
-import pytest
-import pandas as pd
 import numpy as np
+import pytest
 
 from copairs.map.filter import evaluate_and_filter
 from tests.helpers import simulate_random_dframe
@@ -23,8 +22,8 @@ def mock_dataframe():
 def test_correct(mock_dataframe):
     df, parsed_cols = evaluate_and_filter(mock_dataframe, ["p == 'p1'", "w > 'w2'"])
     assert not df.empty
-    assert 'p' in parsed_cols and 'w' in parsed_cols
-    assert all(df['w'].str.extract(r'(\d+)')[0].astype(int) > 2)
+    assert "p" in parsed_cols and "w" in parsed_cols
+    assert all(df["w"].str.extract(r"(\d+)")[0].astype(int) > 2)
 
 
 def test_invalid_query(mock_dataframe):
@@ -44,6 +43,3 @@ def test_empty_result_from_valid_query(mock_dataframe):
     with pytest.raises(ValueError) as excinfo:
         evaluate_and_filter(mock_dataframe, ['p == "p4"'])
     assert "No data matched the query" in str(excinfo.value)
-
-
-

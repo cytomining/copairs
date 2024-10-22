@@ -99,13 +99,15 @@ def get_distance_fn(distance):
 
     if isinstance(distance, str):
         if distance not in distance_metrics:
-            raise ValueError(f"Unsupported distance metric: {distance}. Supported metrics are: {list(distance_metrics.keys())}")
+            raise ValueError(
+                f"Unsupported distance metric: {distance}. Supported metrics are: {list(distance_metrics.keys())}"
+            )
         distance_fn = distance_metrics[distance]
     elif callable(distance):
         distance_fn = distance
     else:
         raise ValueError("Distance must be either a string or a callable object.")
-    
+
     return batch_processing(distance_fn)
 
 

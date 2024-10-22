@@ -3,10 +3,9 @@ from numpy.random import default_rng
 from copairs import Matcher
 from copairs.replicating import (
     corr_between_replicates,
-    correlation_test,
     corr_from_pairs,
+    correlation_test,
 )
-
 from tests.helpers import create_dframe
 
 SEED = 0

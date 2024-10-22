@@ -84,9 +84,7 @@ def average_precision(
     meta = meta.reset_index(drop=True).copy()
 
     logger.info("Indexing metadata...")
-    matcher = MatcherMultilabel(
-        meta, columns, multilabel_col=multilabel_col, seed=0
-    )
+    matcher = MatcherMultilabel(meta, columns, multilabel_col=multilabel_col, seed=0)
 
     logger.info("Finding positive pairs...")
     pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)

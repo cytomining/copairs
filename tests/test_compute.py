@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 
 from copairs import compute
@@ -90,4 +89,3 @@ def test_abs_cosine():
     abs_cosine_fn = compute.get_distance_fn("abs_cosine")
     abs_cosine = abs_cosine_fn(feats, pairs, batch_size)
     assert np.allclose(abs_cosine_gt, abs_cosine)
-

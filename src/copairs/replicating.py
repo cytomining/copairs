@@ -1,10 +1,12 @@
 """Class for getting Percent replicating metric"""
+
 from typing import List, Literal
 
 import numpy as np
 import pandas as pd
 
 from copairs.compute import get_distance_fn
+
 from .matching import Matcher
 
 

@@ -28,7 +28,14 @@ def build_rank_lists(pos_pairs, neg_pairs, pos_sims, neg_sims):
 
 
 def average_precision(
-    meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, batch_size=20000, distance="cosine"
+    meta,
+    feats,
+    pos_sameby,
+    pos_diffby,
+    neg_sameby,
+    neg_diffby,
+    batch_size=20000,
+    distance="cosine",
 ) -> pd.DataFrame:
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)

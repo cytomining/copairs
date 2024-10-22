@@ -1,9 +1,9 @@
-from typing import Tuple, List
 import itertools
 import re
+from typing import List, Tuple
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def validate_pipeline_input(meta, feats, columns):
@@ -45,12 +45,12 @@ def extract_filters(columns, df_columns) -> Tuple[List[str], List[str]]:
         if col in df_columns:
             parsed_cols.append(col)
             continue
-        column_names = re.findall(r'(\w+)\s*[=<>!]+', col)
+        column_names = re.findall(r"(\w+)\s*[=<>!]+", col)
 
         valid_column_names = [col for col in column_names if col in df_columns]
         if not valid_column_names:
             raise ValueError(f"Invalid query or column name: {col}")
-        
+
         queries_to_eval.append(col)
         parsed_cols.extend(valid_column_names)
 
@@ -71,6 +71,8 @@ def apply_filters(df, query_list):
         if df_filtered.empty:
             raise ValueError(f"No data matched the query: {combined_query}")
     except Exception as e:
-        raise ValueError(f"Invalid combined query expression: {combined_query}. Error: {e}")
+        raise ValueError(
+            f"Invalid combined query expression: {combined_query}. Error: {e}"
+        )
 
     return df_filtered
