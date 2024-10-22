@@ -1,3 +1,4 @@
+from typing import Tuple, List
 import itertools
 import re
 
@@ -28,14 +29,14 @@ def flatten_str_list(*args):
     return columns
 
 
-def evaluate_and_filter(df, columns) -> tuple[pd.DataFrame, list[str]]:
+def evaluate_and_filter(df, columns) -> Tuple[pd.DataFrame, List[str]]:
     """Evaluate queries and filter the dataframe"""
     query_list, columns = extract_filters(columns, df.columns)
     df = apply_filters(df, query_list)
     return df, columns
 
 
-def extract_filters(columns, df_columns) -> tuple[list[str], list[str]]:
+def extract_filters(columns, df_columns) -> Tuple[List[str], List[str]]:
     """Extract and validate filters from columns"""
     parsed_cols = []
     queries_to_eval = []
