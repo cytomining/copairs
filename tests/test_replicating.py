@@ -1,4 +1,5 @@
 """Tests for the replicating module."""
+
 from numpy.random import default_rng
 
 from copairs import Matcher

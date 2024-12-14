@@ -1,4 +1,5 @@
 """Tests for the multilabel matching implementation."""
+
 import pandas as pd
 
 from copairs.matching import MatcherMultilabel

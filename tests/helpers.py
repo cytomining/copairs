@@ -1,4 +1,5 @@
 """Helper functions for testing."""
+
 from itertools import product
 from typing import Dict
 

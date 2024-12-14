@@ -1,4 +1,5 @@
 """Test matching with `any` conditions using simulated data."""
+
 from string import ascii_letters
 
 import numpy as np

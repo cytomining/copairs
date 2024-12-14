@@ -1,4 +1,5 @@
 """Test pairwise distance calculation functions."""
+
 import numpy as np
 
 from copairs import compute

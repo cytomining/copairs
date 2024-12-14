@@ -1,4 +1,5 @@
 """Tests data filtering by query."""
+
 import numpy as np
 import pytest
 

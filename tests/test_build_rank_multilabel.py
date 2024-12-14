@@ -1,4 +1,5 @@
 """Test the concatenation of ranges."""
+
 import numpy as np
 
 from copairs.compute import concat_ranges
