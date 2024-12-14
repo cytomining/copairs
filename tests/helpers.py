@@ -1,3 +1,4 @@
+"""Helper functions for testing."""
 from itertools import product
 from typing import Dict
 
@@ -10,7 +11,7 @@ SEED = 0
 
 
 def simulate_plates(n_compounds, n_replicates, plate_size):
-    """Round robin creation of platemaps"""
+    """Round robin creation of platemaps."""
     total = n_compounds * n_replicates
 
     compounds = []
@@ -35,6 +36,7 @@ def simulate_random_plates(
     sameby=ColumnList,
     diffby=ColumnList,
 ):
+    """Simulate random platemaps."""
     rng = np.random.default_rng(SEED)
     dframe = simulate_plates(n_compounds, n_replicates, plate_size)
     # Shuffle values
@@ -52,6 +54,7 @@ def simulate_random_dframe(
     diffby: ColumnList,
     rng: np.random.Generator,
 ):
+    """Simulate random dataframe."""
     dframe = pd.DataFrame(columns=list(vocab_size.keys()), index=range(length))
     for col, size in vocab_size.items():
         dframe[col] = rng.integers(1, size + 1, size=length)
@@ -64,9 +67,7 @@ def simulate_random_dframe(
 
 
 def create_dframe(n_options, n_rows):
-    """
-    Random permutation of a fix number of elements per column
-    """
+    """Create a dataframe with predefined number of plates, wells, and compounds."""
     if isinstance(n_options, int):
         n_options = [n_options] * 3
     colc = list(f"c{i}" for i in range(n_options[0]))

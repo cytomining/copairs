@@ -1,9 +1,11 @@
+"""Test the concatenation of ranges."""
 import numpy as np
 
 from copairs.compute import concat_ranges
 
 
 def naive_concat_ranges(start: np.ndarray, end: np.ndarray):
+    """Concatenate ranges into a mask."""
     mask = []
     for s, e in zip(start, end):
         mask.extend(range(s, e))
@@ -11,6 +13,7 @@ def naive_concat_ranges(start: np.ndarray, end: np.ndarray):
 
 
 def test_concat_ranges():
+    """Test the concatenation of ranges."""
     rng = np.random.default_rng()
     num_range = 5, 10
     start_range = 2, 10

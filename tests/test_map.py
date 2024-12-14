@@ -1,3 +1,4 @@
+"""Tests for (mean) Average Precision calculation."""
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,6 +14,7 @@ SEED = 0
 
 
 def test_random_binary_matrix():
+    """Test the random binary matrix generation."""
     rng = np.random.default_rng(SEED)
     # Test with n=3, m=4, k=2
     A = compute.random_binary_matrix(3, 4, 2, rng)
@@ -28,6 +30,7 @@ def test_random_binary_matrix():
 
 
 def test_compute_ap():
+    """Test the average precision computation."""
     num_pos, num_neg, num_perm = 5, 6, 100
     total = num_pos + num_neg
 
@@ -56,6 +59,7 @@ def test_compute_ap():
 
 
 def test_compute_ap_contiguous():
+    """Test the contiguous average precision computation."""
     num_pos_range = [2, 9]
     num_neg_range = [10, 20]
     num_samples_range = [5, 30]
@@ -88,6 +92,7 @@ def test_compute_ap_contiguous():
 
 
 def test_pipeline():
+    """Check the implementation with for mAP calculation."""
     length = 10
     vocab_size = {"p": 5, "w": 3, "l": 4}
     n_feats = 5
@@ -103,7 +108,7 @@ def test_pipeline():
 
 
 def test_pipeline_multilabel():
-    """Check the multilabel implementation with for mAP calculation"""
+    """Check the multilabel implementation with for mAP calculation."""
     length = 10
     vocab_size = {"p": 3, "w": 5, "l": 4}
     n_feats = 8
@@ -124,6 +129,7 @@ def test_pipeline_multilabel():
 
 
 def test_raise_no_pairs():
+    """Test the exception raised when no pairs are found."""
     length = 10
     vocab_size = {"p": 3, "w": 3, "l": 10}
     n_feats = 5
@@ -143,6 +149,7 @@ def test_raise_no_pairs():
 
 
 def test_raise_nan_error():
+    """Test the exception raised when there are null values."""
     length = 10
     vocab_size = {"p": 5, "w": 3, "l": 4}
     n_feats = 8

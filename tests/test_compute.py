@@ -1,3 +1,4 @@
+"""Test pairwise distance calculation functions."""
 import numpy as np
 
 from copairs import compute
@@ -7,6 +8,7 @@ rng = np.random.default_rng(SEED)
 
 
 def corrcoef_naive(feats, pairs):
+    """Compute correlation coefficient between pairs of features."""
     corr = np.empty((len(pairs),))
     for pos, (i, j) in enumerate(pairs):
         corr[pos] = np.corrcoef(feats[i], feats[j])[0, 1]
@@ -14,6 +16,7 @@ def corrcoef_naive(feats, pairs):
 
 
 def cosine_naive(feats, pairs):
+    """Compute cosine similarity between pairs of features."""
     cosine = np.empty((len(pairs),))
     for pos, (i, j) in enumerate(pairs):
         a, b = feats[i], feats[j]
@@ -24,6 +27,7 @@ def cosine_naive(feats, pairs):
 
 
 def euclidean_naive(feats, pairs):
+    """Compute euclidean similarity between pairs of features."""
     euclidean_sim = np.empty((len(pairs),))
     for pos, (i, j) in enumerate(pairs):
         dist = np.linalg.norm(feats[i] - feats[j])
@@ -32,10 +36,12 @@ def euclidean_naive(feats, pairs):
 
 
 def abs_cosine_naive(feats, pairs):
+    """Compute absolute cosine similarity between pairs of features."""
     return np.abs(cosine_naive(feats, pairs))
 
 
 def test_corrcoef():
+    """Test correlation coefficient computation."""
     n_samples = 10
     n_pairs = 20
     n_feats = 5
@@ -50,6 +56,7 @@ def test_corrcoef():
 
 
 def test_cosine():
+    """Test cosine similarity computation."""
     n_samples = 10
     n_pairs = 20
     n_feats = 5
@@ -64,6 +71,7 @@ def test_cosine():
 
 
 def test_euclidean():
+    """Test euclidean similarity computation."""
     n_samples = 10
     n_pairs = 20
     n_feats = 5
@@ -78,6 +86,7 @@ def test_euclidean():
 
 
 def test_abs_cosine():
+    """Test absolute cosine similarity computation."""
     n_samples = 10
     n_pairs = 20
     n_feats = 5
