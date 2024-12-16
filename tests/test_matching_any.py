@@ -1,3 +1,5 @@
+"""Test matching with `any` conditions using simulated data."""
+
 from string import ascii_letters
 
 import numpy as np
@@ -10,7 +12,7 @@ SEED = 42
 
 
 def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
-    """Compute valid pairs using cross product from pandas"""
+    """Compute valid pairs using cross product from pandas."""
     cross = dframe.reset_index().merge(
         dframe.reset_index(), how="cross", suffixes=("_x", "_y")
     )
@@ -39,7 +41,7 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
 
 
 def check_naive(dframe, matcher: Matcher, sameby, diffby):
-    """Check Matcher and naive generate same pairs"""
+    """Check Matcher and naive generate same pairs."""
     gt_pairs = get_naive_pairs(dframe, sameby, diffby)
     vals = matcher.get_all_pairs(sameby, diffby)
     vals = sum(vals.values(), [])
@@ -51,7 +53,7 @@ def check_naive(dframe, matcher: Matcher, sameby, diffby):
 
 
 def check_simulated_data(length, vocab_size, sameby, diffby, rng):
-    """Test sample of valid pairs from a simulated dataset"""
+    """Test sample of valid pairs from a simulated dataset."""
     sameby_cols = sameby["all"] + sameby["any"]
     diffby_cols = diffby["all"] + diffby["any"]
     dframe = simulate_random_dframe(length, vocab_size, sameby_cols, diffby_cols, rng)
@@ -60,7 +62,7 @@ def check_simulated_data(length, vocab_size, sameby, diffby, rng):
 
 
 def test_stress_simulated_data_any_all():
-    """Run multiple tests using simulated data"""
+    """Run multiple tests using simulated data."""
     rng = np.random.default_rng(SEED)
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
@@ -78,7 +80,7 @@ def test_stress_simulated_data_any_all():
 
 
 def test_stress_simulated_data_all_all():
-    """Run multiple tests using simulated data"""
+    """Run multiple tests using simulated data."""
     rng = np.random.default_rng(SEED)
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
@@ -96,7 +98,7 @@ def test_stress_simulated_data_all_all():
 
 
 def test_stress_simulated_data_all_any():
-    """Run multiple tests using simulated data"""
+    """Run multiple tests using simulated data."""
     rng = np.random.default_rng(SEED)
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
@@ -114,7 +116,7 @@ def test_stress_simulated_data_all_any():
 
 
 def test_stress_simulated_data_any_any():
-    """Run multiple tests using simulated data"""
+    """Run multiple tests using simulated data."""
     rng = np.random.default_rng(SEED)
     num_cols_range = [4, 6]
     vocab_size_range = [5, 10]

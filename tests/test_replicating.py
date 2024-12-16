@@ -1,3 +1,5 @@
+"""Tests for the replicating module."""
+
 from numpy.random import default_rng
 
 from copairs import Matcher
@@ -12,6 +14,7 @@ SEED = 0
 
 
 def test_corr_between_replicates():
+    """Test calculating correlation between replicates."""
     rng = default_rng(SEED)
     num_samples = 10
     X = rng.normal(size=[num_samples, 6])
@@ -20,6 +23,7 @@ def test_corr_between_replicates():
 
 
 def test_correlation_test():
+    """Test correlation test."""
     rng = default_rng(SEED)
     num_samples = 10
     X = rng.normal(size=[num_samples, 6])
@@ -31,6 +35,7 @@ def test_correlation_test():
 
 
 def test_corr_from_pairs():
+    """Test calculating correlation from a list of named pairs."""
     num_samples = 10
     sameby = ["c"]
     diffby = ["p", "w"]
