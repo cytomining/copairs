@@ -1,3 +1,5 @@
+"""Tests for the multilabel matching implementation."""
+
 import pandas as pd
 
 from copairs.matching import MatcherMultilabel
@@ -7,6 +9,7 @@ SEED = 42
 
 
 def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby, multilabel_col: str):
+    """Get pairs using a naive implementation."""
     dframe = dframe.copy()
 
     dframe[multilabel_col] = dframe[multilabel_col].apply(set)
@@ -45,7 +48,7 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby, multilabel_col: str):
 
 
 def check_naive(dframe, matcher: MatcherMultilabel, sameby, diffby, multilabel_col):
-    """Check Matcher and naive generate same pairs"""
+    """Check Matcher and naive generate same pairs."""
     gt_pairs = get_naive_pairs(dframe, sameby, diffby, multilabel_col)
     vals = matcher.get_all_pairs(sameby, diffby)
     vals = sum(vals.values(), [])
@@ -57,7 +60,7 @@ def check_naive(dframe, matcher: MatcherMultilabel, sameby, diffby, multilabel_c
 
 
 def test_sameby():
-    """Check the multilabel implementation with sameby"""
+    """Check the multilabel implementation with sameby."""
     multilabel_col = "c"
     sameby = ["c"]
     diffby = ["p", "w"]
@@ -70,7 +73,7 @@ def test_sameby():
 
 
 def test_diffby():
-    """Check the multilabel implementation with sameby"""
+    """Check the multilabel implementation with sameby."""
     multilabel_col = "c"
     sameby = ["p"]
     diffby = ["c", "w"]
@@ -84,7 +87,7 @@ def test_diffby():
 
 
 def test_only_diffby():
-    """Check the multilabel implementation with only diffby being equal to c"""
+    """Check the multilabel implementation with only diffby being equal to c."""
     multilabel_col = "c"
     sameby = []
     diffby = ["c"]
@@ -97,7 +100,7 @@ def test_only_diffby():
 
 
 def test_only_diffby_many_cols():
-    """Check the multilabel implementation with only diffby being equal to c"""
+    """Check the multilabel implementation with only diffby being equal to c."""
     multilabel_col = "c"
     sameby = []
     diffby = ["c", "w"]
@@ -110,7 +113,7 @@ def test_only_diffby_many_cols():
 
 
 def test_only_sameby_many_cols():
-    """Check the multilabel implementation with only diffby being equal to c"""
+    """Check the multilabel implementation with only diffby being equal to c."""
     multilabel_col = "c"
     sameby = ["c", "w"]
     diffby = []

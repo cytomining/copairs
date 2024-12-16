@@ -1,6 +1,6 @@
 [project]
 name = "copairs"
-version = "0.4.2"
+version = "0.4.3"
 description = "Find pairs and compute metrics between them"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dev = ["ruff"]
 plot = ["plotly"]
 test = ["scikit-learn", "pytest"]
 demo = ["notebook", "matplotlib"]
@@ -31,4 +32,4 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["src"] 
+where = ["src"]

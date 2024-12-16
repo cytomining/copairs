@@ -1,4 +1,4 @@
-"""Test functions for Matcher"""
+"""Test functions for Matcher."""
 
 from string import ascii_letters
 
@@ -13,7 +13,7 @@ SEED = 0
 
 
 def run_stress_sample_null(dframe, num_pairs):
-    """Assert every generated null pair does not match any column"""
+    """Assert every generated null pair does not match any column."""
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     for _ in range(num_pairs):
         id1, id2 = matcher.sample_null_pair(dframe.columns)
@@ -23,19 +23,19 @@ def run_stress_sample_null(dframe, num_pairs):
 
 
 def test_null_sample_large():
-    """Test Matcher guarantees elements with different values"""
+    """Test Matcher guarantees elements with different values."""
     dframe = create_dframe(32, 10000)
     run_stress_sample_null(dframe, 5000)
 
 
 def test_null_sample_small():
-    """Test Sample with small set"""
+    """Test Sample with small set."""
     dframe = create_dframe(3, 10)
     run_stress_sample_null(dframe, 100)
 
 
 def test_null_sample_nan_vals():
-    """Test NaN values are ignored"""
+    """Test NaN values are ignored."""
     dframe = create_dframe(4, 15)
     rng = np.random.default_rng(SEED)
     nan_mask = rng.random(dframe.shape) < 0.5
@@ -44,7 +44,7 @@ def test_null_sample_nan_vals():
 
 
 def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
-    """Compute valid pairs using cross product from pandas"""
+    """Compute valid pairs using cross product from pandas."""
     cross = dframe.reset_index().merge(
         dframe.reset_index(), how="cross", suffixes=("_x", "_y")
     )
@@ -62,7 +62,7 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
 
 
 def check_naive(dframe, matcher: Matcher, sameby, diffby):
-    """Check Matcher and naive generate same pairs"""
+    """Check Matcher and naive generate same pairs."""
     gt_pairs = get_naive_pairs(dframe, sameby, diffby)
     vals = matcher.get_all_pairs(sameby, diffby)
     vals = sum(vals.values(), [])
@@ -74,14 +74,14 @@ def check_naive(dframe, matcher: Matcher, sameby, diffby):
 
 
 def check_simulated_data(length, vocab_size, sameby, diffby, rng):
-    """Test sample of valid pairs from a simulated dataset"""
+    """Test sample of valid pairs from a simulated dataset."""
     dframe = simulate_random_dframe(length, vocab_size, sameby, diffby, rng)
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     check_naive(dframe, matcher, sameby, diffby)
 
 
 def test_stress_simulated_data():
-    """Run multiple tests using simulated data"""
+    """Run multiple tests using simulated data."""
     rng = np.random.default_rng(SEED)
     num_cols_range = [2, 6]
     vocab_size_range = [5, 10]
@@ -99,7 +99,7 @@ def test_stress_simulated_data():
 
 
 def test_empty_sameby():
-    """Test query without sameby"""
+    """Test query without sameby."""
     dframe = create_dframe(3, 10)
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     check_naive(dframe, matcher, sameby=[], diffby=["w", "c"])
@@ -107,7 +107,7 @@ def test_empty_sameby():
 
 
 def test_empty_diffby():
-    """Test query without diffby"""
+    """Test query without diffby."""
     dframe = create_dframe(3, 10)
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     matcher.get_all_pairs(["c"], [])
@@ -116,7 +116,7 @@ def test_empty_diffby():
 
 
 def test_raise_distjoint():
-    """Test check for disjoint sameby and diffby"""
+    """Test check for disjoint sameby and diffby."""
     dframe = create_dframe(3, 10)
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     with pytest.raises(ValueError, match="must be disjoint lists"):
@@ -124,7 +124,7 @@ def test_raise_distjoint():
 
 
 def test_raise_no_params():
-    """Test check for at least one of sameby and diffby"""
+    """Test check for at least one of sameby and diffby."""
     dframe = create_dframe(3, 10)
     matcher = Matcher(dframe, dframe.columns, seed=SEED)
     with pytest.raises(ValueError, match="at least one should be provided"):
@@ -132,7 +132,7 @@ def test_raise_no_params():
 
 
 def assert_sameby_diffby(dframe: pd.DataFrame, pairs_dict: dict, sameby, diffby):
-    """Assert the pairs are valid"""
+    """Assert the pairs are valid."""
     for _, pairs in pairs_dict.items():
         for id1, id2 in pairs:
             for col in sameby:
