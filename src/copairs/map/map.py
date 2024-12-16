@@ -13,7 +13,7 @@ logger = logging.getLogger("copairs")
 def mean_average_precision(
     ap_scores: pd.DataFrame, sameby, null_size: int, threshold: float, seed: int
 ) -> pd.DataFrame:
-    """ Calculate the Mean Average Precision (mAP) score and associated p-values.
+    """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
     This function computes the Mean Average Precision (mAP) score by grouping profiles
     based on the specified criteria (`sameby`). It calculates the significance of mAP
@@ -88,7 +88,5 @@ def mean_average_precision(
     # Mark scores below the p-value threshold
     map_scores["below_p"] = map_scores["p_value"] < threshold
     map_scores["below_corrected_p"] = map_scores["corrected_p_value"] < threshold
-
-  
 
     return map_scores

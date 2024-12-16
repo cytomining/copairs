@@ -9,7 +9,7 @@ import pandas as pd
 def validate_pipeline_input(
     meta: pd.DataFrame, feats: np.ndarray, columns: List[str]
 ) -> None:
-    """ Validate the metadata and features for consistency and completeness.
+    """Validate the metadata and features for consistency and completeness.
 
     Parameters:
     ----------
@@ -57,7 +57,7 @@ def flatten_str_list(*args):
 def evaluate_and_filter(
     df: pd.DataFrame, columns: List[str]
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """ Evaluate query filters and filter the metadata DataFrame based on specified columns.
+    """Evaluate query filters and filter the metadata DataFrame based on specified columns.
 
     This function processes column specifications, extracts any filter conditions,
     applies these conditions to the metadata DataFrame, and returns the filtered metadata
@@ -89,7 +89,7 @@ def evaluate_and_filter(
 def extract_filters(
     columns: List[str], df_columns: List[str]
 ) -> Tuple[List[str], List[str]]:
-    """ Extract and validate query filters from selected metadata columns.
+    """Extract and validate query filters from selected metadata columns.
 
     Parameters:
     ----------
@@ -143,10 +143,10 @@ def extract_filters(
 
 
 def apply_filters(df: pd.DataFrame, query_list: List[str]) -> pd.DataFrame:
-    """ Combine and apply query filters to a DataFrame.
+    """Combine and apply query filters to a DataFrame.
 
-    This function takes a list of query expressions and applies them to a DataFrame 
-    to filter its rows. If no query expressions are provided, the original DataFrame 
+    This function takes a list of query expressions and applies them to a DataFrame
+    to filter its rows. If no query expressions are provided, the original DataFrame
     is returned unchanged.
 
     Parameters:
@@ -154,7 +154,7 @@ def apply_filters(df: pd.DataFrame, query_list: List[str]) -> pd.DataFrame:
     df : pd.DataFrame
         The DataFrame to which the filters will be applied.
     query_list : List[str]
-        A list of query expressions (e.g., "column_name > 5"). These expressions 
+        A list of query expressions (e.g., "column_name > 5"). These expressions
         should follow the syntax supported by `pd.DataFrame.query`.
 
     Returns:

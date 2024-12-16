@@ -224,7 +224,7 @@ def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
 
 
 def get_distance_fn(distance):
-    """ Retrieve a distance metric function based on a string identifier or custom callable.
+    """Retrieve a distance metric function based on a string identifier or custom callable.
 
     This function provides flexibility in specifying the distance metric to be used
     for pairwise similarity or dissimilarity computations. Users can choose from a
@@ -242,8 +242,8 @@ def get_distance_fn(distance):
         - "manhattan": Inverse Manhattan distance (scaled to range 0-1).
         - "chebyshev": Inverse Chebyshev distance (scaled to range 0-1).
 
-        If a callable is provided, it must accept the paramters associated with each 
-        callable function. 
+        If a callable is provided, it must accept the paramters associated with each
+        callable function.
 
     Returns:
     -------
@@ -366,7 +366,7 @@ def average_precision(rel_k):
 def ap_contiguous(
     rel_k_list: np.ndarray, counts: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """ Compute Average Precision (AP) scores from relevance labels.
+    """Compute Average Precision (AP) scores from relevance labels.
 
     This function calculates Average Precision (AP) scores for each profile based on
     relevance labels and their associated counts. It also returns configurations
@@ -418,7 +418,7 @@ def ap_contiguous(
 
 
 def random_ap(num_perm, num_pos, total, seed):
-    """ Generate random Average Precision (AP) scores to create a null distribution.
+    """Generate random Average Precision (AP) scores to create a null distribution.
 
     This function computes multiple Average Precision (AP) scores based on randomly
     generated binary relevance lists. It is useful for generating a null distribution
@@ -590,7 +590,7 @@ def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed
 
 
 def concat_ranges(start, end):
-    """ Create a 1D array by concatenating multiple integer ranges.
+    """Create a 1D array by concatenating multiple integer ranges.
 
     This function generates a single concatenated array from multiple ranges defined
     by the `start` and `end` arrays. Each range is inclusive of `start` and exclusive
