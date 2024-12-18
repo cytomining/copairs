@@ -2,7 +2,7 @@ import itertools
 import os
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Optional, Union
 
 import numpy as np
 from tqdm.autonotebook import tqdm
@@ -223,7 +223,7 @@ def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
     return 1 / (1 + c_dist)
 
 
-def get_distance_fn(distance):
+def get_distance_fn(distance: Union[str, Callable]) -> Callable:
     """Retrieve a distance metric function based on a string identifier or custom callable.
 
     This function provides flexibility in specifying the distance metric to be used
@@ -289,7 +289,9 @@ def get_distance_fn(distance):
     return batch_processing(distance_fn)
 
 
-def random_binary_matrix(n, m, k, rng):
+def random_binary_matrix(
+    n: int, m: int, k: int, rng: Optional[np.random.Generator]
+) -> np.ndarray:
     """Generate a random binary matrix with a fixed number of 1's per row.
 
     This function creates an `n x m` binary matrix where each row contains exactly
@@ -304,9 +306,10 @@ def random_binary_matrix(n, m, k, rng):
         Number of columns in the matrix.
     k : int
         Number of 1's to be placed in each row. Must satisfy `k <= m`.
-    rng : np.random.Generator
+    rng : Optional[np.random.Generator]
         A NumPy random number generator instance used for shuffling the positions
-        of the ones in each row.
+        of the ones in each row. If None, a new Generator will be created using
+        the default random seed.
 
     Returns:
     -------
@@ -325,7 +328,7 @@ def random_binary_matrix(n, m, k, rng):
     return matrix
 
 
-def average_precision(rel_k):
+def average_precision(rel_k: np.ndarray) -> np.ndarray:
     """Compute the Average Precision (AP) for a binary list of relevance scores.
 
     Average Precision (AP) is a performance metric for ranking tasks, which calculates
@@ -417,7 +420,7 @@ def ap_contiguous(
     return ap_scores, null_confs
 
 
-def random_ap(num_perm, num_pos, total, seed):
+def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     """Generate random Average Precision (AP) scores to create a null distribution.
 
     This function computes multiple Average Precision (AP) scores based on randomly
@@ -589,7 +592,7 @@ def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed
     return pvals
 
 
-def concat_ranges(start, end):
+def concat_ranges(start: np.ndarray, end: np.ndarray) -> np.ndarray:
     """Create a 1D array by concatenating multiple integer ranges.
 
     This function generates a single concatenated array from multiple ranges defined
