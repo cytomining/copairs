@@ -3,6 +3,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from typing import List
 
 from copairs import compute
 from copairs.matching import Matcher, UnpairedException
@@ -83,10 +84,10 @@ def build_rank_lists(
 def average_precision(
     meta: pd.DataFrame,
     feats: pd.DataFrame,
-    pos_sameby: list[str],
-    pos_diffby: list[str],
-    neg_sameby: list[str],
-    neg_diffby: list[str],
+    pos_sameby: List[str],
+    pos_diffby: List[str],
+    neg_sameby: List[str],
+    neg_diffby: List[str],
     batch_size: int = 20000,
     distance: str = "cosine",
 ) -> pd.DataFrame:
