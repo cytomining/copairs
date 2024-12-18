@@ -37,7 +37,7 @@ def validate_pipeline_input(
 
     # Check for null values in the feature matrix
     if np.isnan(feats).any():
-        raise ValueError("Features should not contain null values.")
+        raise ValueError("features should not have null values.")
 
 
 def flatten_str_list(*args):
