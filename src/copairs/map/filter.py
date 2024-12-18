@@ -29,7 +29,7 @@ def validate_pipeline_input(
     """
     # Check for null values in the specified metadata columns
     if meta[columns].isna().any(axis=None):
-        raise ValueError("Metadata columns should not contain null values.")
+        raise ValueError("metadata columns should not have null values.")
 
     # Check if the number of rows in metadata matches the feature matrix
     if len(meta) != len(feats):
@@ -136,7 +136,7 @@ def extract_filters(
 
         # Check for duplicate metadata columns in the parsed list
         if len(parsed_cols) != len(set(parsed_cols)):
-            raise ValueError(f"Duplicate queries for metadata column: {col}")
+            raise ValueError(f"Duplicate queries for column: {col}")
 
     # Return the queries to evaluate and the parsed metadata column names
     return queries_to_eval, parsed_cols
