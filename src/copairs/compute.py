@@ -289,81 +289,30 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
     return batch_processing(distance_fn)
 
 
-def random_binary_matrix(
-    n: int, m: int, k: int, rng: Optional[np.random.Generator]
-) -> np.ndarray:
-    """Generate a random binary matrix with a fixed number of 1's per row.
-
-    This function creates an `n x m` binary matrix where each row contains exactly
-    `k` ones, with the positions of the ones randomized using a specified random
-    number generator (RNG).
-
-    Parameters:
-    ----------
-    n : int
-        Number of rows in the matrix.
-    m : int
-        Number of columns in the matrix.
-    k : int
-        Number of 1's to be placed in each row. Must satisfy `k <= m`.
-    rng : Optional[np.random.Generator]
-        A NumPy random number generator instance used for shuffling the positions
-        of the ones in each row. If None, a new Generator will be created using
-        the default random seed.
+def random_binary_matrix(n, m, k, rng):
+    """Generate a indices of k values in 1 per row in a random binary n*m matrix.
+    Args:
+    n: Number of rows.
+    m: Number of columns.
+    k: Number of 1's per row.
 
     Returns:
     -------
     np.ndarray
         A binary matrix of shape `(n, m)` with exactly `k` ones per row.
     """
-    # Initialize the binary matrix with all zeros
-    matrix = np.zeros((n, m), dtype=int)
-
-    # Fill the first `k` elements of each row with ones
-    matrix[:, :k] = 1
-
-    # Randomly shuffle each row to distribute the ones across the columns
-    rng.permuted(matrix, axis=1, out=matrix)
-
-    return matrix
+    dtype = np.uint16 if m < 2**16 else np.uint32
+    indices = np.tile(np.arange(m, dtype=dtype), (n, 1))
+    rng.permuted(indices, axis=1, out=indices)
+    return np.sort(indices[:, :k], axis=1)
 
 
-def average_precision(rel_k: np.ndarray) -> np.ndarray:
-    """Compute the Average Precision (AP) for a binary list of relevance scores.
-
-    Average Precision (AP) is a performance metric for ranking tasks, which calculates
-    the weighted mean of precision values at the positions where relevant items occur
-    in a sorted list. The relevance list should be binary (1 for relevant items, 0
-    for non-relevant).
-
-    Parameters:
-    ----------
-    rel_k : np.ndarray
-        A 2D binary array where each row represents a ranked list of items, and each
-        element indicates the relevance of the item (1 for relevant, 0 for non-relevant).
-
-    Returns:
-    -------
-    np.ndarray
-        A 1D array of Average Precision (AP) scores, one for each row in the input array.
-    """
-
-    # Cumulative sum of relevance scores along the row (True Positives at each rank)
-    tp = np.cumsum(rel_k, axis=1)
-
-    # Total number of relevant items (last value in cumulative sum per row)
-    num_pos = tp[:, -1]
-
-    # Rank positions (1-based index for each column)
-    k = np.arange(1, rel_k.shape[1] + 1)
-
-    # Precision at each rank
-    pr_k = tp / k
-
-    # Calculate AP: Weighted sum of precision values, normalized by total relevant items
-    ap = (pr_k * rel_k).sum(axis=1) / num_pos
-
-    return ap
+def average_precision(rel_k) -> np.ndarray:
+    """Compute average precision based on binary list indices"""
+    num_pos = rel_k.shape[1]
+    pr_k = np.arange(1, num_pos + 1, dtype=np.float32) / (rel_k + 1)
+    ap_values = pr_k.sum(axis=1) / num_pos
+    return ap_values
 
 
 def ap_contiguous(
@@ -395,10 +344,7 @@ def ap_contiguous(
     # Convert counts into cutoff indices to segment relevance labels
     cutoffs = to_cutoffs(counts)
 
-    # Calculate the number of positive pairs for each profile
-    num_pos = np.add.reduceat(rel_k_list, cutoffs)
-
-    # Compute the cumulative shift for handling contiguous true positives
+    num_pos = np.add.reduceat(rel_k_list, cutoffs, dtype=np.uint32)
     shift = np.empty_like(num_pos)
     shift[0], shift[1:] = 0, num_pos[:-1]
 
@@ -453,8 +399,7 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
 
     # Compute Average Precision (AP) scores for each row of the binary matrix
     null_dist = average_precision(rel_k)
-
-    return null_dist
+    return null_dist.astype(np.float32)
 
 
 def null_dist_cached(

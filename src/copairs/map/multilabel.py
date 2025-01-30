@@ -48,8 +48,8 @@ def build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
         neg_ix = np.repeat(query, neg_counts)
         labels = np.concatenate(
             [
-                np.ones(mpos_pairs.size, dtype=np.int32),
-                np.zeros(len(neg_sims), dtype=np.int32),
+                np.ones(mpos_pairs.size, dtype=np.uint32),
+                np.zeros(len(neg_sims), dtype=np.uint32),
             ]
         )
 
@@ -89,13 +89,13 @@ def average_precision(
     logger.info("Finding positive pairs...")
     pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
     pos_keys = pos_pairs.keys()
-    pos_counts = np.fromiter(map(len, pos_pairs.values()), dtype=np.int32)
+    pos_counts = np.fromiter(map(len, pos_pairs.values()), dtype=np.uint32)
     pos_total = sum(pos_counts)
     if pos_total == 0:
         raise UnpairedException("Unable to find positive pairs.")
     pos_pairs = np.fromiter(
         itertools.chain.from_iterable(pos_pairs.values()),
-        dtype=np.dtype((np.int32, 2)),
+        dtype=np.dtype((np.uint32, 2)),
         count=pos_total,
     )
 
@@ -106,7 +106,7 @@ def average_precision(
         raise UnpairedException("Unable to find any negative pairs.")
     neg_pairs = np.fromiter(
         itertools.chain.from_iterable(neg_pairs.values()),
-        dtype=np.dtype((np.int32, 2)),
+        dtype=np.dtype((np.uint32, 2)),
         count=neg_total,
     )
 

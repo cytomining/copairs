@@ -54,8 +54,8 @@ def build_rank_lists(
     # Combine relevance labels: 1 for positive pairs, 0 for negative pairs
     labels = np.concatenate(
         [
-            np.ones(pos_pairs.size, dtype=np.int32),  # Label positive pairs
-            np.zeros(neg_pairs.size, dtype=np.int32),  # Label negative pairs
+            np.ones(pos_pairs.size, dtype=np.uint32),
+            np.zeros(neg_pairs.size, dtype=np.uint32),
         ]
     )
 
@@ -78,7 +78,7 @@ def build_rank_lists(
     # Find unique profile indices and count their occurrences in the pairs
     paired_ix, counts = np.unique(ix, return_counts=True)
 
-    return paired_ix, rel_k_list, counts
+    return paired_ix, rel_k_list, counts.astype(np.uint32)
 
 
 def average_precision(
@@ -193,7 +193,7 @@ def average_precision(
     # Convert positive pairs to a NumPy array for efficient computation
     pos_pairs = np.fromiter(
         itertools.chain.from_iterable(pos_pairs.values()),
-        dtype=np.dtype((np.int32, 2)),
+        dtype=np.dtype((np.uint32, 2)),
         count=pos_total,
     )
 
@@ -207,7 +207,7 @@ def average_precision(
     # Convert negative pairs to a NumPy array for efficient computation
     neg_pairs = np.fromiter(
         itertools.chain.from_iterable(neg_pairs.values()),
-        dtype=np.dtype((np.int32, 2)),
+        dtype=np.dtype((np.uint32, 2)),
         count=neg_total,
     )
 

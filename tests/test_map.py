@@ -14,20 +14,28 @@ from tests.helpers import simulate_random_dframe
 SEED = 0
 
 
+def binary2indices(arr: np.ndarray) -> np.ndarray:
+    """Convert a binary matrix to a list of indices."""
+    return np.where(arr == 1)[1].reshape(arr.shape[0], arr.sum(axis=1)[0])
+
+
 def test_random_binary_matrix():
     """Test the random binary matrix generation."""
     rng = np.random.default_rng(SEED)
+    
     # Test with n=3, m=4, k=2
-    A = compute.random_binary_matrix(3, 4, 2, rng)
-    assert A.shape == (3, 4)
-    assert np.all(np.sum(A, axis=1) == 2)
-    assert np.all((A >= 0) | (A <= 1))
+    indices = compute.random_binary_matrix(3, 4, 2, rng)
+    assert indices.shape == (3, 2)
+    assert np.all(indices < 4)
+    assert np.all(indices >= 0)
+    assert np.unique(indices, axis=1).shape == indices.shape
 
     # Test with n=5, m=6, k=3
-    B = compute.random_binary_matrix(5, 6, 3, rng)
-    assert B.shape == (5, 6)
-    assert np.all(np.sum(B, axis=1) == 3)
-    assert np.all((B == 0) | (B <= 1))
+    indices = compute.random_binary_matrix(5, 6, 3, rng)
+    assert indices.shape == (5, 3)
+    assert np.all(indices < 6)
+    assert np.all(indices >= 0)
+    assert np.unique(indices, axis=1).shape == indices.shape
 
 
 def test_compute_ap():
@@ -50,7 +58,8 @@ def test_compute_ap():
         .apply(lambda x: np.array(df.y_true[0])[x])
     )
     rel_k = np.stack(rel_k)
-    ap = compute.average_precision(rel_k)
+
+    ap = compute.average_precision(binary2indices(rel_k))
 
     ap_sklearn = df.apply(
         lambda x: average_precision_score(x["y_true"], x["y_pred"]), axis=1
