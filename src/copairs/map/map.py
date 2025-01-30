@@ -11,7 +11,7 @@ logger = logging.getLogger("copairs")
 
 
 def mean_average_precision(
-    ap_scores: pd.DataFrame, sameby, null_size: int, threshold: float, seed: int
+    ap_scores: pd.DataFrame, sameby, null_size: int, threshold: float, seed: int, max_workers: int = 32
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -77,7 +77,7 @@ def mean_average_precision(
 
     # Compute p-values for each group using the null distributions
     params = map_scores[["mean_average_precision", "indices"]]
-    map_scores["p_value"] = thread_map(get_p_value, params.values, leave=False)
+    map_scores["p_value"] = thread_map(get_p_value, params.values, leave=False, max_workers=max_workers)
 
     # Perform multiple testing correction on p-values
     reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
