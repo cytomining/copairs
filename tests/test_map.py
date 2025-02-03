@@ -22,7 +22,7 @@ def binary2indices(arr: np.ndarray) -> np.ndarray:
 def test_random_binary_matrix():
     """Test the random binary matrix generation."""
     rng = np.random.default_rng(SEED)
-    
+
     # Test with n=3, m=4, k=2
     indices = compute.random_binary_matrix(3, 4, 2, rng)
     assert indices.shape == (3, 2)
