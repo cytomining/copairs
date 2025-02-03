@@ -18,6 +18,23 @@ ColumnList = Union[Sequence[str], pd.Index]
 ColumnDict = Dict[str, ColumnList]
 
 
+def assign_reference_index(
+    df: pd.DataFrame,
+    condition: Union[str, pd.Index],
+    reference_col: str = "Metadata_Reference_Index",
+    default_value: int = -1,
+    inplace: bool = False,
+):
+    """Assigns reference index to a specified column based on a given condition."""
+    if not inplace:
+        df = df.copy()
+    df[reference_col] = default_value
+    if isinstance(condition, str):
+        condition = df.query(condition).index
+    df.loc[condition, reference_col] = condition
+    return df if not inplace else None
+
+
 def reverse_index(col: pd.Series) -> pd.Series:
     """Build a reverse_index for a given column in the DataFrame"""
     return pd.Series(col.groupby(col, observed=True).indices, name=col.name)
