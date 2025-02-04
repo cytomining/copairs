@@ -11,7 +11,7 @@ from tests.helpers import simulate_random_dframe
 def test_assign_reference_index():
     SEED = 42
     length = 20
-    vocab_size = {"p": 5, "w": 3, "l": 4}
+    vocab_size = {"p": 5, "w": 3, "l": 2}
     n_feats = 5
     pos_sameby = ["l"]
     pos_diffby = []
@@ -40,4 +40,4 @@ def test_assign_reference_index():
     pd.testing.assert_frame_equal(
         ap_ri.query("l!='l1'").drop(columns="Metadata_Reference_Index"),
         ap.query("l!='l1'"),
-    ).all(axis=None)
+    )
