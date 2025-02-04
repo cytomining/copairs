@@ -16,7 +16,7 @@ SEED = 0
 
 def binary2indices(arr: np.ndarray) -> np.ndarray:
     """Convert a binary matrix to a list of indices."""
-    return np.where(arr == 1)[1].reshape(arr.shape[0], arr.sum(axis=1)[0])
+    return np.nonzero(arr)[1].reshape(arr.shape[0], -1)
 
 
 def test_random_binary_matrix():
