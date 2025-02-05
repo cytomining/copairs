@@ -1,3 +1,5 @@
+"""Functions to plot percent replicating."""
+
 from typing import Optional
 
 from plotly import graph_objects as go
@@ -15,9 +17,7 @@ def plot(
     true_dist_title="True replicates",
     null_dist_title="Null distribution",
 ) -> go.Figure:
-    """
-    Plot two distributions and threshold(s) line.
-    """
+    """Plot two distributions and threshold(s) line."""
     # fig = go.Figure()
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 

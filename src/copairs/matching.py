@@ -1,6 +1,4 @@
-"""
-Sample pairs with given column restrictions
-"""
+"""Sample pairs with given column restrictions."""
 
 import itertools
 import logging
@@ -18,13 +16,30 @@ ColumnList = Union[Sequence[str], pd.Index]
 ColumnDict = Dict[str, ColumnList]
 
 
+def assign_reference_index(
+    df: pd.DataFrame,
+    condition: Union[str, pd.Index],
+    reference_col: str = "Metadata_Reference_Index",
+    default_value: int = -1,
+    inplace: bool = False,
+):
+    """Assign reference index to a specified column based on a given condition."""
+    if not inplace:
+        df = df.copy()
+    df[reference_col] = default_value
+    if isinstance(condition, str):
+        condition = df.query(condition).index
+    df.loc[condition, reference_col] = condition
+    return df if not inplace else None
+
+
 def reverse_index(col: pd.Series) -> pd.Series:
-    """Build a reverse_index for a given column in the DataFrame"""
+    """Build a reverse_index for a given column in the DataFrame."""
     return pd.Series(col.groupby(col, observed=True).indices, name=col.name)
 
 
 def dict_to_dframe(dict_pairs, sameby: Union[str, list]):
-    """Convert the Matcher.get_all_pairs output to pd.DataFrame"""
+    """Convert the Matcher.get_all_pairs output to pd.DataFrame."""
     if not dict_pairs:
         raise ValueError("dict_pairs empty")
     keys = np.array(list(dict_pairs.keys()))
@@ -46,17 +61,14 @@ def dict_to_dframe(dict_pairs, sameby: Union[str, list]):
 
 
 class UnpairedException(Exception):
-    """Exception raised when a row can not be paired with any other row in the
-    data"""
+    """Exception raised when a row can not be paired with any other row in the data."""
 
 
 class Matcher:
-    """Class to get pair of rows given contraints in the columns"""
+    """Class to get pair of rows given contraints in the columns."""
 
     def __init__(self, dframe: pd.DataFrame, columns: ColumnList, seed: int):
-        """
-        max_size: max number of rows to consider from the same value.
-        """
+        """max_size: max number of rows to consider from the same value."""
         rng = np.random.default_rng(seed)
         self.original_index = dframe.index
         dframe = dframe[columns].reset_index(drop=True).copy()
@@ -85,9 +97,7 @@ class Matcher:
         self.rand_iter = iter([])
 
     def _null_sample(self, diffby_all: ColumnList, diffby_any: ColumnList):
-        """
-        Sample a pair from the frame.
-        """
+        """Sample a pair from the frame."""
         valid = set(self.frozen_valid)
         id1 = self.integers(0, len(valid) - 1)
         valid.remove(id1)
@@ -101,7 +111,7 @@ class Matcher:
         return id1, id2
 
     def sample_null_pair(self, diffby: ColumnList, n_tries=5):
-        """Sample pairs from the data. It tries multiple times before raising an error"""
+        """Sample pairs from the data. It tries multiple times before raising an error."""
         if isinstance(diffby, dict):
             diffby_all, diffby_any = diffby.get("all", []), diffby.get("any", [])
             if len(diffby_any) == 1:
@@ -118,6 +128,7 @@ class Matcher:
         raise ValueError("Number of tries exhusted. Could not find a valid pair")
 
     def rand_next(self):
+        """Get next value from the precomputed value."""
         try:
             value = next(self.rand_iter)
         except StopIteration:
@@ -127,9 +138,11 @@ class Matcher:
         return value
 
     def integers(self, min_val, max_val):
+        """Get a random integer value between the specified range."""
         return int(self.rand_next() * (max_val - min_val + 1) + min_val)
 
     def choice(self, items):
+        """Select a random item from the given list."""
         min_val, max_val = 0, len(items) - 1
         pos = self.integers(min_val, max_val)
         return items[pos]
@@ -140,9 +153,7 @@ class Matcher:
         diffby: Union[str, ColumnList, ColumnDict],
         original_index: bool = True,
     ):
-        """
-        Get all pairs with given params
-        """
+        """Get all pairs with given params."""
         sameby, diffby = self._normalize_sameby_diffby(sameby, diffby)
         sameby, diffby = self._validate_inputs(sameby, diffby)
 
@@ -168,9 +179,7 @@ class Matcher:
         }
 
     def _normalize_sameby_diffby(self, sameby, diffby):
-        """
-        Convert sameby and diffby to a consistent format: {'all': [...], 'any': [...]}
-        """
+        """Convert sameby and diffby to a consistent format: {'all': [...], 'any': [...]}."""
         keys = ["all", "any"]
         result = []
 
@@ -294,8 +303,7 @@ class Matcher:
         return pairs
 
     def _only_diffby_all(self, diffby_all: ColumnList):
-        """Generate a dict with single NaN key containing all of the pairs
-        with different values in the column list"""
+        """Generate a dict with single NaN key containing all of the pairs with different values in the column list."""
         diffby_all = sorted(diffby_all, key=self.col_order.get)
 
         # Cartesian product for one of the diffby columns
@@ -311,8 +319,7 @@ class Matcher:
         return {None: list(map(tuple, pairs))}
 
     def _only_diffby_any(self, diffby: ColumnList):
-        """Generate a dict with single NaN key containing all of the pairs
-        with different values in any of specififed columns"""
+        """Generate a dict with single NaN key containing all of the pairs with different values in any of specififed columns."""
         diffby = sorted(diffby, key=self.col_order.get)
 
         pairs = []
@@ -325,8 +332,7 @@ class Matcher:
         return {None: list(map(tuple, pairs))}
 
     def _only_diffby_all_any(self, diffby_all: ColumnList, diffby_any: ColumnList):
-        """Generate a dict with single NaN key containing all of the pairs
-        with different values in any of specififed columns"""
+        """Generate a dict with single NaN key containing all of the pairs with different values in any of specififed columns."""
         diffby_all_pairs = np.asarray(self._only_diffby_all(diffby_all)[None])
         diffby_all_any = self._filter_pairs_by_condition(
             diffby_all_pairs, diffby_any, condition="any_diff"
@@ -337,12 +343,12 @@ class Matcher:
         self, idx: int, diffby_all: ColumnList, diffby_any: ColumnList, valid: Set[int]
     ):
         """
-        Remove from valid rows that have matches with idx in any of the diffby columns
+        Remove from valid rows that have matches with idx in any of the diffby columns.
+
         :idx: index of the row to be compared
         :diffby: indices of columns that should have different values
         :valid: candidate rows to be evaluated
-        :returns: subset of valid after removing indices
-
+        :returns: subset of valid after removing indices.
         """
         row = self.values[idx]
         for col in diffby_all:
@@ -388,6 +394,12 @@ class Matcher:
 
 
 class MatcherMultilabel:
+    """
+    Class to get pair of rows given contraints in the columns.
+
+    Support one multilabel column.
+    """
+
     def __init__(
         self, dframe: pd.DataFrame, columns: ColumnList, multilabel_col: str, seed: int
     ):
@@ -400,6 +412,7 @@ class MatcherMultilabel:
         self.matcher = Matcher(dframe, columns, seed)
 
     def get_all_pairs(self, sameby: Union[str, ColumnList], diffby: ColumnList):
+        """Get all pairs with given params."""
         diffby_multi = self.multilabel_col in diffby
         if diffby_multi:
             # Multilabel in diffby must be 'ALL' instead of 'ANY'
@@ -424,11 +437,13 @@ class MatcherMultilabel:
         return pairs
 
     def sample_null_pair(self, diffby: ColumnList, n_tries=5):
+        """Sample pairs from the data. It tries multiple times before raising an error."""
         null_pair = self.matcher.sample_null_pair(diffby, n_tries)
         id1, id2 = self.original_index[list(null_pair)].values
         return id1, id2
 
     def get_null_pairs(self, diffby: ColumnList, size: int, n_tries=5):
+        """Sample multiple null pairs at the same time."""
         null_pairs = []
         for _ in tqdm(range(size)):
             null_pairs.append(self.matcher.sample_null_pair(diffby, n_tries))
@@ -438,7 +453,7 @@ class MatcherMultilabel:
         return null_pairs
 
     def _only_diffby_multi(self):
-        """Special case when it is filter only by the diffby=multilabel_col"""
+        """Process special case when it is filter only by the diffby=multilabel_col."""
         pairs = self.get_all_pairs(self.multilabel_col, [])
         pairs = itertools.chain.from_iterable(pairs.values())
         pairs = set(map(frozenset, pairs))
