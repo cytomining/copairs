@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -16,7 +17,7 @@ def mean_average_precision(
     null_size: int,
     threshold: float,
     seed: int,
-    max_workers: int = 32,
+    max_workers: Optional[int] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -38,6 +39,8 @@ def mean_average_precision(
         p-value threshold for identifying significant MaP scores.
     seed : int
         Random seed for reproducibility.
+    max_workers : int
+        Number of workers used. Default defined by tqdm's `thread_map`
 
     Returns:
     -------

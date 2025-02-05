@@ -2,7 +2,7 @@ import itertools
 import os
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Callable, Tuple, Optional, Union
+from typing import Callable, Tuple, Union
 
 import numpy as np
 from tqdm.autonotebook import tqdm
@@ -312,7 +312,7 @@ def average_precision(rel_k) -> np.ndarray:
     num_pos = rel_k.shape[1]
     pr_k = np.arange(1, num_pos + 1, dtype=np.float32) / (rel_k + 1)
     ap_values = pr_k.sum(axis=1) / num_pos
-    return ap_values
+    return ap_values.astype(np.float32)
 
 
 def ap_contiguous(
@@ -399,7 +399,7 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
 
     # Compute Average Precision (AP) scores for each row of the binary matrix
     null_dist = average_precision(rel_k)
-    return null_dist.astype(np.float32)
+    return null_dist
 
 
 def null_dist_cached(

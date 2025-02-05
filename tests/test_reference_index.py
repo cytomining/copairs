@@ -1,5 +1,6 @@
 """Tests for assign reference index helper function."""
 
+import pytest
 import numpy as np
 import pandas as pd
 
@@ -8,10 +9,11 @@ from copairs.matching import assign_reference_index
 from tests.helpers import simulate_random_dframe
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
 def test_assign_reference_index():
     SEED = 42
-    length = 20
-    vocab_size = {"p": 5, "w": 3, "l": 2}
+    length = 200
+    vocab_size = {"p": 5, "w": 3, "l": 4}
     n_feats = 5
     pos_sameby = ["l"]
     pos_diffby = []
@@ -19,10 +21,14 @@ def test_assign_reference_index():
     neg_diffby = ["l"]
     rng = np.random.default_rng(SEED)
     meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
+    # p: Plate, w: Well, l: PerturbationID, t: PerturbationType (is control?)
+    meta.eval("t=(l=='l1')", inplace=True)
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
 
-    ap = average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    ap = average_precision(
+        meta, feats, pos_sameby + ["t"], pos_diffby, neg_sameby, neg_diffby + ["t"]
+    )
 
     ap_ri = average_precision(
         assign_reference_index(meta, "l=='l1'"),
