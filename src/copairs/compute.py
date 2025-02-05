@@ -1,3 +1,5 @@
+"""Functions to compute distances and ranks using numpy operations."""
+
 import itertools
 import os
 from multiprocessing.pool import ThreadPool
@@ -15,7 +17,7 @@ def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
     tracking via `tqdm`. It is particularly useful for batch operations that benefit
     from multithreading.
 
-    Parameters:
+    Parameters
     ----------
     par_func : Callable
         A function to execute for each item. It should accept a single argument
@@ -45,18 +47,20 @@ def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
 def batch_processing(
     pairwise_op: Callable[[np.ndarray, np.ndarray], np.ndarray],
 ):
-    """Decorator for adding batch processing to pairwise operations.
+    """
+    Add batch processing support to pairwise operations.
 
-    This function wraps a pairwise operation to process data in batches, enabling
-    efficient computation and multithreading when working with large datasets.
+    This decorator wraps a pairwise operation to process data in batches,
+    enabling efficient computation and multithreading when working with large
+    datasets.
 
-    Parameters:
+    Parameters
     ----------
     pairwise_op : Callable
         A function that computes pairwise operations (e.g., similarity or distance)
         between two arrays of features.
 
-    Returns:
+    Returns
     -------
     Callable
         A wrapped function that processes pairwise operations in batches.
@@ -89,14 +93,14 @@ def batch_processing(
 def pairwise_corr(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     """Compute the Pearson correlation coefficient for paired rows of two matrices.
 
-    Parameters:
+    Parameters
     ----------
     x_sample : np.ndarray
         A 2D array where each row represents a profile
     y_sample : np.ndarray
         A 2D array of the same shape as `x_sample`.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array of Pearson correlation coefficients for each row pair in
@@ -125,14 +129,14 @@ def pairwise_corr(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
 def pairwise_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     """Compute cosine similarity for paired rows of two matrices.
 
-    Parameters:
+    Parameters
     ----------
     x_sample : np.ndarray
         A 2D array where each row represents a profile.
     y_sample : np.ndarray
         A 2D array of the same shape as `x_sample`.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array of cosine similarity scores for each row pair in `x_sample` and `y_sample`.
@@ -149,14 +153,14 @@ def pairwise_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
 def pairwise_abs_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     """Compute the absolute cosine similarity for paired rows of two matrices.
 
-    Parameters:
+    Parameters
     ----------
     x_sample : np.ndarray
         A 2D array where each row represents a profile.
     y_sample : np.ndarray
         A 2D array of the same shape as `x_sample`.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         Absolute values of cosine similarity scores.
@@ -168,14 +172,14 @@ def pairwise_euclidean(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
     """
     Compute the inverse Euclidean distance for paired rows of two matrices.
 
-    Parameters:
+    Parameters
     ----------
     x_sample : np.ndarray
         A 2D array where each row represents a profile.
     y_sample : np.ndarray
         A 2D array of the same shape as `x_sample`.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array of inverse Euclidean distance scores (scaled to range 0-1).
@@ -188,14 +192,14 @@ def pairwise_euclidean(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
 def pairwise_manhattan(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     """Compute the inverse Manhattan distance for paired rows of two matrices.
 
-    Parameters:
+    Parameters
     ----------
     x_sample : np.ndarray
         A 2D array where each row represents a profile.
     y_sample : np.ndarray
         A 2D array of the same shape as `x_sample`.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array of inverse Manhattan distance scores (scaled to range 0-1).
@@ -207,14 +211,14 @@ def pairwise_manhattan(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
 def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     """Compute the inverse Chebyshev distance for paired rows of two matrices.
 
-    Parameters:
+    Parameters
     ----------
     x_sample : np.ndarray
         A 2D array where each row represents a profile.
     y_sample : np.ndarray
         A 2D array of the same shape as `x_sample`.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array of inverse Chebyshev distance scores (scaled to range 0-1).
@@ -230,7 +234,7 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
     for pairwise similarity or dissimilarity computations. Users can choose from a
     predefined set of metrics or provide a custom callable.
 
-    Parameters:
+    Parameters
     ----------
     distance : str or callable
         The name of the distance metric or a custom callable function. Supported
@@ -245,13 +249,13 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
         If a callable is provided, it must accept the paramters associated with each
         callable function.
 
-    Returns:
+    Returns
     -------
     callable
         A function implementing the specified distance metric.
 
-    Raises:
-    -------
+    Raises
+    ------
     ValueError:
         If the provided `distance` is not a recognized string identifier or a valid callable.
 
@@ -260,7 +264,6 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
     >>> distance_fn = get_distance_fn("cosine")
     >>> similarity_scores = distance_fn(x_sample, y_sample)
     """
-
     # Dictionary of supported distance metrics
     distance_metrics = {
         "abs_cosine": pairwise_abs_cosine,
@@ -291,12 +294,13 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
 
 def random_binary_matrix(n, m, k, rng):
     """Generate a indices of k values in 1 per row in a random binary n*m matrix.
+
     Args:
     n: Number of rows.
     m: Number of columns.
     k: Number of 1's per row.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A binary matrix of shape `(n, m)` with exactly `k` ones per row.
@@ -308,7 +312,7 @@ def random_binary_matrix(n, m, k, rng):
 
 
 def average_precision(rel_k) -> np.ndarray:
-    """Compute average precision based on binary list indices"""
+    """Compute average precision based on binary list indices."""
     num_pos = rel_k.shape[1]
     pr_k = np.arange(1, num_pos + 1, dtype=np.float32) / (rel_k + 1)
     ap_values = pr_k.sum(axis=1) / num_pos
@@ -324,7 +328,7 @@ def ap_contiguous(
     relevance labels and their associated counts. It also returns configurations
     indicating the number of positive and total pairs for each profile.
 
-    Parameters:
+    Parameters
     ----------
     rel_k_list : np.ndarray
         Array of relevance labels (1 for positive pairs, 0 for negative pairs), sorted
@@ -332,7 +336,7 @@ def ap_contiguous(
     counts : np.ndarray
         Array indicating how many times each profile appears in the rank list.
 
-    Returns:
+    Returns
     -------
     ap_scores : np.ndarray
         Array of Average Precision scores for each profile.
@@ -373,7 +377,7 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     generated binary relevance lists. It is useful for generating a null distribution
     to assess the significance of observed AP scores.
 
-    Parameters:
+    Parameters
     ----------
     num_perm : int
         Number of random permutations (i.e., how many random relevance lists to generate).
@@ -384,7 +388,7 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     seed : int
         Seed for the random number generator to ensure reproducibility.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array containing the Average Precision scores for each randomly
@@ -411,7 +415,7 @@ def null_dist_cached(
     pairs (`num_pos`) and total pairs (`total`). It uses caching to store and
     retrieve precomputed distributions, saving time and computational resources.
 
-    Parameters:
+    Parameters
     ----------
     num_pos : int
         Number of positive pairs in the configuration.
@@ -424,7 +428,7 @@ def null_dist_cached(
     cache_dir : Path
         Directory to store or retrieve cached null distributions.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         Null distribution for the specified configuration.
@@ -453,7 +457,8 @@ def null_dist_cached(
 
 def get_null_dists(confs: np.ndarray, null_size: int, seed: int) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
-    Parameters:
+
+    Parameters
     ----------
     confs : np.ndarray
         Array where each row contains the number of positive pairs (`num_pos`)
@@ -463,7 +468,7 @@ def get_null_dists(confs: np.ndarray, null_size: int, seed: int) -> np.ndarray:
     seed : int
         Random seed for reproducibility.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 2D array where each row corresponds to a null distribution for a specific
@@ -493,10 +498,9 @@ def get_null_dists(confs: np.ndarray, null_size: int, seed: int) -> np.ndarray:
 
 
 def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed: int):
-    """Calculate p-values for an array of Average Precision (AP) scores
-    using a null distribution.
+    """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
-    Parameters:
+    Parameters
     ----------
     ap_scores : np.ndarray
         Array of observed AP scores for which to calculate p-values.
@@ -509,7 +513,7 @@ def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed
         Seed for the random number generator to ensure reproducibility of the null
         distribution.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         An array of p-values corresponding to the input AP scores.
@@ -544,14 +548,14 @@ def concat_ranges(start: np.ndarray, end: np.ndarray) -> np.ndarray:
     by the `start` and `end` arrays. Each range is inclusive of `start` and exclusive
     of `end`.
 
-    Parameters:
+    Parameters
     ----------
     start : np.ndarray
         A 1D array of start indices for the ranges.
     end : np.ndarray
         A 1D array of end indices for the ranges. Must have the same shape as `start`.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array containing the concatenated ranges.
@@ -578,12 +582,12 @@ def to_cutoffs(counts: np.ndarray) -> np.ndarray:
     in a cumulative list. The first index is always `0`, and subsequent indices
     correspond to the cumulative sum of counts up to the previous entry.
 
-    Parameters:
+    Parameters
     ----------
     counts : np.ndarray
         A 1D array of counts representing the size of each segment.
 
-    Returns:
+    Returns
     -------
     np.ndarray
         A 1D array of cutoff indices where each value indicates the starting index

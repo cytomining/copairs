@@ -1,3 +1,5 @@
+"""Functions to compute mean average precision."""
+
 import logging
 from typing import Optional
 
@@ -26,7 +28,7 @@ def mean_average_precision(
     scores by comparing them to a null distribution and performs multiple testing
     corrections.
 
-    Parameters:
+    Parameters
     ----------
     ap_scores : pd.DataFrame
         DataFrame containing individual Average Precision (AP) scores and pair statistics
@@ -42,7 +44,7 @@ def mean_average_precision(
     max_workers : int
         Number of workers used. Default defined by tqdm's `thread_map`
 
-    Returns:
+    Returns
     -------
     pd.DataFrame
         DataFrame with the following columns:

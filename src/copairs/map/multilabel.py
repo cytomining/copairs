@@ -1,3 +1,5 @@
+"""Functions to compute mAP with multilabel support."""
+
 import itertools
 import logging
 
@@ -12,7 +14,7 @@ from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_inp
 logger = logging.getLogger("copairs")
 
 
-def create_neg_query_solver(neg_pairs, neg_sims):
+def _create_neg_query_solver(neg_pairs, neg_sims):
     # Melting and sorting by ix. neg_cutoffs splits the contiguous array
     neg_ix = neg_pairs.ravel()
     neg_sims = np.repeat(neg_sims, 2)
@@ -35,7 +37,7 @@ def create_neg_query_solver(neg_pairs, neg_sims):
     return negs_for
 
 
-def build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
+def _build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
     ap_scores_list, null_confs_list, ix_list = [], [], []
 
     start = 0
@@ -76,6 +78,13 @@ def average_precision(
     batch_size=20000,
     distance="cosine",
 ) -> pd.DataFrame:
+    """
+    Compute average precision with multilabel support.
+
+    See Also
+    --------
+    copairs.map.average_precision : Average precision without multilabel support.
+    """
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
@@ -120,8 +129,8 @@ def average_precision(
     neg_sims = distance_fn(feats, neg_pairs, batch_size)
 
     logger.info("Computing AP per label...")
-    negs_for = create_neg_query_solver(neg_pairs, neg_sims)
-    ap_scores_list, null_confs_list, ix_list = build_rank_lists_multi(
+    negs_for = _create_neg_query_solver(neg_pairs, neg_sims)
+    ap_scores_list, null_confs_list, ix_list = _build_rank_lists_multi(
         pos_pairs, pos_sims, pos_counts, negs_for
     )
 

@@ -1,3 +1,5 @@
+"""Functions to support query-like syntax when finding the matches."""
+
 import itertools
 import re
 from typing import List, Tuple
@@ -11,7 +13,7 @@ def validate_pipeline_input(
 ) -> None:
     """Validate the metadata and features for consistency and completeness.
 
-    Parameters:
+    Parameters
     ----------
     meta : pd.DataFrame
         The metadata DataFrame describing the profiles.
@@ -20,8 +22,8 @@ def validate_pipeline_input(
     columns : List[str]
         List of column names in the metadata to validate for null values.
 
-    Raises:
-    -------
+    Raises
+    ------
     ValueError:
         - If any of the specified metadata columns contain null values.
         - If the number of rows in the metadata and features are not equal.
@@ -41,7 +43,7 @@ def validate_pipeline_input(
 
 
 def flatten_str_list(*args):
-    """create a single list with all the params given"""
+    """Create a single list with all the params given."""
     columns = set()
     for col in args:
         if isinstance(col, str):
@@ -63,14 +65,14 @@ def evaluate_and_filter(
     applies these conditions to the metadata DataFrame, and returns the filtered metadata
     along with the updated list of columns.
 
-    Parameters:
+    Parameters
     ----------
     df : pd.DataFrame
         The metadata DataFrame containing information about profiles to be filtered.
     columns : List[str]
         A list of metadata column names.
 
-    Returns:
+    Returns
     -------
     Tuple[pd.DataFrame, List[str]]
         - The filtered metadata DataFrame.
@@ -91,7 +93,7 @@ def extract_filters(
 ) -> Tuple[List[str], List[str]]:
     """Extract and validate query filters from selected metadata columns.
 
-    Parameters:
+    Parameters
     ----------
     columns : List[str]
         A list of selected metadata column names or query expressions. Query expressions
@@ -99,14 +101,14 @@ def extract_filters(
     df_columns : List[str]
         All available metadata column names to validate against.
 
-    Returns:
+    Returns
     -------
     Tuple[List[str], List[str]]
         - `queries_to_eval`: A list of valid query expressions to evaluate.
         - `parsed_cols`: A list of valid metadata column names extracted from the input `columns`.
 
-    Raises:
-    -------
+    Raises
+    ------
     ValueError:
         - If a metadata column or query expression is invalid (e.g., references a non-existent column).
         - If duplicate queries are found for the same metadata column.
@@ -149,7 +151,7 @@ def apply_filters(df: pd.DataFrame, query_list: List[str]) -> pd.DataFrame:
     to filter its rows. If no query expressions are provided, the original DataFrame
     is returned unchanged.
 
-    Parameters:
+    Parameters
     ----------
     df : pd.DataFrame
         The DataFrame to which the filters will be applied.
@@ -157,13 +159,13 @@ def apply_filters(df: pd.DataFrame, query_list: List[str]) -> pd.DataFrame:
         A list of query expressions (e.g., "column_name > 5"). These expressions
         should follow the syntax supported by `pd.DataFrame.query`.
 
-    Returns:
+    Returns
     -------
     pd.DataFrame
         The DataFrame filtered based on the provided query expressions.
 
-    Raises:
-    -------
+    Raises
+    ------
     ValueError:
         - If the combined query results in an empty DataFrame.
         - If the combined query expression is invalid.

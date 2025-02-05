@@ -1,9 +1,11 @@
+"""Functions to compute average precision."""
+
 import itertools
 import logging
+from typing import List
 
 import numpy as np
 import pandas as pd
-from typing import List
 
 from copairs import compute
 from copairs.matching import Matcher, UnpairedException
@@ -24,7 +26,7 @@ def build_rank_lists(
     This function processes positive and negative pairs along with their similarity scores
     to construct rank lists and determine unique profile indices with their associated counts.
 
-    Parameters:
+    Parameters
     ----------
     pos_pairs : np.ndarray
         Array of positive pair indices, where each pair is represented as a pair of integers.
@@ -38,7 +40,7 @@ def build_rank_lists(
     neg_sims : np.ndarray
         Array of similarity scores for negative pairs.
 
-    Returns:
+    Returns
     -------
     paired_ix : np.ndarray
         Unique indices of profiles that appear in the rank lists.
@@ -50,7 +52,6 @@ def build_rank_lists(
     counts : np.ndarray
         Array of counts indicating how many times each profile index appears in the rank lists.
     """
-
     # Combine relevance labels: 1 for positive pairs, 0 for negative pairs
     labels = np.concatenate(
         [
@@ -91,15 +92,14 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
 ) -> pd.DataFrame:
-    """Calculate average precision (AP) scores for pairs of profiles based on their
-    similarity.
+    """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
     This function identifies positive and negative pairs of profiles using  metadata
     rules, computes their similarity scores, and calculates average precision
     scores for each profile. The results include the number of positive and total pairs
     for each profile.
 
-    Parameters:
+    Parameters
     ----------
     meta : pd.DataFrame
         Metadata of the profiles, including columns used for defining pairs.
@@ -142,7 +142,7 @@ def average_precision(
     distance : str
         The distance metric used for computing similarities. Default is "cosine".
 
-    Returns:
+    Returns
     -------
     pd.DataFrame
         A DataFrame containing the following columns:
@@ -151,13 +151,13 @@ def average_precision(
         - 'n_total_pairs': The total number of pairs for each profile.
         - Additional metadata columns from the input.
 
-    Raises:
+    Raises
     ------
     UnpairedException
         If no positive or negative pairs are found in the dataset.
 
-    Notes:
-    ------
+    Notes
+    -----
     - Positive Pair Rules:
         * Positive pairs are defined by `pos_sameby` (profiles share these metadata values)
           and optionally differentiated by `pos_diffby` (profiles must differ in these metadata values if specified).
@@ -165,7 +165,6 @@ def average_precision(
         * Negative pairs are defined by `neg_diffby` (profiles differ in these metadata values)
           and optionally constrained by `neg_sameby` (profiles share these metadata values if specified).
     """
-
     # Combine all metadata columns needed for pair definitions
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
 

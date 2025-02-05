@@ -11,6 +11,7 @@ from tests.helpers import simulate_random_dframe
 
 @pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
 def test_assign_reference_index():
+    """Test ap values are not computed for ref samples."""
     SEED = 42
     length = 200
     vocab_size = {"p": 5, "w": 3, "l": 4}
