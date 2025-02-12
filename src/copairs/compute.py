@@ -4,7 +4,7 @@ import itertools
 import os
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Callable, Tuple, Union
+from typing import Callable, Tuple, Union, Optional
 
 import numpy as np
 from tqdm.autonotebook import tqdm
@@ -455,7 +455,12 @@ def null_dist_cached(
     return null_dist
 
 
-def get_null_dists(confs: np.ndarray, null_size: int, seed: int) -> np.ndarray:
+def get_null_dists(
+    confs: np.ndarray,
+    null_size: int,
+    seed: int,
+    cache_dir: Optional[Union[str, Path]] = None,
+) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
 
     Parameters
@@ -475,7 +480,8 @@ def get_null_dists(confs: np.ndarray, null_size: int, seed: int) -> np.ndarray:
         configuration.
     """
     # Define the directory for caching null distributions
-    cache_dir = Path.home() / ".copairs" / f"seed{seed}" / f"ns{null_size}"
+    cache_dir = Path.home() / ".copairs" if cache_dir is None else Path(cache_dir)
+    cache_dir = cache_dir / f"seed{seed}" / f"ns{null_size}"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Number of configurations and random seeds for each configuration
