@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from copairs.matching import MatcherMultilabel
+from copairs.matching import find_pairs_multilabel
 from tests.helpers import simulate_random_plates
 
 SEED = 42
@@ -47,11 +47,10 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby, multilabel_col: str):
     return pairs
 
 
-def check_naive(dframe, matcher: MatcherMultilabel, sameby, diffby, multilabel_col):
-    """Check Matcher and naive generate same pairs."""
+def check_naive(dframe, sameby, diffby, multilabel_col):
+    """Check find_pairs_multilabel and naive generate same pairs."""
     gt_pairs = get_naive_pairs(dframe, sameby, diffby, multilabel_col)
-    vals = matcher.get_all_pairs(sameby, diffby)
-    vals = sum(vals.values(), [])
+    vals = find_pairs_multilabel(dframe, sameby, diffby, multilabel_col)
     vals = pd.DataFrame(vals, columns=["index_x", "index_y"])
     vals = vals.sort_values(["index_x", "index_y"]).reset_index(drop=True)
     vals = set(vals.apply(frozenset, axis=1))
@@ -68,8 +67,7 @@ def test_sameby():
         n_compounds=4, n_replicates=5, plate_size=5, sameby=sameby, diffby=diffby
     )
     dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
-    matcher = MatcherMultilabel(dframe, dframe.columns, multilabel_col, seed=SEED)
-    check_naive(dframe, matcher, sameby, diffby, multilabel_col)
+    check_naive(dframe, sameby, diffby, multilabel_col)
 
 
 def test_diffby():
@@ -81,9 +79,8 @@ def test_diffby():
         n_compounds=4, n_replicates=5, plate_size=5, sameby=sameby, diffby=diffby
     )
     dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
-    matcher = MatcherMultilabel(dframe, dframe.columns, multilabel_col, seed=SEED)
 
-    check_naive(dframe, matcher, sameby, diffby, multilabel_col)
+    check_naive(dframe, sameby, diffby, multilabel_col)
 
 
 def test_only_diffby():
@@ -95,8 +92,7 @@ def test_only_diffby():
         n_compounds=4, n_replicates=5, plate_size=5, sameby=sameby, diffby=diffby
     )
     dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
-    matcher = MatcherMultilabel(dframe, dframe.columns, multilabel_col, seed=SEED)
-    check_naive(dframe, matcher, sameby, diffby, multilabel_col)
+    check_naive(dframe, sameby, diffby, multilabel_col)
 
 
 def test_only_diffby_many_cols():
@@ -108,8 +104,7 @@ def test_only_diffby_many_cols():
         n_compounds=4, n_replicates=5, plate_size=5, sameby=sameby, diffby=diffby
     )
     dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
-    matcher = MatcherMultilabel(dframe, dframe.columns, multilabel_col, seed=SEED)
-    check_naive(dframe, matcher, sameby, diffby, multilabel_col)
+    check_naive(dframe, sameby, diffby, multilabel_col)
 
 
 def test_only_sameby_many_cols():
@@ -121,5 +116,4 @@ def test_only_sameby_many_cols():
         n_compounds=4, n_replicates=5, plate_size=5, sameby=sameby, diffby=diffby
     )
     dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
-    matcher = MatcherMultilabel(dframe, dframe.columns, multilabel_col, seed=SEED)
-    check_naive(dframe, matcher, sameby, diffby, multilabel_col)
+    check_naive(dframe, sameby, diffby, multilabel_col)

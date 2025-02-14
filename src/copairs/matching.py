@@ -7,6 +7,7 @@ from collections import namedtuple
 from math import comb
 from typing import Dict, Sequence, Set, Union
 
+import duckdb
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
@@ -463,3 +464,120 @@ class MatcherMultilabel:
             return set(x) not in pairs
 
         return {None: list(filter(filter_fn, all_pairs))}
+
+
+def find_pairs(
+    dframe: Union[pd.DataFrame, duckdb.duckdb.DuckDBPyRelation],
+    sameby: Union[str, ColumnList],
+    diffby: Union[str, ColumnList],
+    rev: bool = False,
+) -> np.ndarray:
+    """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns.
+
+    If `rev`  is True sameby and diffby are swapped.
+    """
+    sameby, diffby = _validate(sameby, diffby)
+
+    if len(set(sameby).intersection(diffby)):
+        raise ValueError("sameby and diffby must be disjoint lists")
+
+    df = dframe
+    if isinstance(df, pd.DataFrame):
+        df = dframe.reset_index()
+    with duckdb.connect(":memory:"):
+        # If rev is True, diffby and sameby are swapped
+        group_1, group_2 = [
+            [f"{('', 'NOT')[i - rev]} A.{x} = B.{x}" for x in y]
+            for i, y in enumerate((sameby, diffby))
+        ]
+        string = (
+            f"SELECT A.index,B.index"
+            " FROM df A"
+            " JOIN df B"
+            " ON A.index < B.index"  #  Ensures only one of (a,b)/(b,a) and no (a,a)
+            f" AND {' AND '.join((*group_1, *group_2))}"
+        )
+        index_d = duckdb.sql(string).fetchnumpy()
+
+        result = np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
+        return result
+
+
+def _validate(sameby, diffby):
+    if isinstance(sameby, str):
+        sameby = (sameby,)
+    if isinstance(diffby, str):
+        sameby = (diffby,)
+
+    if not (len(sameby) or len(diffby)):
+        raise ValueError("at least one should be provided")
+
+    return sameby, diffby
+
+
+def find_pairs_multilabel(
+    dframe: Union[pd.DataFrame, duckdb.duckdb.DuckDBPyRelation],
+    sameby: Union[str, ColumnList],
+    diffby: Union[str, ColumnList],
+    multilabel_col: str,
+) -> np.ndarray:
+    """
+    Find pairs of rows in a DataFrame that have the same or different values in certain columns.
+
+    The function takes into account columns with multiple labels (i.e., a list of identifiers).
+
+    Parameters
+    ----------
+    dframe : Union[pd.DataFrame, duckdb.duckdb.DuckDBPyRelation]
+        Input DataFrame.
+    sameby : Union[str, ColumnList]
+        List of column names to consider for finding identical values.
+    diffby : Union[str, ColumnList]
+        List of column names to consider for finding different values.
+    multilabel_col : str
+        Name of the column containing multiple labels.
+
+    Returns
+    -------
+    np.ndarray
+        Array of pairs of indices with matching or non-matching values in the specified columns.
+
+    Notes
+    -----
+    The function asserts that `multilabel_col` is present in either `sameby` or `diffby`.
+    """
+    assert (multilabel_col in sameby) or (multilabel_col in diffby), (
+        f"Missing {multilabel_col} in sameby and diffby"
+    )
+
+    df = dframe.reset_index()
+
+    if multilabel_col in sameby:
+        sameby.remove(multilabel_col)
+        shared_item = True
+    else:
+        diffby.remove(multilabel_col)
+        shared_item = False
+
+    with duckdb.connect(":memory:"):
+        result = duckdb.sql(
+            "SELECT * "
+            f" FROM (select *,CAST(len(list_intersect(A.{multilabel_col},B.{multilabel_col})) AS BOOL)"
+            " AS shared_item "
+            " FROM df A JOIN df B ON A.index < B.index)"
+            f" WHERE shared_item = {shared_item}"
+        )
+
+        if len(sameby) or len(diffby):
+            monolabel_result = find_pairs(df, sameby, diffby).T
+            result = duckdb.sql(
+                f"SELECT index, index_1"
+                " FROM result A JOIN monolabel_result B"
+                " ON A.index = B.column0 "
+                "AND A.index_1 = B.column1"
+            )
+
+        index_d = result.fetchnumpy()
+        result = np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
+
+    return result

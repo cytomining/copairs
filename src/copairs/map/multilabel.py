@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.matching import MatcherMultilabel, UnpairedException
+from copairs.matching import UnpairedException, find_pairs
 
 from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_input
 
@@ -93,31 +93,18 @@ def average_precision(
     meta = meta.reset_index(drop=True).copy()
 
     logger.info("Indexing metadata...")
-    matcher = MatcherMultilabel(meta, columns, multilabel_col=multilabel_col, seed=0)
 
     logger.info("Finding positive pairs...")
-    pos_pairs = matcher.get_all_pairs(sameby=pos_sameby, diffby=pos_diffby)
-    pos_keys = pos_pairs.keys()
-    pos_counts = np.fromiter(map(len, pos_pairs.values()), dtype=np.uint32)
-    pos_total = sum(pos_counts)
-    if pos_total == 0:
+    pos_pairs = find_pairs(meta, sameby=pos_sameby, diffby=pos_diffby)
+    # pos_keys = pos_pairs.keys()
+    if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
-    pos_pairs = np.fromiter(
-        itertools.chain.from_iterable(pos_pairs.values()),
-        dtype=np.dtype((np.uint32, 2)),
-        count=pos_total,
-    )
 
     logger.info("Finding negative pairs...")
-    neg_pairs = matcher.get_all_pairs(sameby=neg_sameby, diffby=neg_diffby)
-    neg_total = sum(len(p) for p in neg_pairs.values())
-    if neg_total == 0:
+    _, pos_counts = np.unique(pos_pairs, axis=0, return_counts=True)
+    neg_pairs = find_pairs(meta, sameby=neg_sameby, diffby=neg_diffby)
+    if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find any negative pairs.")
-    neg_pairs = np.fromiter(
-        itertools.chain.from_iterable(neg_pairs.values()),
-        dtype=np.dtype((np.uint32, 2)),
-        count=neg_total,
-    )
 
     logger.info("Dropping dups in negative pairs...")
     neg_pairs = np.unique(neg_pairs, axis=0)
@@ -136,21 +123,16 @@ def average_precision(
 
     logger.info("Creating result DataFrame...")
     results = []
-    for i, key in enumerate(pos_keys):
+    for i, key in enumerate(pos_pairs):
         result = pd.DataFrame(
             {
                 "average_precision": ap_scores_list[i],
                 "n_pos_pairs": null_confs_list[i][:, 0],
                 "n_total_pairs": null_confs_list[i][:, 1],
                 "ix": ix_list[i],
+                **{col: meta.iloc[key][col] for col in meta.columns},
             }
         )
-        if isinstance(key, tuple):
-            # Is a ComposedKey
-            for k, v in zip(key._fields, key):
-                result[k] = v
-        else:
-            result[multilabel_col] = key
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
     meta = meta.drop(multilabel_col, axis=1)
