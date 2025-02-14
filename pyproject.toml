@@ -13,7 +13,8 @@ authors = [
 dependencies = [
   "pandas",
   "tqdm",
-  "statsmodels"
+  "statsmodels",
+  "duckdb>=1.2.0",
 ]
 
 [project.optional-dependencies]
