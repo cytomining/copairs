@@ -18,7 +18,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff"]
+dev = [
+    "ipdb>=0.13.13",
+    "jupyter>=1.1.1",
+    "ruff",
+]
 plot = ["plotly"]
 test = ["scikit-learn", "pytest"]
 demo = ["notebook", "matplotlib"]
