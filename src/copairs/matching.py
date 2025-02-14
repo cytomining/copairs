@@ -466,7 +466,7 @@ class MatcherMultilabel:
         return {None: list(filter(filter_fn, all_pairs))}
 
 
-def find_pairs(dframe, sameby: list[str], diffby: list[str], inside=True) -> np.ndarray:
+def find_pairs(dframe, sameby, diffby, inside=True) -> np.ndarray:
     """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns."""
     df = dframe.reset_index()
     with duckdb.connect("main"):
