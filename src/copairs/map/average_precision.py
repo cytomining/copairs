@@ -183,14 +183,12 @@ def average_precision(
     # Identify positive pairs based on `pos_sameby` and `pos_diffby`
     logger.info("Finding positive pairs...")
     pos_pairs = find_pairs(meta, sameby=pos_sameby, diffby=pos_diffby)
-    # pos_total = sum(len(p) for p in pos_pairs.values())
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 
     # Identify negative pairs based on `neg_sameby` and `neg_diffby`
     logger.info("Finding negative pairs...")
     neg_pairs = find_pairs(meta, sameby=neg_sameby, diffby=neg_diffby)
-    # neg_total = sum(len(p) for p in neg_pairs.values())
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find negative pairs.")
 
