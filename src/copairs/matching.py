@@ -7,6 +7,7 @@ from collections import namedtuple
 from math import comb
 from typing import Dict, Sequence, Set, Union
 
+import duckdb
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
@@ -463,3 +464,25 @@ class MatcherMultilabel:
             return set(x) not in pairs
 
         return {None: list(filter(filter_fn, all_pairs))}
+    
+def find_pairs(dframe, sameby:list[str], diffby:list[str])->np.ndarray:
+    """
+    Find the indices of pairs in which share the same value in `sameby` columns but not on `diffby` columns.
+    This assumes that sameby is not empty
+    
+    """
+    df = dframe.reset_index()
+    with duckdb.connect("main"):
+        pos_suffix = [f"AND A.{x} = B.{x}" for x in sameby[1:]]
+        neg_suffix = [f"AND NOT A.{x} = B.{x}" for x in diffby]
+        string = (
+        # f"SELECT A.index,B.index,{','.join(['A.' + x for x in sameby])} "
+        f"SELECT A.index,B.index "
+        'FROM df A '
+        'JOIN df B '
+        f"ON A.{sameby[0]} = B.{sameby[0]}"
+        f" {' '.join((*pos_suffix, *neg_suffix))} "
+        )
+        index_d = duckdb.sql(string).fetchnumpy()
+        return np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
+
