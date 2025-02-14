@@ -7,6 +7,9 @@ Seed = 0
 # Cols are c, p and w
 sameby = ["c"]
 diffby = []
+n_compounds = 15000
+n_replicates = 20
+plate_size = 384
 
 def simulate_plates(n_compounds, n_replicates, plate_size):
     """Round robin creation of platemaps."""
@@ -22,7 +25,9 @@ def simulate_plates(n_compounds, n_replicates, plate_size):
         compounds.append(f"c{compound_id}")
         plates.append(f"p{plate_id}")
         wells.append(f"w{well_id}")
-        
+
+    dframe = pd.DataFrame({"c": compounds, "p": plates, "w": wells})
+    return dframe
 def find_pairs(dframe, sameby, diffby):
     # Assumes sameby or diffby is not empty
     df = dframe.reset_index()
@@ -30,29 +35,33 @@ def find_pairs(dframe, sameby, diffby):
         pos_suffix = [f"AND A.{x} = B.{x}" for x in sameby[1:]]
         neg_suffix = [f"AND NOT A.{x} = B.{x}" for x in diffby]
         string = (
-        # f"SELECT list(index),list(index_1),{','.join('first(' + x +')' for x in sameby)} FROM ("
-        f"SELECT {','.join(['CAST(A.' + x +') AS ' for x in sameby])},A.index,B.index "
+        f"SELECT {','.join(['A.' + x for x in sameby])},A.index,B.index "
         'FROM df A '
         'JOIN df B '
         f"ON A.{sameby[0]} = B.{sameby[0]}"
         f" {' '.join((*pos_suffix, *neg_suffix))} "
-        # f" {' '.join((*pos_suffix, *neg_suffix))})"
-        # f"GROUP BY {','.join(sameby)}"
         )
+        # tmp = duckdb.sql(f"SELECT * WHERE(c = c0) FROM ({string})")
         tmp = duckdb.sql(string)
+        return tmp
 
-    dframe = pd.DataFrame({"c": compounds, "p": plates, "w": wells})
-    return dframe
+    return None
 
 # Gen data
-%timeit dframe = simulate_plates(n_compounds=15000, n_replicates=20, plate_size=384)
+dframe = simulate_plates(n_compounds, n_replicates, plate_size)
 
 # Load matcher
-%timeit matcher = Matcher(dframe, dframe.columns, seed=SEED)
+matcher = Matcher(dframe, dframe.columns, seed=SEED)
 
 # Evaluate
-# pairs_dict = matcher.get_all_pairs(sameby, diffby)
-# %timeit pairs_dict2 = find_pairs(dframe,sameby, diffby)
+# %timeit pairs_dict = matcher.get_all_pairs(sameby, diffby)
+duckdb_results = find_pairs(dframe,sameby, diffby)
+"""Assert the pairs are valid."""
+for _, id1, id2 in duckdb_results.fetchall():
+    for col in sameby:
+        assert dframe.loc[id1, col] == dframe.loc[id2, col]
+    for col in diffby:
+        assert dframe.loc[id1, col] != dframe.loc[id2, col]
 
 
 # Compounds = 15000
