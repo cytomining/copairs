@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.matching import find_pairs, UnpairedException
+from copairs.matching import UnpairedException, find_pairs
 
 from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_input
 
@@ -53,12 +53,10 @@ def build_rank_lists(
         Array of counts indicating how many times each profile index appears in the rank lists.
     """
     # Combine relevance labels: 1 for positive pairs, 0 for negative pairs
-    labels = np.concatenate(
-        [
-            np.ones(pos_pairs.size, dtype=np.uint32),
-            np.zeros(neg_pairs.size, dtype=np.uint32),
-        ]
-    )
+    labels = np.concatenate([
+        np.ones(pos_pairs.size, dtype=np.uint32),
+        np.zeros(neg_pairs.size, dtype=np.uint32),
+    ])
 
     # Flatten positive and negative pair indices for ranking
     ix = np.concatenate([pos_pairs.ravel(), neg_pairs.ravel()])
@@ -179,7 +177,6 @@ def average_precision(
     meta = meta.reset_index(drop=True).copy()
 
     logger.info("Indexing metadata...")
-    # matcher = (meta, columns, seed=0)
 
     # Identify positive pairs based on `pos_sameby` and `pos_diffby`
     logger.info("Finding positive pairs...")
@@ -188,26 +185,12 @@ def average_precision(
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 
-    # # Convert positive pairs to a NumPy array for efficient computation
-    # pos_pairs = np.fromiter(
-    #     itertools.chain.from_iterable(pos_pairs.values()),
-    #     dtype=np.dtype((np.uint32, 2)),
-    #     count=pos_total,
-    # )
-
     # Identify negative pairs based on `neg_sameby` and `neg_diffby`
     logger.info("Finding negative pairs...")
     neg_pairs = find_pairs(meta, sameby=neg_sameby, diffby=neg_diffby)
     # neg_total = sum(len(p) for p in neg_pairs.values())
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find negative pairs.")
-
-    # Convert negative pairs to a NumPy array for efficient computation
-    # neg_pairs = np.fromiter(
-    #     itertools.chain.from_iterable(neg_pairs.values()),
-    #     dtype=np.dtype((np.uint32, 2)),
-    #     count=neg_total,
-    # )
 
     # Compute similarities for positive pairs
     logger.info("Computing positive similarities...")
