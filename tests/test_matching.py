@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from copairs import Matcher
 from copairs.matching import find_pairs
 from tests.helpers import create_dframe, simulate_plates, simulate_random_dframe
 
