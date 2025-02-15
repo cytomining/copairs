@@ -468,6 +468,18 @@ class MatcherMultilabel:
 
 def find_pairs(dframe, sameby, diffby, inside=True) -> np.ndarray:
     """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns."""
+        
+    if isinstance(sameby, str):
+        sameby = (sameby,)
+    if isinstance(diffby, str):
+        sameby = (diffby,)
+
+    if not (len(sameby) or len(diffby)):
+        raise ValueError("at least one should be provided")
+    
+    if len(set(sameby).intersection(diffby)):
+         raise ValueError("sameby and diffby must be disjoint lists")
+        
     df = dframe.reset_index()
     with duckdb.connect("main"):
         pos_suffix = [f"A.{x} = B.{x}" for x in sameby]
