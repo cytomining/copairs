@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from copairs import Matcher
+from copairs.matching import find_pairs
 from tests.helpers import create_dframe, simulate_plates, simulate_random_dframe
 
 SEED = 0
@@ -61,11 +62,12 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
     return pairs
 
 
-def check_naive(dframe, matcher: Matcher, sameby, diffby):
+def check_naive(dframe, sameby, diffby):
     """Check Matcher and naive generate same pairs."""
     gt_pairs = get_naive_pairs(dframe, sameby, diffby)
-    vals = matcher.get_all_pairs(sameby, diffby)
-    vals = sum(vals.values(), [])
+    # vals = matcher.get_all_pairs(sameby, diffby)
+    vals = find_pairs(dframe, sameby, diffby)
+    # vals = sum(vals.values(), [])
     vals = pd.DataFrame(vals, columns=["index_x", "index_y"])
     vals = vals.sort_values(["index_x", "index_y"]).reset_index(drop=True)
     vals = set(vals.apply(frozenset, axis=1))
@@ -76,8 +78,7 @@ def check_naive(dframe, matcher: Matcher, sameby, diffby):
 def check_simulated_data(length, vocab_size, sameby, diffby, rng):
     """Test sample of valid pairs from a simulated dataset."""
     dframe = simulate_random_dframe(length, vocab_size, sameby, diffby, rng)
-    matcher = Matcher(dframe, dframe.columns, seed=SEED)
-    check_naive(dframe, matcher, sameby, diffby)
+    check_naive(dframe, sameby, diffby)
 
 
 def test_stress_simulated_data():
@@ -101,51 +102,44 @@ def test_stress_simulated_data():
 def test_empty_sameby():
     """Test query without sameby."""
     dframe = create_dframe(3, 10)
-    matcher = Matcher(dframe, dframe.columns, seed=SEED)
-    check_naive(dframe, matcher, sameby=[], diffby=["w", "c"])
-    check_naive(dframe, matcher, sameby=[], diffby=["w"])
+    check_naive(dframe, sameby=[], diffby=["w", "c"])
+    check_naive(dframe, sameby=[], diffby=["w"])
 
 
 def test_empty_diffby():
     """Test query without diffby."""
     dframe = create_dframe(3, 10)
-    matcher = Matcher(dframe, dframe.columns, seed=SEED)
-    matcher.get_all_pairs(["c"], [])
-    check_naive(dframe, matcher, sameby=["c"], diffby=[])
-    check_naive(dframe, matcher, sameby=["w", "c"], diffby=[])
+    check_naive(dframe, sameby=["c"], diffby=[])
+    check_naive(dframe, sameby=["w", "c"], diffby=[])
 
 
 def test_raise_distjoint():
     """Test check for disjoint sameby and diffby."""
     dframe = create_dframe(3, 10)
-    matcher = Matcher(dframe, dframe.columns, seed=SEED)
     with pytest.raises(ValueError, match="must be disjoint lists"):
-        matcher.get_all_pairs("c", ["w", "c"])
+        find_pairs(dframe, "c", ["w", "c"])
 
 
 def test_raise_no_params():
     """Test check for at least one of sameby and diffby."""
     dframe = create_dframe(3, 10)
-    matcher = Matcher(dframe, dframe.columns, seed=SEED)
     with pytest.raises(ValueError, match="at least one should be provided"):
-        matcher.get_all_pairs([], [])
+        find_pairs(dframe, [], [])
 
 
-def assert_sameby_diffby(dframe: pd.DataFrame, pairs_dict: dict, sameby, diffby):
+def assert_sameby_diffby(dframe: pd.DataFrame, pairs: dict, sameby, diffby):
     """Assert the pairs are valid."""
-    for _, pairs in pairs_dict.items():
-        for id1, id2 in pairs:
-            for col in sameby:
-                assert dframe.loc[id1, col] == dframe.loc[id2, col]
-            for col in diffby:
-                assert dframe.loc[id1, col] != dframe.loc[id2, col]
+    for id1, id2 in pairs:
+        for col in sameby:
+            assert dframe.loc[id1, col] == dframe.loc[id2, col]
+        for col in diffby:
+            assert dframe.loc[id1, col] != dframe.loc[id2, col]
 
 
 def test_simulate_plates_mult_sameby_large():
     """Test matcher successfully complete analysis of a large dataset."""
     dframe = simulate_plates(n_compounds=15000, n_replicates=20, plate_size=384)
-    matcher = Matcher(dframe, dframe.columns, seed=SEED)
     sameby = ["c", "w"]
     diffby = ["p"]
-    pairs_dict = matcher.get_all_pairs(sameby, diffby)
+    pairs_dict = find_pairs(dframe, sameby, diffby)
     assert_sameby_diffby(dframe, pairs_dict, sameby, diffby)
