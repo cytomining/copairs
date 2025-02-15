@@ -13,11 +13,16 @@ authors = [
 dependencies = [
   "pandas",
   "tqdm",
-  "statsmodels"
+  "statsmodels",
+  "duckdb>=1.2.0",
 ]
 
 [project.optional-dependencies]
-dev = ["ruff"]
+dev = [
+    "ipdb>=0.13.13",
+    "jupyter>=1.1.1",
+    "ruff",
+]
 plot = ["plotly"]
 test = ["scikit-learn", "pytest"]
 demo = ["notebook", "matplotlib"]
@@ -39,3 +44,12 @@ select = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[dependency-groups]
+dev = [
+    "ipdb>=0.13.13",
+    "jupyter>=1.1.1",
+]
+test = [
+    "scikit-learn>=1.3.2",
+]

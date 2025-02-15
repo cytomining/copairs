@@ -7,6 +7,7 @@ from collections import namedtuple
 from math import comb
 from typing import Dict, Sequence, Set, Union
 
+import duckdb
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
@@ -463,3 +464,43 @@ class MatcherMultilabel:
             return set(x) not in pairs
 
         return {None: list(filter(filter_fn, all_pairs))}
+
+
+def find_pairs(dframe, sameby, diffby, rev=False) -> np.ndarray:
+    """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns.
+
+    `rev` reverses same and diff, which means that we get the complement
+    """
+    sameby, diffby = _validate(sameby, diffby)
+
+    if len(set(sameby).intersection(diffby)):
+        raise ValueError("sameby and diffby must be disjoint lists")
+
+    df = dframe.reset_index()
+    with duckdb.connect("main"):
+        group_1, group_2 = [
+            [f"{('', 'NOT')[i - rev]} A.{x} = B.{x}" for x in y]
+            for i, y in enumerate((sameby, diffby))
+        ]
+        string = (
+            f"SELECT A.index,B.index"
+            " FROM df A"
+            " JOIN df B"
+            " ON A.index < B.index"  #  Ensures only one of (a,b)/(b,a) and no (a,a)
+            f" AND {' AND '.join((*group_1, *group_2))}"
+        )
+        index_d = duckdb.sql(string).fetchnumpy()
+
+        return np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
+
+
+def _validate(sameby, diffby):
+    if isinstance(sameby, str):
+        sameby = (sameby,)
+    if isinstance(diffby, str):
+        sameby = (diffby,)
+
+    if not (len(sameby) or len(diffby)):
+        raise ValueError("at least one should be provided")
+
+    return sameby, diffby
