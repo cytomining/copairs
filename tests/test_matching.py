@@ -16,10 +16,9 @@ SEED = 0
 def run_stress_sample_null(dframe, num_pairs):
     """Assert every generated null pair does not match any column."""
     null_pair = find_pairs(dframe, dframe.columns, [], rev=True)
-    randint = np.random.randint(len(null_pair))
-    sample = null_pair[randint]
-    for _ in range(num_pairs):
-        id1, id2 = sample
+    randints = np.random.randint(len(null_pair), size=num_pairs)
+    for i in randints:
+        id1, id2 = null_pair[i]
         row1 = dframe.loc[id1]
         row2 = dframe.loc[id2]
         assert (row1 != row2).all()
