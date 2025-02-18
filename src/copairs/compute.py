@@ -8,6 +8,8 @@ from typing import Callable, Tuple, Union, Optional
 
 import numpy as np
 from tqdm.autonotebook import tqdm
+from scipy.spatial.distance import cdist
+from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 
 
 def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
@@ -227,17 +229,41 @@ def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
     return 1 / (1 + c_dist)
 
 
-def get_distance_fn(distance: Union[str, Callable]) -> Callable:
-    """Retrieve a distance metric function based on a string identifier or custom callable.
+def _cdist_diag_sim(x_sample: np.ndarray, y_sample: np.ndarray, metric: str) -> np.ndarray:
+    """Compute similarity based on the diagonal of the ScipY's cdist result (row-wise distance).
 
-    This function provides flexibility in specifying the distance metric to be used
-    for pairwise similarity or dissimilarity computations. Users can choose from a
-    predefined set of metrics or provide a custom callable.
+    Parameters
+    ----------
+    x_sample : np.ndarray
+        A 2D array where each row represents a profile.
+    y_sample : np.ndarray
+        A 2D array of the same shape as `x_sample`.
+    metric : str
+        The name of the distance metric to use.
+
+    Returns
+    -------
+    np.ndarray
+        A 1D array of distance scores for each row pair in `x_sample` and `y_sample (diagonal).
+    """
+    bounded_0_1 = ["jaccard", "hamming"]
+    distance = np.diag(cdist(x_sample, y_sample, metric=metric))
+    if metric in bounded_0_1:
+        return 1 - distance
+    return 1 / (1 + distance)
+
+
+def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
+    """Retrieve a similarity function based on a distance string identifier or custom callable.
+
+    This function provides flexibility in specifying the distance function to be used
+    for pairwise similarity computations. Users can choose a metrics from a predefined set,
+    scipy.spational.distance submodule, or provide a custom callable.
 
     Parameters
     ----------
     distance : str or callable
-        The name of the distance metric or a custom callable function. Supported
+        The name of the distance function or a custom callable function. Supported
         string identifiers for predefined metrics are:
         - "cosine": Cosine similarity.
         - "abs_cosine": Absolute cosine similarity.
@@ -246,13 +272,16 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
         - "manhattan": Inverse Manhattan distance (scaled to range 0-1).
         - "chebyshev": Inverse Chebyshev distance (scaled to range 0-1).
 
+        Additionally, any distance metric supported by `scipy.spatial.distance.cdist`
+        can be used by providing the metric name as a string.
+
         If a callable is provided, it must accept the paramters associated with each
         callable function.
 
     Returns
     -------
     callable
-        A function implementing the specified distance metric.
+        A function implementing the specified similarity function.
 
     Raises
     ------
@@ -264,8 +293,8 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
     >>> distance_fn = get_distance_fn("cosine")
     >>> similarity_scores = distance_fn(x_sample, y_sample)
     """
-    # Dictionary of supported distance metrics
-    distance_metrics = {
+    # Dictionary of supported similarity functions
+    similarity_functions = {
         "abs_cosine": pairwise_abs_cosine,
         "cosine": pairwise_cosine,
         "correlation": pairwise_corr,
@@ -274,22 +303,25 @@ def get_distance_fn(distance: Union[str, Callable]) -> Callable:
         "chebyshev": pairwise_chebyshev,
     }
 
-    # If a string is provided, look up the corresponding metric function
+    # If a string is provided, look up the corresponding function
     if isinstance(distance, str):
-        if distance not in distance_metrics:
+        if distance in similarity_functions:
+            similarity_fn = similarity_functions[distance]
+        elif distance in SCIPY_METRICS_NAMES:
+            similarity_fn = lambda x_sample, y_sample: _cdist_diag_sim(x_sample, y_sample, distance)
+        else:
             raise ValueError(
-                f"Unsupported distance metric: {distance}. Supported metrics are: {list(distance_metrics.keys())}"
+                f"Unsupported distance function: {distance}. Supported functions are: {set(similarity_functions.keys()) | set(SCIPY_METRICS_NAMES)}"
             )
-        distance_fn = distance_metrics[distance]
     elif callable(distance):
         # If a callable is provided, use it directly
-        distance_fn = distance
+        similarity_fn = distance
     else:
         # Raise an error if neither a string nor a callable is provided
         raise ValueError("Distance must be either a string or a callable object.")
 
     # Wrap the distance function for efficient batch processing
-    return batch_processing(distance_fn)
+    return batch_processing(similarity_fn)
 
 
 def random_binary_matrix(n, m, k, rng):

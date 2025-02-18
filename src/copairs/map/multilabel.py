@@ -88,7 +88,7 @@ def average_precision(
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
-    distance_fn = compute.get_distance_fn(distance)
+    distance_fn = compute.get_similarity_fn(distance)
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 
