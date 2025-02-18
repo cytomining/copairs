@@ -229,7 +229,9 @@ def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
     return 1 / (1 + c_dist)
 
 
-def _cdist_diag_sim(x_sample: np.ndarray, y_sample: np.ndarray, metric: str) -> np.ndarray:
+def _cdist_diag_sim(
+    x_sample: np.ndarray, y_sample: np.ndarray, metric: str
+) -> np.ndarray:
     """Compute similarity based on the diagonal of the ScipY's cdist result (row-wise distance).
 
     Parameters
@@ -308,7 +310,9 @@ def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
         if distance in similarity_functions:
             similarity_fn = similarity_functions[distance]
         elif distance in SCIPY_METRICS_NAMES:
-            similarity_fn = lambda x_sample, y_sample: _cdist_diag_sim(x_sample, y_sample, distance)
+            similarity_fn = lambda x_sample, y_sample: _cdist_diag_sim(
+                x_sample, y_sample, distance
+            )
         else:
             raise ValueError(
                 f"Unsupported distance function: {distance}. Supported functions are: {set(similarity_functions.keys()) | set(SCIPY_METRICS_NAMES)}"
