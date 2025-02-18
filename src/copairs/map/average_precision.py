@@ -140,7 +140,7 @@ def average_precision(
         Default is 20000.
 
     distance : str
-        The distance metric used for computing similarities. Default is "cosine".
+        The distance function used for computing similarities. Default is "cosine".
 
     Returns
     -------
@@ -173,7 +173,7 @@ def average_precision(
     validate_pipeline_input(meta, feats, columns)
 
     # Get the distance function for similarity calculations (e.g., cosine)
-    distance_fn = compute.get_distance_fn(distance)
+    similarity_fn = compute.get_similarity_fn(distance)
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
@@ -194,11 +194,11 @@ def average_precision(
 
     # Compute similarities for positive pairs
     logger.info("Computing positive similarities...")
-    pos_sims = distance_fn(feats, pos_pairs, batch_size)
+    pos_sims = similarity_fn(feats, pos_pairs, batch_size)
 
     # Compute similarities for negative pairs
     logger.info("Computing negative similarities...")
-    neg_sims = distance_fn(feats, neg_pairs, batch_size)
+    neg_sims = similarity_fn(feats, neg_pairs, batch_size)
 
     # Build rank lists for calculating average precision
     logger.info("Building rank lists...")
