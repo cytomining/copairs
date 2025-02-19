@@ -477,7 +477,7 @@ def find_pairs(dframe, sameby, diffby, rev=False) -> np.ndarray:
         raise ValueError("sameby and diffby must be disjoint lists")
 
     df = dframe.reset_index()
-    with duckdb.connect("main"):
+    with duckdb.connect(":memory:"):
         group_1, group_2 = [
             [f"{('', 'NOT')[i - rev]} A.{x} = B.{x}" for x in y]
             for i, y in enumerate((sameby, diffby))
