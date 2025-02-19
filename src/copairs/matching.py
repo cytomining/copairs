@@ -469,7 +469,12 @@ class MatcherMultilabel:
 
 
 @timing
-def find_pairs(dframe, sameby, diffby, rev=False) -> np.ndarray:
+def find_pairs(
+    dframe: Union[pd.DataFrame, duckdb.duckdb.DuckDBPyRelation],
+    sameby: Union[str, ColumnList],
+    diffby: Union[str, ColumnList],
+    rev: bool = False,
+) -> np.ndarray:
     """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns.
 
     If `rev`  is True sameby and diffby are swapped.
@@ -479,7 +484,9 @@ def find_pairs(dframe, sameby, diffby, rev=False) -> np.ndarray:
     if len(set(sameby).intersection(diffby)):
         raise ValueError("sameby and diffby must be disjoint lists")
 
-    df = dframe.reset_index()
+    df = dframe
+    if isinstance(df, pd.DataFrame):
+        df = dframe.reset_index()
     with duckdb.connect(":memory:"):
         # If rev is True, diffby and sameby are swapped
         group_1, group_2 = [
@@ -524,6 +531,6 @@ def find_pairs_multilabel(dframe, sameby, diffby, multilabel_col):
             f"SELECT *,UNNEST({nested_col}) AS {multilabel_col} FROM indexed"
         )
 
-    pairs = get_all_pairs(unnested, sameby, diffby)
+    pairs = find_pairs(unnested, sameby, diffby)
 
     return pairs
