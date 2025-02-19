@@ -9,6 +9,8 @@ from typing import Callable, Tuple, Union
 import numpy as np
 from tqdm.autonotebook import tqdm
 
+from copairs.timing import timing
+
 
 def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
     """Execute a function in parallel over a list of items.
@@ -319,6 +321,7 @@ def average_precision(rel_k) -> np.ndarray:
     return ap_values.astype(np.float32)
 
 
+@timing
 def ap_contiguous(
     rel_k_list: np.ndarray, counts: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:

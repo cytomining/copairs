@@ -9,6 +9,7 @@ import pandas as pd
 
 from copairs import compute
 from copairs.matching import UnpairedException, find_pairs
+from copairs.timing import timing
 
 from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_input
 
@@ -53,12 +54,10 @@ def build_rank_lists(
         Array of counts indicating how many times each profile index appears in the rank lists.
     """
     # Combine relevance labels: 1 for positive pairs, 0 for negative pairs
-    labels = np.concatenate(
-        [
-            np.ones(pos_pairs.size, dtype=np.uint32),
-            np.zeros(neg_pairs.size, dtype=np.uint32),
-        ]
-    )
+    labels = np.concatenate([
+        np.ones(pos_pairs.size, dtype=np.uint32),
+        np.zeros(neg_pairs.size, dtype=np.uint32),
+    ])
 
     # Flatten positive and negative pair indices for ranking
     ix = np.concatenate([pos_pairs.ravel(), neg_pairs.ravel()])
@@ -222,6 +221,7 @@ def average_precision(
     return meta
 
 
+@timing
 def p_values(dframe: pd.DataFrame, null_size: int, seed: int) -> np.ndarray:
     """Compute p-values for average precision scores based on a null distribution.
 

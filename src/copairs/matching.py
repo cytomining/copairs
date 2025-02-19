@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
+from copairs.timing import timing
+
 logger = logging.getLogger("copairs")
 ColumnList = Union[Sequence[str], pd.Index]
 ColumnDict = Dict[str, ColumnList]
@@ -466,6 +468,7 @@ class MatcherMultilabel:
         return {None: list(filter(filter_fn, all_pairs))}
 
 
+@timing
 def find_pairs(dframe, sameby, diffby, rev=False) -> np.ndarray:
     """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns.
 
