@@ -472,7 +472,7 @@ class MatcherMultilabel:
 def find_pairs(dframe, sameby, diffby, rev=False) -> np.ndarray:
     """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns.
 
-    `rev` reverses same and diff, which means that we get the complement
+    If `rev`  is True sameby and diffby are swapped.
     """
     sameby, diffby = _validate(sameby, diffby)
 
@@ -481,6 +481,7 @@ def find_pairs(dframe, sameby, diffby, rev=False) -> np.ndarray:
 
     df = dframe.reset_index()
     with duckdb.connect(":memory:"):
+        # If rev is True, diffby and sameby are swapped
         group_1, group_2 = [
             [f"{('', 'NOT')[i - rev]} A.{x} = B.{x}" for x in y]
             for i, y in enumerate((sameby, diffby))
@@ -507,3 +508,22 @@ def _validate(sameby, diffby):
         raise ValueError("at least one should be provided")
 
     return sameby, diffby
+
+
+def find_pairs_multilabel(dframe, sameby, diffby, multilabel_col):
+    """
+    You can include columns with multiple labels (i.e., a list of identifiers).
+    """
+
+    nested_col = multilabel_col + "_nested"
+    indexed = dframe.rename({multilabel_col: nested_col}, axis=1).reset_index()
+
+    # Unnest (i.e., explode) the multilabel column and proceed as normal
+    with duckdb.connect(":memory:"):
+        unnested = duckdb.sql(
+            f"SELECT *,UNNEST({nested_col}) AS {multilabel_col} FROM indexed"
+        )
+
+    pairs = get_all_pairs(unnested, sameby, diffby)
+
+    return pairs
