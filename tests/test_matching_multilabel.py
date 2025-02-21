@@ -72,6 +72,19 @@ def test_sameby():
     check_naive(dframe, matcher, sameby, diffby, multilabel_col)
 
 
+def test_sameby_other_cols():
+    """Check the multilabel implementation with sameby and other cols."""
+    multilabel_col = "c"
+    sameby = ["c", "p"]
+    diffby = ["w"]
+    dframe = simulate_random_plates(
+        n_compounds=4, n_replicates=5, plate_size=5, sameby=sameby, diffby=diffby
+    )
+    dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
+    matcher = MatcherMultilabel(dframe, dframe.columns, multilabel_col, seed=SEED)
+    check_naive(dframe, matcher, sameby, diffby, multilabel_col)
+
+
 def test_diffby():
     """Check the multilabel implementation with sameby."""
     multilabel_col = "c"
