@@ -1,7 +1,8 @@
 """Functions to compute mean average precision."""
 
 import logging
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,7 @@ def mean_average_precision(
     threshold: float,
     seed: int,
     max_workers: Optional[int] = None,
+    cache_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -64,7 +66,9 @@ def mean_average_precision(
     null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
 
     # Generate null distributions for each unique configuration
-    null_dists = compute.get_null_dists(null_confs, null_size, seed=seed)
+    null_dists = compute.get_null_dists(
+        null_confs, null_size, seed=seed, cache_dir=cache_dir
+    )
     ap_scores["null_ix"] = rev_ix
 
     # Function to calculate the p-value for a mAP score based on the null distribution
