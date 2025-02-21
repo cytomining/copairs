@@ -8,16 +8,22 @@ license = {file = "LICENSE.txt"}
 keywords = ["pairwise", "replication"]
 authors = [
   { name = "John Arevalo", email = "johnarevalo@gmail.com" },
-  { name = "Alexandr Kalinin", email = "akalinin@broadinstitute.org" }
+  { name = "Alexandr Kalinin", email = "akalinin@broadinstitute.org" },
+  { name = "Alan F. Munoz", email = "amunozgo@broadinstitute.org" }
 ]
 dependencies = [
   "pandas",
   "tqdm",
-  "statsmodels"
+  "statsmodels",
+  "duckdb>=1.2.0",
 ]
 
 [project.optional-dependencies]
-dev = ["ruff"]
+dev = [
+    "ipdb>=0.13.13",
+    "jupyter>=1.1.1",
+    "ruff",
+]
 plot = ["plotly"]
 test = ["scikit-learn", "pytest"]
 demo = ["notebook", "matplotlib"]
@@ -39,3 +45,13 @@ select = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "trepan3k>=1.3.1",
+]
+test = [
+    "pytest>=8.3.4",
+    "scikit-learn>=1.3.2",
+]

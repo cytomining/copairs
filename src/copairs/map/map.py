@@ -87,6 +87,7 @@ def mean_average_precision(
 
     # Compute p-values for each group using the null distributions
     params = map_scores[["mean_average_precision", "indices"]]
+
     map_scores["p_value"] = thread_map(
         get_p_value, params.values, leave=False, max_workers=max_workers
     )
