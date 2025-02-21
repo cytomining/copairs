@@ -96,7 +96,6 @@ def average_precision(
 
     logger.info("Finding positive pairs...")
     pos_pairs = find_pairs(meta, sameby=pos_sameby, diffby=pos_diffby)
-    # pos_keys = pos_pairs.keys()
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 

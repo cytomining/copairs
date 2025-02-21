@@ -65,9 +65,7 @@ def get_naive_pairs(dframe: pd.DataFrame, sameby, diffby):
 def check_naive(dframe, sameby, diffby):
     """Check Matcher and naive generate same pairs."""
     gt_pairs = get_naive_pairs(dframe, sameby, diffby)
-    # vals = matcher.get_all_pairs(sameby, diffby)
     vals = find_pairs(dframe, sameby, diffby)
-    # vals = sum(vals.values(), [])
     vals = pd.DataFrame(vals, columns=["index_x", "index_y"])
     vals = vals.sort_values(["index_x", "index_y"]).reset_index(drop=True)
     vals = set(vals.apply(frozenset, axis=1))
