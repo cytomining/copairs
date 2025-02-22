@@ -10,6 +10,7 @@ import numpy as np
 from tqdm.autonotebook import tqdm
 from scipy.spatial.distance import cdist
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
+from scipy.stats import hypergeom
 
 
 def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
@@ -531,7 +532,7 @@ def get_null_dists(
     # Function to generate null distributions for each configuration
     def par_func(i):
         num_pos, total = confs[i]
-        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
+        null_dists[i] = get_random_ap(total, num_pos)
 
     # Parallelize the generation of null distributions
     parallel_map(par_func, np.arange(num_confs))
@@ -645,3 +646,32 @@ def to_cutoffs(counts: np.ndarray) -> np.ndarray:
     cutoffs[1:] = counts.cumsum()[:-1]
 
     return cutoffs
+
+def get_random_ap(M: int, n: int) -> float:
+    """
+    Calculate average precision for a given N,m pair.
+
+    Parameters
+    ----------
+    M : int
+        The total number of items.
+    n : int
+        The number of trials.
+
+    Returns
+    -------
+    divided : float
+        The calculated probability.
+
+    Notes
+    -----
+    This function uses the hypergeometric distribution to calculate the probability.
+    """
+    k, N = np.indices((n, M)) + 1
+    p_at_N = k / N
+    result = hypergeom.pmf(np.arange(n)[::-1, np.newaxis], M, n, np.arange(M)[np.newaxis, ::-1])
+    norm = result * p_at_N * p_at_N
+    added = norm.sum()
+    divided = added / n
+
+    return divided
