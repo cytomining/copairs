@@ -95,13 +95,17 @@ def average_precision(
     logger.info("Indexing metadata...")
 
     logger.info("Finding positive pairs...")
-    pos_pairs = find_pairs_multilabel(meta, sameby=pos_sameby, diffby=pos_diffby, multilabel_col=multilabel_col)
+    pos_pairs = find_pairs_multilabel(
+        meta, sameby=pos_sameby, diffby=pos_diffby, multilabel_col=multilabel_col
+    )
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 
     logger.info("Finding negative pairs...")
     _, pos_counts = np.unique(pos_pairs, axis=0, return_counts=True)
-    neg_pairs = find_pairs_multilabel(meta, sameby=neg_sameby, diffby=neg_diffby, multilabel_col=multilabel_col)
+    neg_pairs = find_pairs_multilabel(
+        meta, sameby=neg_sameby, diffby=neg_diffby, multilabel_col=multilabel_col
+    )
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find any negative pairs.")
 
