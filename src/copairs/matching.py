@@ -577,7 +577,6 @@ def find_pairs_multilabel(
                 "AND A.index_1 = B.column1"
             )
 
-        index_d = result.fetchnumpy()
-        result = np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
-
+    index_d = result.fetchnumpy()
+    result = np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
     return result
