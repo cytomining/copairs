@@ -585,22 +585,21 @@ def find_pairs_multilabel(
             string = ("SELECT * FROM unnested A"
                       " NATURAL JOIN (SELECT matched_item,COUNT(matched_item)"
                       " AS c FROM unnested GROUP BY matched_item) B")
-            result = duckdb.sql(string)
+            results = duckdb.sql(string)
 
             # Sort them to match the original implementation
-            result = duckdb.sql("SELECT * FROM result ORDER BY matched_item")
-
-            # Format results to return pairs, keys and counts
+            results = duckdb.sql("SELECT * FROM results ORDER BY matched_item")
 
             # Sorted pairs of indices (we select to reduce memory footprint)
-            pairs = duckdb.sql("SELECT index,index_1 FROM result")
+            pairs = duckdb.sql("SELECT index,index_1 FROM results")
             pairs_np = pairs.fetchnumpy()
             
             # Keys are the items inside multilabel col
             # Counts are the number of occurrences of each one
-            keys_counts = duckdb.sql("SELECT distinct matched_item,c FROM result")
+            # It is important to sort again!
+            keys_counts = duckdb.sql("SELECT distinct matched_item,c FROM results ORDER BY matched_item")
             keys_counts_np = keys_counts.fetchnumpy()
-            
+
             result = (np.array([pairs_np[f"index{k}"] for k in ("","_1")], dtype=np.uint32).T, *[keys_counts_np[k] for k in ("matched_item", "c")])
         else: # if multilabel_col is in diffby return only the index
             index_d = result.fetchnumpy()
