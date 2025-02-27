@@ -1,6 +1,5 @@
 """Functions to compute average precision."""
 
-import itertools
 import logging
 from typing import List
 

@@ -1,7 +1,7 @@
 """Functions to compute mAP with multilabel support."""
 
-import itertools
 import logging
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -68,12 +68,12 @@ def _build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
 
 
 def average_precision(
-    meta,
-    feats,
-    pos_sameby,
-    pos_diffby,
-    neg_sameby,
-    neg_diffby,
+    meta: pd.DataFrame,
+    feats: pd.DataFrame,
+    pos_sameby: List[str],
+    pos_diffby: List[str],
+    neg_sameby: List[str],
+    neg_diffby: List[str],
     multilabel_col,
     batch_size=20000,
     distance="cosine",
@@ -98,7 +98,6 @@ def average_precision(
     pos_pairs, keys, pos_counts = find_pairs_multilabel(
         meta, sameby=pos_sameby, diffby=pos_diffby, multilabel_col=multilabel_col
     )
-    total_counts = sum(pos_counts)
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 
@@ -142,7 +141,7 @@ def average_precision(
     results = pd.concat(results).reset_index(drop=True)
     meta = meta.drop(multilabel_col, axis=1)
     results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
-    results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.int32)
-    results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.int32)
+    results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.uint32)
+    results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.uint32)
     logger.info("Finished.")
     return results

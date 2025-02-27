@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,7 @@ logger = logging.getLogger("copairs")
 
 def mean_average_precision(
     ap_scores: pd.DataFrame,
-    sameby,
+    sameby: List[str],
     null_size: int,
     threshold: float,
     seed: int,
