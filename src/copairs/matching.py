@@ -579,12 +579,16 @@ def find_pairs_multilabel(
                 " AND A.index_1 = B.column1"
             )
 
-        if shared_item == "": # If multilabel_col is in sameby
+        if shared_item == "":  # If multilabel_col is in sameby
             # We assign a pair if any of the other items in the list is a pair too
-            unnested = duckdb.sql("SELECT *,UNNEST(shared_items) AS matched_item FROM result")
-            string = ("SELECT * FROM unnested A"
-                      " NATURAL JOIN (SELECT matched_item,COUNT(matched_item)"
-                      " AS c FROM unnested GROUP BY matched_item) B")
+            unnested = duckdb.sql(
+                "SELECT *,UNNEST(shared_items) AS matched_item FROM result"
+            )
+            string = (
+                "SELECT * FROM unnested A"
+                " NATURAL JOIN (SELECT matched_item,COUNT(matched_item)"
+                " AS c FROM unnested GROUP BY matched_item) B"
+            )
             results = duckdb.sql(string)
 
             # Sort them to match the original implementation
@@ -593,16 +597,25 @@ def find_pairs_multilabel(
             # Sorted pairs of indices (we select to reduce memory footprint)
             pairs = duckdb.sql("SELECT index,index_1 FROM results")
             pairs_np = pairs.fetchnumpy()
-            
+
             # Keys are the items inside multilabel col
             # Counts are the number of occurrences of each one
             # It is important to sort again!
-            keys_counts = duckdb.sql("SELECT distinct matched_item,c FROM results ORDER BY matched_item")
+            keys_counts = duckdb.sql(
+                "SELECT distinct matched_item,c FROM results ORDER BY matched_item"
+            )
             keys_counts_np = keys_counts.fetchnumpy()
 
-            result = (np.array([pairs_np[f"index{k}"] for k in ("","_1")], dtype=np.uint32).T, *[keys_counts_np[k] for k in ("matched_item", "c")])
-        else: # if multilabel_col is in diffby return only the index
+            result = (
+                np.array(
+                    [pairs_np[f"index{k}"] for k in ("", "_1")], dtype=np.uint32
+                ).T,
+                *[keys_counts_np[k] for k in ("matched_item", "c")],
+            )
+        else:  # if multilabel_col is in diffby return only the index
             index_d = result.fetchnumpy()
-            result = np.array([index_d[k] for k in ("index","index_1")], dtype=np.uint32).T
+            result = np.array(
+                [index_d[k] for k in ("index", "index_1")], dtype=np.uint32
+            ).T
 
     return result
