@@ -51,6 +51,8 @@ def check_naive(dframe, sameby, diffby, multilabel_col):
     """Check find_pairs_multilabel and naive generate same pairs."""
     gt_pairs = get_naive_pairs(dframe, sameby, diffby, multilabel_col)
     vals = find_pairs_multilabel(dframe, sameby, diffby, multilabel_col)
+    if multilabel_col in sameby:  # output is different if based on multilabel_col
+        vals = vals[0]
     vals = pd.DataFrame(vals, columns=["index_x", "index_y"])
     vals = vals.sort_values(["index_x", "index_y"]).reset_index(drop=True)
     vals = set(vals.apply(frozenset, axis=1))

@@ -1,10 +1,10 @@
 """Sample pairs with given column restrictions."""
 
-from copy import copy
 import itertools
 import logging
 import re
 from collections import namedtuple
+from copy import copy
 from math import comb
 from typing import Dict, Sequence, Set, Union
 
@@ -573,13 +573,15 @@ def find_pairs_multilabel(
         if len(sameby) or len(diffby):
             monolabel_result = find_pairs(df, sameby, diffby).T
             result = duckdb.sql(
-                f"SELECT index, index_1"
+                f"SELECT *"
                 " FROM result A JOIN monolabel_result B"
                 " ON A.index = B.column0"
                 " AND A.index_1 = B.column1"
             )
 
         if shared_item == "":  # If multilabel_col is in sameby
+            counts_col = "_c"
+
             # We assign a pair if any of the other items in the list is a pair too
             unnested = duckdb.sql(
                 "SELECT *,UNNEST(shared_items) AS matched_item FROM result"
@@ -587,7 +589,7 @@ def find_pairs_multilabel(
             string = (
                 "SELECT * FROM unnested A"
                 " NATURAL JOIN (SELECT matched_item,COUNT(matched_item)"
-                " AS c FROM unnested GROUP BY matched_item) B"
+                f" AS {counts_col} FROM unnested GROUP BY matched_item) B"
             )
             results = duckdb.sql(string)
 
@@ -602,7 +604,7 @@ def find_pairs_multilabel(
             # Counts are the number of occurrences of each one
             # It is important to sort again!
             keys_counts = duckdb.sql(
-                "SELECT distinct matched_item,c FROM results ORDER BY matched_item"
+                f"SELECT distinct matched_item,{counts_col} FROM results ORDER BY matched_item"
             )
             keys_counts_np = keys_counts.fetchnumpy()
 
@@ -610,7 +612,7 @@ def find_pairs_multilabel(
                 np.array(
                     [pairs_np[f"index{k}"] for k in ("", "_1")], dtype=np.uint32
                 ).T,
-                *[keys_counts_np[k] for k in ("matched_item", "c")],
+                *[keys_counts_np[k] for k in ("matched_item", counts_col)],
             )
         else:  # if multilabel_col is in diffby return only the index
             index_d = result.fetchnumpy()
