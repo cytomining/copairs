@@ -1,6 +1,5 @@
 """Functions to compute average precision."""
 
-import itertools
 import logging
 from typing import List
 
@@ -66,7 +65,7 @@ def build_rank_lists(
     # Expand similarity scores to match the flattened pair indices
     sim_all = np.concatenate([np.repeat(pos_sims, 2), np.repeat(neg_sims, 2)])
 
-    # Sort by similarity (descending) and then by index (lexicographical order)
+    # Sort by index (lexicographical order) and then by similarity (descending)
     # `1 - sim_all` ensures higher similarity values appear first, prioritizing
     # pairs with stronger similarity scores for ranking.
     # `ix` acts as a secondary criterion, ensuring consistent ordering of pairs

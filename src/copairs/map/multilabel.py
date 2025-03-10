@@ -1,13 +1,13 @@
 """Functions to compute mAP with multilabel support."""
 
-import itertools
 import logging
+from typing import List
 
 import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.matching import UnpairedException, find_pairs
+from copairs.matching import UnpairedException, find_pairs_multilabel
 
 from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_input
 
@@ -68,12 +68,12 @@ def _build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
 
 
 def average_precision(
-    meta,
-    feats,
-    pos_sameby,
-    pos_diffby,
-    neg_sameby,
-    neg_diffby,
+    meta: pd.DataFrame,
+    feats: pd.DataFrame,
+    pos_sameby: List[str],
+    pos_diffby: List[str],
+    neg_sameby: List[str],
+    neg_diffby: List[str],
     multilabel_col,
     batch_size=20000,
     distance="cosine",
@@ -95,13 +95,16 @@ def average_precision(
     logger.info("Indexing metadata...")
 
     logger.info("Finding positive pairs...")
-    pos_pairs = find_pairs(meta, sameby=pos_sameby, diffby=pos_diffby)
+    pos_pairs, keys, pos_counts = find_pairs_multilabel(
+        meta, sameby=pos_sameby, diffby=pos_diffby, multilabel_col=multilabel_col
+    )
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 
     logger.info("Finding negative pairs...")
-    _, pos_counts = np.unique(pos_pairs, axis=0, return_counts=True)
-    neg_pairs = find_pairs(meta, sameby=neg_sameby, diffby=neg_diffby)
+    neg_pairs = find_pairs_multilabel(
+        meta, sameby=neg_sameby, diffby=neg_diffby, multilabel_col=multilabel_col
+    )
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find any negative pairs.")
 
@@ -122,21 +125,23 @@ def average_precision(
 
     logger.info("Creating result DataFrame...")
     results = []
-    for i, key in enumerate(pos_pairs):
+    "Here the positive pairs are per-item inside multilabel_col"
+    # TODO Check if multi-label key is necessary
+    for i, key in enumerate(keys):
         result = pd.DataFrame(
             {
                 "average_precision": ap_scores_list[i],
                 "n_pos_pairs": null_confs_list[i][:, 0],
                 "n_total_pairs": null_confs_list[i][:, 1],
                 "ix": ix_list[i],
-                **{col: meta.iloc[key][col] for col in meta.columns},
+                multilabel_col: key,
             }
         )
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
     meta = meta.drop(multilabel_col, axis=1)
     results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
-    results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.int32)
-    results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.int32)
+    results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.uint32)
+    results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.uint32)
     logger.info("Finished.")
     return results

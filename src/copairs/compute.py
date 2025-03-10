@@ -398,7 +398,8 @@ def ap_contiguous(
     pr_k = tp / k
 
     # Calculate average precision scores for each profile
-    ap_scores = np.add.reduceat(pr_k * rel_k_list, cutoffs) / num_pos
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ap_scores = np.add.reduceat(pr_k * rel_k_list, cutoffs) / num_pos
 
     # Generate configurations (number of positive and total pairs)
     null_confs = np.stack([num_pos, counts], axis=1)

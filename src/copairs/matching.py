@@ -4,6 +4,7 @@ import itertools
 import logging
 import re
 from collections import namedtuple
+from copy import copy
 from math import comb
 from typing import Dict, Sequence, Set, Union
 
@@ -520,7 +521,7 @@ def find_pairs_multilabel(
     sameby: Union[str, ColumnList],
     diffby: Union[str, ColumnList],
     multilabel_col: str,
-) -> np.ndarray:
+) -> np.ndarray or tuple(np.ndarray, np.ndarray, np.ndarray):
     """
     Find pairs of rows in a DataFrame that have the same or different values in certain columns.
 
@@ -553,31 +554,70 @@ def find_pairs_multilabel(
     df = dframe.reset_index()
 
     if multilabel_col in sameby:
+        sameby = copy(sameby)
         sameby.remove(multilabel_col)
-        shared_item = True
+        shared_item = ""
     else:
+        diffby = copy(diffby)
         diffby.remove(multilabel_col)
-        shared_item = False
+        shared_item = "NOT"
 
     with duckdb.connect(":memory:"):
         result = duckdb.sql(
             "SELECT * "
-            f" FROM (select *,CAST(len(list_intersect(A.{multilabel_col},B.{multilabel_col})) AS BOOL)"
-            " AS shared_item "
+            " FROM (SELECT *,"
+            f"list_intersect(A.{multilabel_col},B.{multilabel_col}) AS shared_items"
             " FROM df A JOIN df B ON A.index < B.index)"
-            f" WHERE shared_item = {shared_item}"
+            f" WHERE {shared_item} len(shared_items) > 0"
         )
-
         if len(sameby) or len(diffby):
             monolabel_result = find_pairs(df, sameby, diffby).T
             result = duckdb.sql(
-                f"SELECT index, index_1"
+                f"SELECT *"
                 " FROM result A JOIN monolabel_result B"
-                " ON A.index = B.column0 "
-                "AND A.index_1 = B.column1"
+                " ON A.index = B.column0"
+                " AND A.index_1 = B.column1"
             )
 
-        index_d = result.fetchnumpy()
-        result = np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
+        if shared_item == "":  # If multilabel_col is in sameby
+            counts_col = "_c"
+
+            # We assign a pair if any of the other items in the list is a pair too
+            unnested = duckdb.sql(
+                "SELECT *,UNNEST(shared_items) AS matched_item FROM result"
+            )
+            string = (
+                "SELECT * FROM unnested A"
+                " NATURAL JOIN (SELECT matched_item,COUNT(matched_item)"
+                f" AS {counts_col} FROM unnested GROUP BY matched_item) B"
+            )
+            results = duckdb.sql(string)
+
+            # Sort them to match the original implementation
+            results = duckdb.sql("SELECT * FROM results ORDER BY matched_item")
+
+            # Sorted pairs of indices (we select to reduce memory footprint)
+            pairs = duckdb.sql("SELECT index,index_1 FROM results")
+            pairs_np = pairs.fetchnumpy()
+
+            # Keys are the items inside multilabel col
+            # Counts are the number of occurrences of each one
+            # It is important to sort again!
+            keys_counts = duckdb.sql(
+                f"SELECT distinct matched_item,{counts_col} FROM results ORDER BY matched_item"
+            )
+            keys_counts_np = keys_counts.fetchnumpy()
+
+            result = (
+                np.array(
+                    [pairs_np[f"index{k}"] for k in ("", "_1")], dtype=np.uint32
+                ).T,
+                *[keys_counts_np[k] for k in ("matched_item", counts_col)],
+            )
+        else:  # if multilabel_col is in diffby return only the index
+            index_d = result.fetchnumpy()
+            result = np.array(
+                [index_d[k] for k in ("index", "index_1")], dtype=np.uint32
+            ).T
 
     return result
