@@ -4,15 +4,16 @@ import itertools
 import os
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Callable, Tuple, Union, Optional
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
-from tqdm.autonotebook import tqdm
-from scipy.spatial.distance import cdist
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
+from scipy.spatial.distance import cdist
 
 
-def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
+def parallel_map(
+    par_func: Callable[[int], None], items: np.ndarray, progress_bar: bool = True
+) -> None:
     """Execute a function in parallel over a list of items.
 
     This function uses a thread pool to process items in parallel, with progress
@@ -41,8 +42,12 @@ def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
         # Map the function to items with unordered execution for better efficiency
         tasks = pool.imap_unordered(par_func, items, chunksize=chunksize)
 
-        # Display progress using tqdm
-        for _ in tqdm(tasks, total=len(items), leave=False):
+        if progress_bar:
+            # Display progress using tqdm
+            from tqdm.autonotebook import tqdm
+
+            tasks = tqdm(tasks, total=len(items), leave=False)
+        for _ in tasks:
             pass
 
 

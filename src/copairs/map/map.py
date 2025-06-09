@@ -1,13 +1,13 @@
 """Functions to compute mean average precision."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 
 import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
-from tqdm.contrib.concurrent import thread_map
 
 from copairs import compute
 
@@ -82,15 +82,18 @@ def mean_average_precision(
     logger.info("Computing p-values...")
 
     # Group by the specified metadata column(s) and calculate mean AP
-    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
-        {
-            "average_precision": ["mean", lambda x: list(x.index)],
-        }
-    )
+    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg({
+        "average_precision": ["mean", lambda x: list(x.index)],
+    })
     map_scores.columns = sameby + ["mean_average_precision", "indices"]
 
     # Compute p-values for each group using the null distributions
     params = map_scores[["mean_average_precision", "indices"]]
+
+    if progress_bar:
+        from tqdm.contrib.concurrent import thread_map
+    else:
+        thread_map = silent_thread_map
 
     map_scores["p_value"] = thread_map(
         get_p_value, params.values, leave=False, max_workers=max_workers
@@ -107,3 +110,21 @@ def mean_average_precision(
     map_scores["below_corrected_p"] = map_scores["corrected_p_value"] < threshold
 
     return map_scores
+
+
+def silent_thread_map(fn, *iterables, **kwargs):
+    """
+    Implementation of `thread_map` and `process_map`. Based on tqdm's
+    original implementation for consistency (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
+
+    Parameters
+    ----------
+    max_workers  : [default: min(32, cpu_count() + 4)].
+    chunksize  : [default: 1].
+    """
+
+    kwargs = kwargs.copy()
+    max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
+    chunksize = kwargs.pop("chunksize", 1)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        return list(ex.map(fn, *iterables, chunksize=chunksize), **kwargs)
