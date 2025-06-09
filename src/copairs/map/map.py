@@ -113,9 +113,9 @@ def mean_average_precision(
 
 
 def silent_thread_map(fn, *iterables, **kwargs):
-    """
-    Implementation of `thread_map` and `process_map`. Based on tqdm's
-    original implementation for consistency (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
+    """Map iterables and kwargs to a function.
+
+    Based on tqdm's original implementation for consistency (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
 
     Parameters
     ----------
