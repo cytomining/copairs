@@ -20,6 +20,7 @@ def mean_average_precision(
     null_size: int,
     threshold: float,
     seed: int,
+    progress_bar: Optional[bool] = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
@@ -43,8 +44,12 @@ def mean_average_precision(
         p-value threshold for identifying significant MaP scores.
     seed : int
         Random seed for reproducibility.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`
+        Number of workers used. Default defined by tqdm's `thread_map`.
+    cache_dir : str or Path
+        Location to save the cache.
 
     Returns
     -------
