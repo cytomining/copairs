@@ -134,4 +134,4 @@ def silent_thread_map(fn, *iterables, **kwargs):
     max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
     chunksize = kwargs.pop("chunksize", 1)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        return list(ex.map(fn, *iterables, chunksize=chunksize), **kwargs)
+        return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
