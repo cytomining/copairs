@@ -540,9 +540,7 @@ def get_null_dists(
     # Function to generate null distributions for each configuration
     def par_func(i):
         num_pos, total = confs[i]
-        null_dists[i] = null_dist_cached(
-            num_pos, total, seeds[i], null_size, cache_dir, progress_bar
-        )
+        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
 
     # Parallelize the generation of null distributions
     parallel_map(par_func, np.arange(num_confs), progress_bar)
