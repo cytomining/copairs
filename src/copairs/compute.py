@@ -12,7 +12,9 @@ from scipy.spatial.distance import cdist
 
 
 def parallel_map(
-    par_func: Callable[[int], None], items: np.ndarray, progress_bar: bool = True
+    par_func: Callable[[int], None],
+    items: np.ndarray,
+    progress_bar: Optional[bool] = True,
 ) -> None:
     """Execute a function in parallel over a list of items.
 

@@ -6,7 +6,7 @@ import re
 from collections import namedtuple
 from copy import copy
 from math import comb
-from typing import Dict, Sequence, Set, Union
+from typing import Dict, Optional, Sequence, Set, Union
 
 import duckdb
 import numpy as np
@@ -444,7 +444,11 @@ class MatcherMultilabel:
         return id1, id2
 
     def get_null_pairs(
-        self, diffby: ColumnList, size: int, n_tries=5, progress_bar: bool = True
+        self,
+        diffby: ColumnList,
+        size: int,
+        n_tries=5,
+        progress_bar: Optional[bool] = True,
     ):
         """Sample multiple null pairs at the same time."""
         null_pairs = []
