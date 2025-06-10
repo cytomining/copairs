@@ -1,7 +1,7 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -90,6 +90,7 @@ def average_precision(
     neg_diffby: List[str],
     batch_size: int = 20000,
     distance: str = "cosine",
+    progress_bar: Optional[bool] = True,
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -221,7 +222,9 @@ def average_precision(
     return meta
 
 
-def p_values(dframe: pd.DataFrame, null_size: int, seed: int) -> np.ndarray:
+def p_values(
+    dframe: pd.DataFrame, null_size: int, seed: int, progress_bar: Optional[bool] = True
+) -> np.ndarray:
     """Compute p-values for average precision scores based on a null distribution.
 
     This function calculates the p-values for each profile in the input DataFrame,
@@ -240,6 +243,8 @@ def p_values(dframe: pd.DataFrame, null_size: int, seed: int) -> np.ndarray:
         The number of samples to generate in the null distribution for significance testing.
     seed : int
         Random seed for reproducibility of the null distribution.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -258,7 +263,7 @@ def p_values(dframe: pd.DataFrame, null_size: int, seed: int) -> np.ndarray:
     null_confs = dframe.loc[mask, ["n_pos_pairs", "n_total_pairs"]].values
 
     # Compute p-values for profiles with valid configurations using the null distribution
-    pvals[mask] = compute.p_values(scores, null_confs, null_size, seed)
+    pvals[mask] = compute.p_values(scores, null_confs, null_size, seed, progress_bar)
 
     # Return the array of p-values, including NaN for invalid profiles
     return pvals

@@ -50,6 +50,8 @@ def mean_average_precision(
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
         Location to save the cache.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -72,7 +74,7 @@ def mean_average_precision(
 
     # Generate null distributions for each unique configuration
     null_dists = compute.get_null_dists(
-        null_confs, null_size, seed=seed, cache_dir=cache_dir
+        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
     )
     ap_scores["null_ix"] = rev_ix
 

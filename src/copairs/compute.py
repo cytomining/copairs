@@ -502,6 +502,7 @@ def get_null_dists(
     null_size: int,
     seed: int,
     cache_dir: Optional[Union[str, Path]] = None,
+    progress_bar: Optional[bool] = True,
 ) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
 
@@ -514,6 +515,8 @@ def get_null_dists(
         Number of samples to generate in the null distribution.
     seed : int
         Random seed for reproducibility.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -537,15 +540,23 @@ def get_null_dists(
     # Function to generate null distributions for each configuration
     def par_func(i):
         num_pos, total = confs[i]
-        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
+        null_dists[i] = null_dist_cached(
+            num_pos, total, seeds[i], null_size, cache_dir, progress_bar
+        )
 
     # Parallelize the generation of null distributions
-    parallel_map(par_func, np.arange(num_confs))
+    parallel_map(par_func, np.arange(num_confs), progress_bar)
 
     return null_dists
 
 
-def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed: int):
+def p_values(
+    ap_scores: np.ndarray,
+    null_confs: np.ndarray,
+    null_size: int,
+    seed: int,
+    progress_bar: Optional[bool] = True,
+):
     """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
     Parameters
@@ -560,6 +571,8 @@ def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed
     seed : int
         Seed for the random number generator to ensure reproducibility of the null
         distribution.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -570,7 +583,7 @@ def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
 
     # Generate null distributions for each unique configuration
-    null_dists = get_null_dists(confs, null_size, seed)
+    null_dists = get_null_dists(confs, null_size, seed, progress_bar)
 
     # Sort null distributions for efficient p-value computation
     null_dists.sort(axis=1)
