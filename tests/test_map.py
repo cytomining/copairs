@@ -216,3 +216,31 @@ def test_raise_nan_error():
         average_precision(
             meta_nan, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby
         )
+
+
+def test_progress_bar_consistency():
+    """Test that the progress_bar argument does not change results."""
+    length = 10
+    vocab_size = {"p": 5, "w": 3, "l": 4}
+    n_feats = 5
+    pos_sameby = ["l"]
+    pos_diffby = ["p"]
+    neg_sameby = []
+    neg_diffby = ["l"]
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
+    length = len(meta)
+    feats = rng.uniform(size=(length, n_feats))
+    with_pb, no_pb = [
+        average_precision(
+            meta,
+            feats,
+            pos_sameby,
+            pos_diffby,
+            neg_sameby,
+            neg_diffby,
+            progress_bar=progress_bar,
+        )
+        for progress_bar in (True, False)
+    ]
+    assert with_pb.equals(no_pb), "The progress_bar argument changed results"
