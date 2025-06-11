@@ -52,10 +52,12 @@ def build_rank_lists(
         Array of counts indicating how many times each profile index appears in the rank lists.
     """
     # Combine relevance labels: 1 for positive pairs, 0 for negative pairs
-    labels = np.concatenate([
-        np.ones(pos_pairs.size, dtype=np.uint32),
-        np.zeros(neg_pairs.size, dtype=np.uint32),
-    ])
+    labels = np.concatenate(
+        [
+            np.ones(pos_pairs.size, dtype=np.uint32),
+            np.zeros(neg_pairs.size, dtype=np.uint32),
+        ]
+    )
 
     # Flatten positive and negative pair indices for ranking
     ix = np.concatenate([pos_pairs.ravel(), neg_pairs.ravel()])

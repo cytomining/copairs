@@ -90,9 +90,11 @@ def mean_average_precision(
     logger.info("Computing p-values...")
 
     # Group by the specified metadata column(s) and calculate mean AP
-    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg({
-        "average_precision": ["mean", lambda x: list(x.index)],
-    })
+    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
+        {
+            "average_precision": ["mean", lambda x: list(x.index)],
+        }
+    )
     map_scores.columns = sameby + ["mean_average_precision", "indices"]
 
     # Compute p-values for each group using the null distributions

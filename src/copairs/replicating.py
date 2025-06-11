@@ -79,16 +79,20 @@ def corr_from_pairs(
 
     sameby_col = "_".join(sameby)
 
-    corrs = pd.DataFrame({
-        sameby_col: sameby_vals,
-        "corr": corrs,
-        "row_x": pair_ix[:, 0],
-        "row_y": pair_ix[:, 1],
-    })
-    corrs = corrs.groupby(sameby_col).agg({
-        "corr": ["median", "count"],
-        "row_x": "nunique",
-    })
+    corrs = pd.DataFrame(
+        {
+            sameby_col: sameby_vals,
+            "corr": corrs,
+            "row_x": pair_ix[:, 0],
+            "row_y": pair_ix[:, 1],
+        }
+    )
+    corrs = corrs.groupby(sameby_col).agg(
+        {
+            "corr": ["median", "count"],
+            "row_x": "nunique",
+        }
+    )
 
     median_num_repl = int(corrs["row_x", "nunique"].median())
     corr_dist = corrs["corr"]
