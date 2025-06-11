@@ -114,7 +114,9 @@ def test_pipeline():
     meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
-    average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    average_precision(
+        meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, progress_bar=True
+    )
 
 
 def test_pipeline_multilabel():
@@ -134,7 +136,14 @@ def test_pipeline_multilabel():
     feats = rng.uniform(size=(length, n_feats))
 
     multilabel_average_precision(
-        meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, multilabel_col
+        meta,
+        feats,
+        pos_sameby,
+        pos_diffby,
+        neg_sameby,
+        neg_diffby,
+        multilabel_col,
+        progress_bar=True,
     )
 
 
@@ -153,9 +162,19 @@ def test_raise_no_pairs():
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
     with pytest.raises(UnpairedException, match="Unable to find positive pairs."):
-        average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+        average_precision(
+            meta,
+            feats,
+            pos_sameby,
+            pos_diffby,
+            neg_sameby,
+            neg_diffby,
+            progress_bar=True,
+        )
     with pytest.raises(UnpairedException, match="Unable to find negative pairs."):
-        average_precision(meta, feats, pos_diffby, [], pos_sameby, [])
+        average_precision(
+            meta, feats, pos_diffby, [], pos_sameby, [], progress_bar=True
+        )
 
 
 def test_raise_nan_error():

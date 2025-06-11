@@ -267,7 +267,9 @@ def _cdist_diag_sim(
     return 1 / (1 + distance)
 
 
-def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
+def get_similarity_fn(
+    distance: Union[str, Callable], progress_bar: Optional[bool] = True
+) -> Callable:
     """Retrieve a similarity function based on a distance string identifier or custom callable.
 
     This function provides flexibility in specifying the distance function to be used
@@ -291,6 +293,8 @@ def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
 
         If a callable is provided, it must accept the paramters associated with each
         callable function.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -337,7 +341,7 @@ def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
         raise ValueError("Distance must be either a string or a callable object.")
 
     # Wrap the distance function for efficient batch processing
-    return batch_processing(similarity_fn)
+    return batch_processing(similarity_fn, progress_bar=progress_bar)
 
 
 def random_binary_matrix(n, m, k, rng):

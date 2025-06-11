@@ -173,7 +173,7 @@ def average_precision(
     validate_pipeline_input(meta, feats, columns)
 
     # Get the distance function for similarity calculations (e.g., cosine)
-    similarity_fn = compute.get_similarity_fn(distance)
+    similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
