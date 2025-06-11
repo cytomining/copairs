@@ -448,7 +448,7 @@ class MatcherMultilabel:
         diffby: ColumnList,
         size: int,
         n_tries=5,
-        progress_bar: Optional[bool] = True,
+        progress_bar: bool = True,
     ):
         """Sample multiple null pairs at the same time."""
         null_pairs = []

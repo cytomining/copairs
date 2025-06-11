@@ -20,7 +20,7 @@ def mean_average_precision(
     null_size: int,
     threshold: float,
     seed: int,
-    progress_bar: Optional[bool] = True,
+    progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:

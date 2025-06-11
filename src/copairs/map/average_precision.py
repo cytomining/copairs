@@ -52,12 +52,10 @@ def build_rank_lists(
         Array of counts indicating how many times each profile index appears in the rank lists.
     """
     # Combine relevance labels: 1 for positive pairs, 0 for negative pairs
-    labels = np.concatenate(
-        [
-            np.ones(pos_pairs.size, dtype=np.uint32),
-            np.zeros(neg_pairs.size, dtype=np.uint32),
-        ]
-    )
+    labels = np.concatenate([
+        np.ones(pos_pairs.size, dtype=np.uint32),
+        np.zeros(neg_pairs.size, dtype=np.uint32),
+    ])
 
     # Flatten positive and negative pair indices for ranking
     ix = np.concatenate([pos_pairs.ravel(), neg_pairs.ravel()])
@@ -90,7 +88,7 @@ def average_precision(
     neg_diffby: List[str],
     batch_size: int = 20000,
     distance: str = "cosine",
-    progress_bar: Optional[bool] = True,
+    progress_bar: bool = True,
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -223,7 +221,7 @@ def average_precision(
 
 
 def p_values(
-    dframe: pd.DataFrame, null_size: int, seed: int, progress_bar: Optional[bool] = True
+    dframe: pd.DataFrame, null_size: int, seed: int, progress_bar: bool = True
 ) -> np.ndarray:
     """Compute p-values for average precision scores based on a null distribution.
 

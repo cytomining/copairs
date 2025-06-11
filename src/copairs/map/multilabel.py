@@ -48,12 +48,10 @@ def _build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
         query = np.unique(mpos_pairs)
         neg_sims, neg_counts = negs_for(query)
         neg_ix = np.repeat(query, neg_counts)
-        labels = np.concatenate(
-            [
-                np.ones(mpos_pairs.size, dtype=np.uint32),
-                np.zeros(len(neg_sims), dtype=np.uint32),
-            ]
-        )
+        labels = np.concatenate([
+            np.ones(mpos_pairs.size, dtype=np.uint32),
+            np.zeros(len(neg_sims), dtype=np.uint32),
+        ])
 
         ix = np.concatenate([mpos_pairs.ravel(), neg_ix])
         sim_all = np.concatenate([np.repeat(mpos_sims, 2), neg_sims])
@@ -77,7 +75,7 @@ def average_precision(
     multilabel_col,
     batch_size=20000,
     distance="cosine",
-    progress_bar: Optional[bool] = True,
+    progress_bar: bool = True,
 ) -> pd.DataFrame:
     """
     Compute average precision with multilabel support.
@@ -129,15 +127,13 @@ def average_precision(
     "Here the positive pairs are per-item inside multilabel_col"
     # TODO Check if multi-label key is necessary
     for i, key in enumerate(keys):
-        result = pd.DataFrame(
-            {
-                "average_precision": ap_scores_list[i],
-                "n_pos_pairs": null_confs_list[i][:, 0],
-                "n_total_pairs": null_confs_list[i][:, 1],
-                "ix": ix_list[i],
-                multilabel_col: key,
-            }
-        )
+        result = pd.DataFrame({
+            "average_precision": ap_scores_list[i],
+            "n_pos_pairs": null_confs_list[i][:, 0],
+            "n_total_pairs": null_confs_list[i][:, 1],
+            "ix": ix_list[i],
+            multilabel_col: key,
+        })
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
     meta = meta.drop(multilabel_col, axis=1)

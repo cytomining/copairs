@@ -14,7 +14,7 @@ from scipy.spatial.distance import cdist
 def parallel_map(
     par_func: Callable[[int], None],
     items: np.ndarray,
-    progress_bar: Optional[bool] = True,
+    progress_bar: bool = True,
 ) -> None:
     """Execute a function in parallel over a list of items.
 
@@ -55,7 +55,7 @@ def parallel_map(
 
 def batch_processing(
     pairwise_op: Callable[[np.ndarray, np.ndarray], np.ndarray],
-    progress_bar: Optional[bool] = True,
+    progress_bar: bool = True,
 ):
     """
     Add batch processing support to pairwise operations.
@@ -268,7 +268,7 @@ def _cdist_diag_sim(
 
 
 def get_similarity_fn(
-    distance: Union[str, Callable], progress_bar: Optional[bool] = True
+    distance: Union[str, Callable], progress_bar: bool = True
 ) -> Callable:
     """Retrieve a similarity function based on a distance string identifier or custom callable.
 
@@ -513,7 +513,7 @@ def get_null_dists(
     null_size: int,
     seed: int,
     cache_dir: Optional[Union[str, Path]] = None,
-    progress_bar: Optional[bool] = True,
+    progress_bar: bool = True,
 ) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
 
@@ -564,7 +564,7 @@ def p_values(
     null_confs: np.ndarray,
     null_size: int,
     seed: int,
-    progress_bar: Optional[bool] = True,
+    progress_bar: bool = True,
 ):
     """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
