@@ -2,6 +2,7 @@
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from os import cpu_count
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -89,11 +90,9 @@ def mean_average_precision(
     logger.info("Computing p-values...")
 
     # Group by the specified metadata column(s) and calculate mean AP
-    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
-        {
-            "average_precision": ["mean", lambda x: list(x.index)],
-        }
-    )
+    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg({
+        "average_precision": ["mean", lambda x: list(x.index)],
+    })
     map_scores.columns = sameby + ["mean_average_precision", "indices"]
 
     # Compute p-values for each group using the null distributions
