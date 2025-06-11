@@ -55,6 +55,7 @@ def parallel_map(
 
 def batch_processing(
     pairwise_op: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    progress_bar: Optional[bool] = True,
 ):
     """
     Add batch processing support to pairwise operations.
@@ -68,6 +69,8 @@ def batch_processing(
     pairwise_op : Callable
         A function that computes pairwise operations (e.g., similarity or distance)
         between two arrays of features.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -92,7 +95,9 @@ def batch_processing(
             result[i : i + len(x_sample)] = pairwise_op(x_sample, y_sample)
 
         # Use multithreading to process the batches in parallel
-        parallel_map(par_func, np.arange(0, num_pairs, batch_size))
+        parallel_map(
+            par_func, np.arange(0, num_pairs, batch_size), progress_bar=progress_bar
+        )
 
         return result
 
