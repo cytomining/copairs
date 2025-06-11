@@ -1,7 +1,7 @@
 """Functions to compute mAP with multilabel support."""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -77,6 +77,7 @@ def average_precision(
     multilabel_col,
     batch_size=20000,
     distance="cosine",
+    progress_bar: bool = True,
 ) -> pd.DataFrame:
     """
     Compute average precision with multilabel support.
@@ -88,7 +89,7 @@ def average_precision(
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
-    distance_fn = compute.get_similarity_fn(distance)
+    distance_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 
