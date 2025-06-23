@@ -6,12 +6,11 @@ import re
 from collections import namedtuple
 from copy import copy
 from math import comb
-from typing import Dict, Sequence, Set, Union
+from typing import Dict, Optional, Sequence, Set, Union
 
 import duckdb
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
 
 logger = logging.getLogger("copairs")
 ColumnList = Union[Sequence[str], pd.Index]
@@ -444,10 +443,23 @@ class MatcherMultilabel:
         id1, id2 = self.original_index[list(null_pair)].values
         return id1, id2
 
-    def get_null_pairs(self, diffby: ColumnList, size: int, n_tries=5):
+    def get_null_pairs(
+        self,
+        diffby: ColumnList,
+        size: int,
+        n_tries=5,
+        progress_bar: bool = True,
+    ):
         """Sample multiple null pairs at the same time."""
         null_pairs = []
-        for _ in tqdm(range(size)):
+
+        iterator = range(size)
+        if progress_bar:
+            from tqdm.auto import tqdm
+
+            iterator = tqdm(iterator)
+
+        for _ in iterator:
             null_pairs.append(self.matcher.sample_null_pair(diffby, n_tries))
         null_pairs = np.array(null_pairs)
         null_pairs[:, 0] = self.original_index[null_pairs[:, 0]].values

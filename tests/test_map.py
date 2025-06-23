@@ -101,7 +101,8 @@ def test_compute_ap_contiguous():
         assert np.allclose(ap_scores, ground_truth)
 
 
-def test_pipeline():
+@pytest.mark.parametrize("progress_bar", [True, False])
+def test_pipeline(progress_bar: bool):
     """Check the implementation with for mAP calculation."""
     length = 10
     vocab_size = {"p": 5, "w": 3, "l": 4}
@@ -114,10 +115,19 @@ def test_pipeline():
     meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
-    average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+    average_precision(
+        meta,
+        feats,
+        pos_sameby,
+        pos_diffby,
+        neg_sameby,
+        neg_diffby,
+        progress_bar=progress_bar,
+    )
 
 
-def test_pipeline_multilabel():
+@pytest.mark.parametrize("progress_bar", [True, False])
+def test_pipeline_multilabel(progress_bar: bool):
     """Check the multilabel implementation with for mAP calculation."""
     length = 10
     vocab_size = {"p": 3, "w": 5, "l": 4}
@@ -134,11 +144,19 @@ def test_pipeline_multilabel():
     feats = rng.uniform(size=(length, n_feats))
 
     multilabel_average_precision(
-        meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby, multilabel_col
+        meta,
+        feats,
+        pos_sameby,
+        pos_diffby,
+        neg_sameby,
+        neg_diffby,
+        multilabel_col,
+        progress_bar=progress_bar,
     )
 
 
-def test_raise_no_pairs():
+@pytest.mark.parametrize("progress_bar", [True, False])
+def test_raise_no_pairs(progress_bar: bool):
     """Test the exception raised when no pairs are found."""
     length = 10
     vocab_size = {"p": 3, "w": 3, "l": 10}
@@ -153,9 +171,19 @@ def test_raise_no_pairs():
     length = len(meta)
     feats = rng.uniform(size=(length, n_feats))
     with pytest.raises(UnpairedException, match="Unable to find positive pairs."):
-        average_precision(meta, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby)
+        average_precision(
+            meta,
+            feats,
+            pos_sameby,
+            pos_diffby,
+            neg_sameby,
+            neg_diffby,
+            progress_bar=progress_bar,
+        )
     with pytest.raises(UnpairedException, match="Unable to find negative pairs."):
-        average_precision(meta, feats, pos_diffby, [], pos_sameby, [])
+        average_precision(
+            meta, feats, pos_diffby, [], pos_sameby, [], progress_bar=progress_bar
+        )
 
 
 def test_raise_nan_error():
@@ -188,3 +216,31 @@ def test_raise_nan_error():
         average_precision(
             meta_nan, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby
         )
+
+
+def test_progress_bar_consistency():
+    """Test that the progress_bar argument does not change results."""
+    length = 10
+    vocab_size = {"p": 5, "w": 3, "l": 4}
+    n_feats = 5
+    pos_sameby = ["l"]
+    pos_diffby = ["p"]
+    neg_sameby = []
+    neg_diffby = ["l"]
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
+    length = len(meta)
+    feats = rng.uniform(size=(length, n_feats))
+    with_pb, no_pb = [
+        average_precision(
+            meta,
+            feats,
+            pos_sameby,
+            pos_diffby,
+            neg_sameby,
+            neg_diffby,
+            progress_bar=progress_bar,
+        )
+        for progress_bar in (True, False)
+    ]
+    assert with_pb.equals(no_pb), "The progress_bar argument changed results"

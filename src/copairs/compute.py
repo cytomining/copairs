@@ -4,15 +4,18 @@ import itertools
 import os
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Callable, Tuple, Union, Optional
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
-from tqdm.autonotebook import tqdm
-from scipy.spatial.distance import cdist
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
+from scipy.spatial.distance import cdist
 
 
-def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
+def parallel_map(
+    par_func: Callable[[int], None],
+    items: np.ndarray,
+    progress_bar: bool = True,
+) -> None:
     """Execute a function in parallel over a list of items.
 
     This function uses a thread pool to process items in parallel, with progress
@@ -41,13 +44,18 @@ def parallel_map(par_func: Callable[[int], None], items: np.ndarray) -> None:
         # Map the function to items with unordered execution for better efficiency
         tasks = pool.imap_unordered(par_func, items, chunksize=chunksize)
 
-        # Display progress using tqdm
-        for _ in tqdm(tasks, total=len(items), leave=False):
+        if progress_bar:
+            # Display progress using tqdm
+            from tqdm.autonotebook import tqdm
+
+            tasks = tqdm(tasks, total=len(items), leave=False)
+        for _ in tasks:
             pass
 
 
 def batch_processing(
     pairwise_op: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    progress_bar: bool = True,
 ):
     """
     Add batch processing support to pairwise operations.
@@ -61,6 +69,8 @@ def batch_processing(
     pairwise_op : Callable
         A function that computes pairwise operations (e.g., similarity or distance)
         between two arrays of features.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -85,7 +95,9 @@ def batch_processing(
             result[i : i + len(x_sample)] = pairwise_op(x_sample, y_sample)
 
         # Use multithreading to process the batches in parallel
-        parallel_map(par_func, np.arange(0, num_pairs, batch_size))
+        parallel_map(
+            par_func, np.arange(0, num_pairs, batch_size), progress_bar=progress_bar
+        )
 
         return result
 
@@ -255,7 +267,9 @@ def _cdist_diag_sim(
     return 1 / (1 + distance)
 
 
-def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
+def get_similarity_fn(
+    distance: Union[str, Callable], progress_bar: bool = True
+) -> Callable:
     """Retrieve a similarity function based on a distance string identifier or custom callable.
 
     This function provides flexibility in specifying the distance function to be used
@@ -279,6 +293,8 @@ def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
 
         If a callable is provided, it must accept the paramters associated with each
         callable function.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -325,7 +341,7 @@ def get_similarity_fn(distance: Union[str, Callable]) -> Callable:
         raise ValueError("Distance must be either a string or a callable object.")
 
     # Wrap the distance function for efficient batch processing
-    return batch_processing(similarity_fn)
+    return batch_processing(similarity_fn, progress_bar=progress_bar)
 
 
 def random_binary_matrix(n, m, k, rng):
@@ -497,6 +513,7 @@ def get_null_dists(
     null_size: int,
     seed: int,
     cache_dir: Optional[Union[str, Path]] = None,
+    progress_bar: bool = True,
 ) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
 
@@ -509,6 +526,8 @@ def get_null_dists(
         Number of samples to generate in the null distribution.
     seed : int
         Random seed for reproducibility.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -535,12 +554,18 @@ def get_null_dists(
         null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
 
     # Parallelize the generation of null distributions
-    parallel_map(par_func, np.arange(num_confs))
+    parallel_map(par_func, np.arange(num_confs), progress_bar)
 
     return null_dists
 
 
-def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed: int):
+def p_values(
+    ap_scores: np.ndarray,
+    null_confs: np.ndarray,
+    null_size: int,
+    seed: int,
+    progress_bar: bool = True,
+):
     """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
     Parameters
@@ -555,6 +580,8 @@ def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed
     seed : int
         Seed for the random number generator to ensure reproducibility of the null
         distribution.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -565,7 +592,7 @@ def p_values(ap_scores: np.ndarray, null_confs: np.ndarray, null_size: int, seed
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
 
     # Generate null distributions for each unique configuration
-    null_dists = get_null_dists(confs, null_size, seed)
+    null_dists = get_null_dists(confs, null_size, seed, progress_bar)
 
     # Sort null distributions for efficient p-value computation
     null_dists.sort(axis=1)

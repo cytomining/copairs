@@ -1,13 +1,14 @@
 """Functions to compute mean average precision."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from os import cpu_count
 from pathlib import Path
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 
 import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
-from tqdm.contrib.concurrent import thread_map
 
 from copairs import compute
 
@@ -20,6 +21,7 @@ def mean_average_precision(
     null_size: int,
     threshold: float,
     seed: int,
+    progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
@@ -43,8 +45,14 @@ def mean_average_precision(
         p-value threshold for identifying significant MaP scores.
     seed : int
         Random seed for reproducibility.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`
+        Number of workers used. Default defined by tqdm's `thread_map`.
+    cache_dir : str or Path
+        Location to save the cache.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
 
     Returns
     -------
@@ -67,7 +75,7 @@ def mean_average_precision(
 
     # Generate null distributions for each unique configuration
     null_dists = compute.get_null_dists(
-        null_confs, null_size, seed=seed, cache_dir=cache_dir
+        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
     )
     ap_scores["null_ix"] = rev_ix
 
@@ -92,6 +100,11 @@ def mean_average_precision(
     # Compute p-values for each group using the null distributions
     params = map_scores[["mean_average_precision", "indices"]]
 
+    if progress_bar:
+        from tqdm.contrib.concurrent import thread_map
+    else:
+        thread_map = silent_thread_map
+
     map_scores["p_value"] = thread_map(
         get_p_value, params.values, leave=False, max_workers=max_workers
     )
@@ -107,3 +120,21 @@ def mean_average_precision(
     map_scores["below_corrected_p"] = map_scores["corrected_p_value"] < threshold
 
     return map_scores
+
+
+def silent_thread_map(fn, *iterables, **kwargs):
+    """Map iterables and kwargs to a function.
+
+    Parameters
+    ----------
+    max_workers  : [default: min(32, cpu_count() + 4)].
+    chunksize  : [default: 1].
+    """
+    # Based on tqdm's original implementation for consistency
+    # (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
+
+    kwargs = kwargs.copy()
+    max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
+    chunksize = kwargs.pop("chunksize", 1)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
