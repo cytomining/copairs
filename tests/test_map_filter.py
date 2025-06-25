@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from copairs.map.filter import evaluate_and_filter
 from tests.helpers import simulate_random_dframe
+from copairs.map.filter import evaluate_and_filter
 
 SEED = 0
 

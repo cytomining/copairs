@@ -7,9 +7,9 @@ from sklearn.metrics import average_precision_score
 
 from copairs import compute
 from copairs.map import average_precision
-from copairs.map.multilabel import average_precision as multilabel_average_precision
-from copairs.matching import UnpairedException
 from tests.helpers import simulate_random_dframe
+from copairs.matching import UnpairedException
+from copairs.map.multilabel import average_precision as multilabel_average_precision
 
 SEED = 0
 

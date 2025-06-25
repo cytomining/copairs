@@ -1,12 +1,12 @@
 """Tests for assign reference index helper function."""
 
-import pytest
 import numpy as np
 import pandas as pd
+import pytest
 
 from copairs.map import average_precision
-from copairs.matching import assign_reference_index
 from tests.helpers import simulate_random_dframe
+from copairs.matching import assign_reference_index
 
 
 @pytest.mark.filterwarnings("ignore:invalid value encountered in divide")

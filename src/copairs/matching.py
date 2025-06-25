@@ -1,15 +1,16 @@
 """Sample pairs with given column restrictions."""
 
-import itertools
-import logging
 import re
-from collections import namedtuple
+import logging
+import warnings
+import itertools
 from copy import copy
 from math import comb
-from typing import Dict, Optional, Sequence, Set, Union
+from typing import Set, Dict, Tuple, Union, Sequence
+from collections import namedtuple
 
-import duckdb
 import numpy as np
+import duckdb
 import pandas as pd
 
 logger = logging.getLogger("copairs")
@@ -366,7 +367,8 @@ class Matcher:
                     continue
                 mapper = self.reverse[col]
                 mapped.append(mapper[val])
-            valid = valid - set.intersection(*mapped)
+            if mapped:
+                valid = valid - set.intersection(*mapped)
         return valid
 
     def _get_full_pairs(self, mapper):
@@ -518,9 +520,19 @@ def find_pairs(
 
 def _validate(sameby, diffby):
     if isinstance(sameby, str):
+        warnings.warn(
+            "Passing strings to 'sameby' is deprecated and will be removed in v0.5.3.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         sameby = (sameby,)
     if isinstance(diffby, str):
-        sameby = (diffby,)
+        warnings.warn(
+            "Passing strings to 'diffby' is deprecated and will be removed in v0.5.3.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        diffby = (diffby,)
 
     if not (len(sameby) or len(diffby)):
         raise ValueError("at least one should be provided")
@@ -533,7 +545,7 @@ def find_pairs_multilabel(
     sameby: Union[str, ColumnList],
     diffby: Union[str, ColumnList],
     multilabel_col: str,
-) -> np.ndarray or tuple(np.ndarray, np.ndarray, np.ndarray):
+) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     Find pairs of rows in a DataFrame that have the same or different values in certain columns.
 
@@ -559,6 +571,10 @@ def find_pairs_multilabel(
     -----
     The function asserts that `multilabel_col` is present in either `sameby` or `diffby`.
     """
+    sameby, diffby = _validate(sameby, diffby)
+    sameby = list(sameby)
+    diffby = list(diffby)
+
     assert (multilabel_col in sameby) or (multilabel_col in diffby), (
         f"Missing {multilabel_col} in sameby and diffby"
     )

@@ -1,9 +1,10 @@
 """Tests for the multilabel matching implementation."""
 
 import pandas as pd
+import pytest
 
-from copairs.matching import find_pairs_multilabel
 from tests.helpers import simulate_random_plates
+from copairs.matching import find_pairs_multilabel
 
 SEED = 42
 
@@ -131,3 +132,40 @@ def test_only_sameby_many_cols():
     )
     dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
     check_naive(dframe, sameby, diffby, multilabel_col)
+
+
+def test_accepts_tuples_inputs():
+    """find_pairs_multilabel should accept tuples for sameby and diffby."""
+    multilabel_col = "c"
+    sameby = ("c",)
+    diffby = ("p", "w")
+    dframe = simulate_random_plates(
+        n_compounds=4, n_replicates=5, plate_size=5, sameby=sameby, diffby=diffby
+    )
+    dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
+    check_naive(dframe, sameby, diffby, multilabel_col)
+
+
+def test_accepts_string_inputs():
+    """find_pairs_multilabel should accept strings for sameby and diffby."""
+    multilabel_col = "c"
+    sameby = "c"
+    diffby = "p"
+    dframe = simulate_random_plates(
+        n_compounds=4,
+        n_replicates=5,
+        plate_size=5,
+        sameby=[sameby],
+        diffby=[diffby],
+    )
+    dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
+
+    gt_pairs = get_naive_pairs(dframe, [sameby], [diffby], multilabel_col)
+    with pytest.deprecated_call():
+        vals = find_pairs_multilabel(dframe, sameby, diffby, multilabel_col)
+    if multilabel_col == sameby:
+        vals = vals[0]
+    vals = pd.DataFrame(vals, columns=["index_x", "index_y"])
+    vals = vals.sort_values(["index_x", "index_y"]).reset_index(drop=True)
+
+    assert set(vals.apply(frozenset, axis=1)) == set(gt_pairs.apply(frozenset, axis=1))
