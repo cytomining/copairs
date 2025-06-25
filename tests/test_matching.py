@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from copairs.matching import find_pairs, _validate
 from tests.helpers import create_dframe, simulate_plates, simulate_random_dframe
+from copairs.matching import _validate, find_pairs
 
 SEED = 0
 

@@ -1,7 +1,7 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -9,7 +9,7 @@ import pandas as pd
 from copairs import compute
 from copairs.matching import UnpairedException, find_pairs
 
-from .filter import evaluate_and_filter, flatten_str_list, validate_pipeline_input
+from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 
 logger = logging.getLogger("copairs")
 

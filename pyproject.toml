@@ -41,10 +41,13 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.ruff.lint]
-select = ["D"]
+select = ["D", "I"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[tool.ruff.lint.isort]
+length-sort = true
 
 [dependency-groups]
 dev = [

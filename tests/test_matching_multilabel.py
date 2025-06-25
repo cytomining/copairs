@@ -2,8 +2,8 @@
 
 import pandas as pd
 
-from copairs.matching import find_pairs_multilabel
 from tests.helpers import simulate_random_plates
+from copairs.matching import find_pairs_multilabel
 
 SEED = 42
 

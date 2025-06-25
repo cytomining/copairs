@@ -3,12 +3,12 @@
 from numpy.random import default_rng
 
 from copairs import Matcher
+from tests.helpers import create_dframe
 from copairs.replicating import (
-    corr_between_replicates,
     corr_from_pairs,
     correlation_test,
+    corr_between_replicates,
 )
-from tests.helpers import create_dframe
 
 SEED = 0
 

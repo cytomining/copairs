@@ -5,11 +5,11 @@ import logging
 import itertools
 from copy import copy
 from math import comb
+from typing import Set, Dict, Tuple, Union, Sequence
 from collections import namedtuple
-from typing import Dict, Sequence, Set, Tuple, Union
 
-import duckdb
 import numpy as np
+import duckdb
 import pandas as pd
 
 logger = logging.getLogger("copairs")
