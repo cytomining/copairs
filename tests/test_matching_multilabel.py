@@ -1,6 +1,7 @@
 """Tests for the multilabel matching implementation."""
 
 import pandas as pd
+import pytest
 
 from tests.helpers import simulate_random_plates
 from copairs.matching import find_pairs_multilabel
@@ -160,7 +161,8 @@ def test_accepts_string_inputs():
     dframe = dframe.groupby(["p", "w"])["c"].unique().reset_index()
 
     gt_pairs = get_naive_pairs(dframe, [sameby], [diffby], multilabel_col)
-    vals = find_pairs_multilabel(dframe, sameby, diffby, multilabel_col)
+    with pytest.deprecated_call():
+        vals = find_pairs_multilabel(dframe, sameby, diffby, multilabel_col)
     if multilabel_col == sameby:
         vals = vals[0]
     vals = pd.DataFrame(vals, columns=["index_x", "index_y"])

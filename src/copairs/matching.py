@@ -2,6 +2,7 @@
 
 import re
 import logging
+import warnings
 import itertools
 from copy import copy
 from math import comb
@@ -519,8 +520,18 @@ def find_pairs(
 
 def _validate(sameby, diffby):
     if isinstance(sameby, str):
+        warnings.warn(
+            "Passing strings to 'sameby' is deprecated and will be removed in v0.5.3.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         sameby = (sameby,)
     if isinstance(diffby, str):
+        warnings.warn(
+            "Passing strings to 'diffby' is deprecated and will be removed in v0.5.3.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         diffby = (diffby,)
 
     if not (len(sameby) or len(diffby)):

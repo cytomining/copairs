@@ -127,7 +127,8 @@ def test_raise_no_params():
 
 def test_validate_string_inputs():
     """_validate should convert string inputs to tuples."""
-    sameby, diffby = _validate("c", "p")
+    with pytest.deprecated_call():
+        sameby, diffby = _validate("c", "p")
     assert sameby == ("c",)
     assert diffby == ("p",)
 
