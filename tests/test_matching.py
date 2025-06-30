@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from copairs.matching import find_pairs
 from tests.helpers import create_dframe, simulate_plates, simulate_random_dframe
+from copairs.matching import _validate, find_pairs
 
 SEED = 0
 
@@ -123,6 +123,14 @@ def test_raise_no_params():
     dframe = create_dframe(3, 10)
     with pytest.raises(ValueError, match="at least one should be provided"):
         find_pairs(dframe, [], [])
+
+
+def test_validate_string_inputs():
+    """_validate should convert string inputs to tuples."""
+    with pytest.deprecated_call():
+        sameby, diffby = _validate("c", "p")
+    assert sameby == ("c",)
+    assert diffby == ("p",)
 
 
 def assert_sameby_diffby(dframe: pd.DataFrame, pairs: dict, sameby, diffby):

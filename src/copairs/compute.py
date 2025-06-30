@@ -1,10 +1,10 @@
 """Functions to compute distances and ranks using numpy operations."""
 
-import itertools
 import os
-from multiprocessing.pool import ThreadPool
+import itertools
+from typing import Tuple, Union, Callable, Optional
 from pathlib import Path
-from typing import Callable, Optional, Tuple, Union
+from multiprocessing.pool import ThreadPool
 
 import numpy as np
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES

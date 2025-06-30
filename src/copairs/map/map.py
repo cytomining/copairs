@@ -1,10 +1,10 @@
 """Functions to compute mean average precision."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from os import cpu_count
+from typing import List, Union, Optional
 from pathlib import Path
-from typing import List, Optional, Union
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd

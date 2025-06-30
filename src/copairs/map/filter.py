@@ -1,7 +1,7 @@
 """Functions to support query-like syntax when finding the matches."""
 
-import itertools
 import re
+import itertools
 from typing import List, Tuple
 
 import numpy as np
