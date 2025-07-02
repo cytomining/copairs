@@ -25,6 +25,15 @@ We show how to use copairs for:
 - [calculating mAP to assess phenotypic consistency of perturbations](./phenotypic_consistency.ipynb)
 - [estimating null size for mAP p-value calculation](./null_size.ipynb)
 
+### Command-line script
+
+We also provide a unified command-line script `phenotypic_analysis.py` that can run both phenotypic activity and consistency analyses:
+
+```bash
+# Run both analyses (downloads data automatically if needed)
+./run_phenotypic_analysis.sh
+```
+
 ## Data used
 
 In these examples, we used a single plate of profiles from the dataset "cpg0004" (aka LINCS), which contains Cell Painting images of 1,327 small-molecule perturbations of A549 human cells. The wells on each plate were perturbed with 56 different compounds in six different doses.
