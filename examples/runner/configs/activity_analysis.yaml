@@ -1,0 +1,39 @@
+# Configuration for phenotypic activity analysis
+# Matches the phenotypic_activity.ipynb example
+
+data:
+  path: "../data/2016_04_01_a549_48hr_batch1_plateSQ00014812.csv"
+  metadata_regex: "^Metadata"
+
+preprocessing:
+  # Remove constant columns (as done in notebook)
+  # Note: This is handled differently in the runner, but we can achieve similar results
+  
+  # Assign reference index for controls (DMSO)
+  - type: assign_reference
+    params:
+      condition: "Metadata_broad_sample == 'DMSO'"
+      reference_col: "Metadata_reference_index"
+      default_value: -1
+
+average_precision:
+  params:
+    # Positive pairs: replicates of the same compound
+    pos_sameby: ["Metadata_broad_sample", "Metadata_reference_index"]
+    pos_diffby: []
+    
+    # Negative pairs: compound vs control
+    neg_sameby: []
+    neg_diffby: ["Metadata_broad_sample", "Metadata_reference_index"]
+    
+    # Using default distance (cosine) as in notebook
+
+mean_average_precision:
+  sameby: ["Metadata_broad_sample"]  # Group by compound
+  null_size: 1000000                 # As used in notebook
+  threshold: 0.05
+  seed: 0                            # As used in notebook
+
+output:
+  path: "../../data/activity_map_runner.csv"
+  save_ap_scores: true  # Save AP scores to match notebook output
