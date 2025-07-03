@@ -6,6 +6,7 @@
 #     "copairs",
 #     "pyyaml",
 #     "matplotlib",
+#     "seaborn",
 # ]
 # ///
 
@@ -19,6 +20,7 @@ from pathlib import Path
 import yaml
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
 
 from copairs import map
@@ -499,42 +501,75 @@ class CopairsRunner:
         figsize = tuple(plot_config.get("figsize", [8, 6]))
         dpi = plot_config.get("dpi", 100)
 
+        # Set seaborn style
+        sns.set_style("whitegrid", {"axes.grid": False})
+
         # Create figure
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
         # Calculate percentage of significant results
         significant_ratio = map_results["below_corrected_p"].mean()
 
-        # Create scatter plot
+        # Better color scheme
+        colors = map_results["below_corrected_p"].map(
+            {True: "#2166ac", False: "#969696"}
+        )
+
+        # Create scatter plot with better styling
         ax.scatter(
             data=map_results,
             x="mean_average_precision",
             y="-log10(p-value)",
-            c="below_corrected_p",
-            cmap="tab10",
-            s=20,
-            alpha=0.7,
+            c=colors,
+            s=40,
+            alpha=0.6,
+            edgecolors="none",
         )
 
         # Add significance threshold line
-        ax.axhline(-np.log10(0.05), color="black", linestyle="--", linewidth=1)
-
-        # Add annotation
-        ax.text(
-            0.65,
-            1.5,
-            f"{annotation_prefix} = {100 * significant_ratio:.2f}%",
-            transform=ax.transData,
-            va="center",
-            ha="left",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+        ax.axhline(
+            -np.log10(0.05), color="#d6604d", linestyle="--", linewidth=1.5, alpha=0.8
         )
 
-        # Set labels and title
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
+        # Add annotation without box (top left)
+        ax.text(
+            0.02,
+            0.98,
+            f"{annotation_prefix}: {100 * significant_ratio:.1f}%",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontsize=11,
+            color="#525252",
+        )
+
+        # Remove top and right spines (range frames)
+        sns.despine()
+
+        # Set x-axis limits to always show 0-1.05 range
+        ax.set_xlim(0, 1.05)
+
+        # Set y-axis limits based on the null size
+
+        null_size = (
+            self.config["mean_average_precision"].get("params", {}).get("null_size")
+            if "mean_average_precision" in self.config
+            else None
+        )
+        assert null_size  # This must exist if we are plotting mAP
+
+        ymax = -np.log10(1 / (1 + null_size))
+        ax.set_ylim(0, ymax)
+
+        # Set labels with better formatting
+        ax.set_xlabel(xlabel, fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
         if title:
-            ax.set_title(title)
+            ax.set_title(title, fontsize=14, pad=20)
+
+        # Customize grid
+        ax.grid(True, alpha=0.2, linestyle="-", linewidth=0.5)
+        ax.set_axisbelow(True)
 
         # Adjust layout
         plt.tight_layout()
@@ -554,7 +589,7 @@ class CopairsRunner:
             elif not plot_format:
                 plot_format = "png"
 
-            fig.savefig(save_path, format=plot_format, bbox_inches="tight")
+            fig.savefig(save_path, format=plot_format, bbox_inches="tight", dpi=300)
             logger.info(f"Saved plot to {save_path}")
 
             # Close figure to free memory
