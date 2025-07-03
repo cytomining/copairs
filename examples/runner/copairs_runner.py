@@ -132,6 +132,30 @@ class CopairsRunner:
                 df[column] = df[column].str.split(separator)
                 logger.info(f"Split multilabel column '{column}' by '{separator}'")
 
+            elif step_type == "filter_by_external_csv":
+                # Filter data based on values from an external CSV file
+                csv_path = Path(step["csv_path"])
+                filter_column = step["filter_column"]
+                csv_column = step.get("csv_column", filter_column)
+                condition = step.get("condition", "below_corrected_p")
+                
+                # Load the external CSV
+                external_df = pd.read_csv(csv_path)
+                
+                # Get values that meet the condition
+                if condition in external_df.columns:
+                    # Boolean column filter
+                    valid_values = external_df[external_df[condition]][csv_column].tolist()
+                else:
+                    # Use all values if condition column doesn't exist
+                    valid_values = external_df[csv_column].tolist()
+                
+                # Filter the main dataframe
+                df = df[df[filter_column].isin(valid_values)]
+                logger.info(
+                    f"Filtered to {len(df)} rows based on {len(valid_values)} values from {csv_path}"
+                )
+
             else:
                 logger.warning(f"Unknown preprocessing type: {step_type}")
 

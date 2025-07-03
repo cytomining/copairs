@@ -7,9 +7,10 @@ data:
 
 preprocessing:
   # Filter to only active compounds based on activity analysis
-  # Note: This requires first running the activity analysis
-  # The notebook uses the activity_map.csv file to filter active compounds
-  # Since we can't load external CSV in YAML, we'll need to handle this differently
+  - type: filter_by_external_csv
+    csv_path: "../data/activity_map_runner.csv"
+    filter_column: "Metadata_broad_sample"
+    condition: "below_corrected_p"
   
   # Remove rows with missing targets (implicit in notebook via query)
   - type: dropna
@@ -43,5 +44,5 @@ mean_average_precision:
   seed: 0                      # As used in notebook
 
 output:
-  path: "../../data/target_maps_runner.csv"
+  path: "../data/target_maps_runner.csv"
   save_ap_scores: false
