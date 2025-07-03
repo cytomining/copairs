@@ -35,5 +35,5 @@ mean_average_precision:
   seed: 0                            # As used in notebook
 
 output:
-  path: "../../data/activity_map_runner.csv"
+  path: "../data/activity_map_runner.csv"
   save_ap_scores: true  # Save AP scores to match notebook output
