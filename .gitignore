@@ -159,6 +159,9 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-examples/data/
+examples/data/*
 examples/cache/
 .vscode/
+examples/results/
+CLAUDE.md
+.claude/settings.local.json

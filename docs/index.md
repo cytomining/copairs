@@ -1,47 +1,12 @@
- # copairs
+# copairs
 
 `copairs` is a Python package for finding groups of profiles based on metadata and calculate mean Average Precision to assess intra- vs inter-group similarities.
 
-## Getting started
+## Installation
 
-### System requirements
-copairs supports Python 3.8+ and should work with all modern operating systems (tested with MacOS 13.5, Ubuntu 18.04, Windows 10).
-
-### Dependencies
-copairs depends on widely used Python packages:
-* numpy
-* pandas
-* tqdm
-* statsmodels
-* [optional] plotly
-
-### Installation
-
-To install copairs and dependencies, run:
 ```bash
 pip install copairs
 ```
-
-To also install dependencies for running examples, run:
-```bash
-pip install copairs[demo]
-```
-
-### Testing
-
-To run tests, run:
-```bash
-pip install -e .[test]
-pytest
-```
-
-## Usage
-
-We provide examples demonstrating how to use copairs for:
-- [grouping profiles based on their metadata](./docs/examples/finding_pairs.ipynb)
-- [calculating mAP to assess phenotypic activity of perturbations](./docs/examples/phenotypic_activity.ipynb)
-- [calculating mAP to assess phenotypic consistency of perturbations](./docs/examples/phenotypic_consistency.ipynb)
-- [estimating null size for mAP p-value calculation](./docs/examples/null_size.ipynb)
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):

@@ -1,0 +1,3 @@
+# copairs.replicating
+
+::: copairs.replicating
