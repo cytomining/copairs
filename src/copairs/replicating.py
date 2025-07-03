@@ -35,15 +35,23 @@ def corr_between_non_replicates(
 
     Parameters
     ----------
-    df: pandas.DataFrame
-    n_samples: int
-    n_replicates: int
-    diffby: list of columns that should be different
-    use_rep: which data to use from .obsm property. `None` (default) uses `adata.X`
+    X : np.ndarray
+        Feature matrix.
+    meta : pandas.DataFrame
+        Metadata dataframe.
+    n_samples : int
+        Number of samples to generate.
+    n_replicates : int
+        Number of replicates per sample.
+    diffby : List[str]
+        List of columns that should be different.
+    progress_bar : bool, optional
+        Whether to show progress bar [default: True].
 
     Returns
     -------
-    list-like of correlation values, with a  length of `n_samples`
+    pd.Series
+        Correlation values, with a length of `n_samples`.
     """
     matcher = Matcher(meta, diffby, seed=0)
     n_pairs = n_replicates * n_samples
@@ -112,14 +120,21 @@ def corr_between_replicates(
 
     Parameters
     ----------
-    adata: ad.AnnData
-    sameby: Feature name to group the data frame by
-    diffby: Feature name to force different values
-    use_rep: which data to use from .obsm property. `None` (default) uses `adata.X`
+    X : np.ndarray
+        Feature matrix.
+    meta : pd.DataFrame
+        Metadata dataframe.
+    sameby : List[str]
+        Feature names to group the data frame by.
+    diffby : List[str]
+        Feature names to force different values.
+    progress_bar : bool, optional
+        Whether to show progress bar [default: True].
 
     Returns
     -------
-    list-like of correlation values and median of number of replicates
+    tuple
+        (DataFrame with correlation statistics, median number of replicates).
     """
     matcher = Matcher(meta, sameby + diffby, seed=0)
     pairs = matcher.get_all_pairs(sameby, diffby)

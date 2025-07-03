@@ -38,10 +38,10 @@ pytest
 ## Usage
 
 We provide examples demonstrating how to use copairs for:
-- [grouping profiles based on their metadata](./examples/finding_pairs.ipynb)
-- [calculating mAP to assess phenotypic activity of perturbations](./examples/phenotypic_activity.ipynb)
-- [calculating mAP to assess phenotypic consistency of perturbations](./examples/phenotypic_consistency.ipynb)
-- [estimating null size for mAP p-value calculation](./examples/null_size.ipynb)
+- [grouping profiles based on their metadata](./docs/examples/finding_pairs.ipynb)
+- [calculating mAP to assess phenotypic activity of perturbations](./docs/examples/phenotypic_activity.ipynb)
+- [calculating mAP to assess phenotypic consistency of perturbations](./docs/examples/phenotypic_consistency.ipynb)
+- [estimating null size for mAP p-value calculation](./docs/examples/null_size.ipynb)
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):
