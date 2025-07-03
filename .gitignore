@@ -160,6 +160,7 @@ cython_debug/
 #.idea/
 
 examples/data/*
+utils/data/*
 examples/cache/
 .vscode/
 examples/results/

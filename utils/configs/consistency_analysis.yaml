@@ -2,13 +2,13 @@
 # Matches the phenotypic_consistency.ipynb example
 
 data:
-  path: "../data/2016_04_01_a549_48hr_batch1_plateSQ00014812.csv"
+  path: "data/2016_04_01_a549_48hr_batch1_plateSQ00014812.csv"
   metadata_regex: "^Metadata"
 
 preprocessing:
   # Filter to only active compounds based on activity analysis
   - type: filter_by_external_csv
-    csv_path: "../data/activity_map_runner.csv"
+    csv_path: "data/activity_map_runner.csv"
     filter_column: "Metadata_broad_sample"
     condition: "below_corrected_p"
   
@@ -42,11 +42,12 @@ average_precision:
     multilabel_col: "Metadata_target"
 
 mean_average_precision:
-  sameby: ["Metadata_target"]  # Group by target
-  null_size: 1000000           # As used in notebook
-  threshold: 0.05
-  seed: 0                      # As used in notebook
+  params:
+    sameby: ["Metadata_target"]  # Group by target
+    null_size: 1000000           # As used in notebook
+    threshold: 0.05
+    seed: 0                      # As used in notebook
 
 output:
-  path: "../data/target_maps_runner.csv"
+  path: "data/target_maps_runner.csv"
   save_ap_scores: false

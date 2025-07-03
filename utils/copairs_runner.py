@@ -34,6 +34,9 @@ class CopairsRunner:
     - Running average precision calculations
     - Running mean average precision with significance testing
     - Saving results
+
+    Note: By default, metadata columns are identified using the regex "^Metadata".
+    You can override this by setting data.metadata_regex in your config.
     """
 
     def __init__(self, config: Union[Dict[str, Any], str, Path]):
@@ -75,6 +78,14 @@ class CopairsRunner:
         for field in required_ap:
             if field not in ap_params:
                 raise ValueError(f"Missing required average_precision param: {field}")
+
+        # Validate mean_average_precision params if present
+        if "mean_average_precision" in self.config:
+            map_params = self.config["mean_average_precision"].get("params", {})
+            required_map = ["sameby", "null_size", "threshold", "seed"]
+            for field in required_map:
+                if field not in map_params:
+                    raise ValueError(f"Missing required mean_average_precision param: {field}")
 
     def load_data(self) -> pd.DataFrame:
         """Load data from configured path."""
@@ -214,7 +225,7 @@ class CopairsRunner:
     ) -> pd.DataFrame:
         """Run average precision calculation."""
         ap_config = self.config["average_precision"]
-        params = ap_config["params"].copy()
+        params = ap_config["params"]
 
         # Check if multilabel
         if ap_config.get("multilabel", False):
@@ -232,9 +243,10 @@ class CopairsRunner:
             return ap_results
 
         map_config = self.config["mean_average_precision"]
-        logger.info("Running mean average precision")
+        params = map_config["params"]
 
-        map_results = map.mean_average_precision(ap_results, **map_config)
+        logger.info("Running mean average precision")
+        map_results = map.mean_average_precision(ap_results, **params)
 
         # Add -log10(p-value) column if not present
         if "corrected_p_value" in map_results.columns:

@@ -2,7 +2,7 @@
 # Matches the phenotypic_activity.ipynb example
 
 data:
-  path: "../data/2016_04_01_a549_48hr_batch1_plateSQ00014812.csv"
+  path: "data/2016_04_01_a549_48hr_batch1_plateSQ00014812.csv"
   metadata_regex: "^Metadata"
 
 preprocessing:
@@ -29,11 +29,12 @@ average_precision:
     # Using default distance (cosine) as in notebook
 
 mean_average_precision:
-  sameby: ["Metadata_broad_sample"]  # Group by compound
-  null_size: 1000000                 # As used in notebook
-  threshold: 0.05
-  seed: 0                            # As used in notebook
+  params:
+    sameby: ["Metadata_broad_sample"]  # Group by compound
+    null_size: 1000000                 # As used in notebook
+    threshold: 0.05
+    seed: 0                            # As used in notebook
 
 output:
-  path: "../data/activity_map_runner.csv"
+  path: "data/activity_map_runner.csv"
   save_ap_scores: true  # Save AP scores to match notebook output
