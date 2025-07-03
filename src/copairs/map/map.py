@@ -135,7 +135,7 @@ def silent_thread_map(fn, *iterables, **kwargs):
         Additional keyword arguments. Accepts:
         - max_workers : int, optional
             Maximum number of workers [default: min(32, cpu_count() + 4)].
-        - chunksize : int, optional  
+        - chunksize : int, optional
             Size of chunks for each worker [default: 1].
     """
     # Based on tqdm's original implementation for consistency
