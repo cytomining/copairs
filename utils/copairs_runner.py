@@ -192,6 +192,25 @@ class CopairsRunner:
         -------
         pd.DataFrame
             Preprocessed dataframe
+
+        Notes
+        -----
+        Available preprocessing steps:
+
+        Direct parameter steps (parameters at step level):
+        - filter: Filter rows using pandas query
+        - dropna: Drop rows with NaN values
+        - remove_nan_features: Remove feature columns containing NaN
+        - split_multilabel: Split pipe-separated values into lists
+        - filter_by_external_csv: Filter based on external CSV file
+        - aggregate_replicates: Aggregate by taking median of features
+        - add_column_from_query: Add boolean column from query evaluation
+
+        External function steps (parameters under 'params'):
+        - apply_assign_reference: Apply copairs.matching.assign_reference_index
+
+        The 'apply_' prefix indicates steps that call external functions
+        and require parameters to be nested under 'params'.
         """
         if "preprocessing" not in self.config:
             return df
@@ -205,7 +224,7 @@ class CopairsRunner:
                 df = df.query(query)
                 logger.info(f"After filter '{query}': {len(df)} rows")
 
-            elif step_type == "assign_reference":
+            elif step_type == "apply_assign_reference":
                 params = step["params"]
                 df = assign_reference_index(df, **params)
 
@@ -270,6 +289,16 @@ class CopairsRunner:
 
                 logger.info(
                     f"Aggregated to {len(df)} rows by grouping on {groupby_cols}"
+                )
+
+            elif step_type == "add_column_from_query":
+                # Add a new boolean column based on evaluating a query
+                query = step["query"]
+                # Use provided column name or default to the query itself
+                column_name = step.get("column_name", query)
+                df[column_name] = df.eval(query)
+                logger.info(
+                    f"Added column '{column_name}' with {df[column_name].sum()} True values"
                 )
 
             else:
