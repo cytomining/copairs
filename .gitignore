@@ -166,3 +166,4 @@ examples/cache/
 examples/results/
 CLAUDE.md
 .claude/settings.local.json
+utils/output/

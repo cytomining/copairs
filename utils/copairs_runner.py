@@ -5,6 +5,7 @@
 #     "numpy",
 #     "copairs",
 #     "pyyaml",
+#     "matplotlib",
 # ]
 # ///
 
@@ -18,6 +19,7 @@ from pathlib import Path
 import yaml
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from copairs import map
 from copairs.matching import assign_reference_index
@@ -33,10 +35,13 @@ class CopairsRunner:
     - Preprocessing steps (filtering, reference assignment)
     - Running average precision calculations
     - Running mean average precision with significance testing
+    - Plotting mAP vs -log10(p-value) scatter plots
     - Saving results
 
     Note: By default, metadata columns are identified using the regex "^Metadata".
     You can override this by setting data.metadata_regex in your config.
+
+    To enable plotting, add a "plotting" section to your config with "enabled: true".
     """
 
     def __init__(self, config: Union[Dict[str, Any], str, Path]):
@@ -54,7 +59,18 @@ class CopairsRunner:
 
     @staticmethod
     def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
-        """Load configuration from YAML or JSON file."""
+        """Load configuration from YAML or JSON file.
+
+        Parameters
+        ----------
+        config_path : str or Path
+            Path to YAML or JSON configuration file
+
+        Returns
+        -------
+        dict
+            Configuration dictionary
+        """
         config_path = Path(config_path)
 
         with open(config_path, "r") as f:
@@ -66,7 +82,13 @@ class CopairsRunner:
                 raise ValueError(f"Unsupported config format: {config_path.suffix}")
 
     def validate_config(self):
-        """Validate configuration has required fields."""
+        """Validate configuration has required fields.
+
+        Raises
+        ------
+        ValueError
+            If required configuration fields are missing
+        """
         required = ["data", "average_precision", "output"]
         for field in required:
             if field not in self.config:
@@ -85,10 +107,32 @@ class CopairsRunner:
             required_map = ["sameby", "null_size", "threshold", "seed"]
             for field in required_map:
                 if field not in map_params:
-                    raise ValueError(f"Missing required mean_average_precision param: {field}")
+                    raise ValueError(
+                        f"Missing required mean_average_precision param: {field}"
+                    )
+
+        # Validate plotting params if present
+        if "plotting" in self.config and self.config["plotting"].get("enabled", False):
+            plot_config = self.config["plotting"]
+            if "mean_average_precision" not in self.config:
+                logger.warning(
+                    "Plotting is enabled but mean_average_precision is not configured. "
+                    "No plots will be generated."
+                )
 
     def load_data(self) -> pd.DataFrame:
-        """Load data from configured path."""
+        """Load data from configured path.
+
+        Returns
+        -------
+        pd.DataFrame
+            Loaded data
+
+        Raises
+        ------
+        ValueError
+            If file format is not supported
+        """
         data_config = self.config["data"]
         path = Path(data_config["path"])
 
@@ -105,7 +149,18 @@ class CopairsRunner:
         return df
 
     def preprocess_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply preprocessing steps to data."""
+        """Apply preprocessing steps to data.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe
+
+        Returns
+        -------
+        pd.DataFrame
+            Preprocessed dataframe
+        """
         if "preprocessing" not in self.config:
             return df
 
@@ -149,18 +204,20 @@ class CopairsRunner:
                 filter_column = step["filter_column"]
                 csv_column = step.get("csv_column", filter_column)
                 condition = step.get("condition", "below_corrected_p")
-                
+
                 # Load the external CSV
                 external_df = pd.read_csv(csv_path)
-                
+
                 # Get values that meet the condition
                 if condition in external_df.columns:
                     # Boolean column filter
-                    valid_values = external_df[external_df[condition]][csv_column].tolist()
+                    valid_values = external_df[external_df[condition]][
+                        csv_column
+                    ].tolist()
                 else:
                     # Use all values if condition column doesn't exist
                     valid_values = external_df[csv_column].tolist()
-                
+
                 # Filter the main dataframe
                 df = df[df[filter_column].isin(valid_values)]
                 logger.info(
@@ -171,15 +228,17 @@ class CopairsRunner:
                 # Aggregate replicates by taking median of features
                 groupby_cols = step["groupby"]
                 feature_cols = self.get_feature_columns(df)
-                
+
                 # Keep only groupby columns and features (matching notebook behavior)
                 keep_cols = groupby_cols + feature_cols
                 df = df[keep_cols]
-                
+
                 # Group and aggregate only feature columns
                 df = df.groupby(groupby_cols, as_index=False)[feature_cols].median()
-                
-                logger.info(f"Aggregated to {len(df)} rows by grouping on {groupby_cols}")
+
+                logger.info(
+                    f"Aggregated to {len(df)} rows by grouping on {groupby_cols}"
+                )
 
             else:
                 logger.warning(f"Unknown preprocessing type: {step_type}")
@@ -187,7 +246,18 @@ class CopairsRunner:
         return df
 
     def get_feature_columns(self, df: pd.DataFrame) -> List[str]:
-        """Get feature columns from dataframe."""
+        """Get feature columns from dataframe.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe
+
+        Returns
+        -------
+        list of str
+            Feature column names
+        """
         data_config = self.config["data"]
 
         if "feature_columns" in data_config:
@@ -203,7 +273,18 @@ class CopairsRunner:
             return [col for col in df.columns if col not in metadata_cols]
 
     def extract_data(self, df: pd.DataFrame) -> tuple:
-        """Extract metadata and feature data."""
+        """Extract metadata and feature data.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe
+
+        Returns
+        -------
+        tuple
+            (metadata, features) where metadata is a DataFrame and features is a numpy array
+        """
         data_config = self.config["data"]
 
         # Get metadata
@@ -223,7 +304,20 @@ class CopairsRunner:
     def run_average_precision(
         self, metadata: pd.DataFrame, features: np.ndarray
     ) -> pd.DataFrame:
-        """Run average precision calculation."""
+        """Run average precision calculation.
+
+        Parameters
+        ----------
+        metadata : pd.DataFrame
+            Metadata dataframe
+        features : np.ndarray
+            Feature array
+
+        Returns
+        -------
+        pd.DataFrame
+            Average precision results
+        """
         ap_config = self.config["average_precision"]
         params = ap_config["params"]
 
@@ -238,7 +332,18 @@ class CopairsRunner:
         return results
 
     def run_mean_average_precision(self, ap_results: pd.DataFrame) -> pd.DataFrame:
-        """Run mean average precision if configured."""
+        """Run mean average precision if configured.
+
+        Parameters
+        ----------
+        ap_results : pd.DataFrame
+            Average precision results
+
+        Returns
+        -------
+        pd.DataFrame
+            Mean average precision results with p-values
+        """
         if "mean_average_precision" not in self.config:
             return ap_results
 
@@ -257,7 +362,15 @@ class CopairsRunner:
         return map_results
 
     def save_results(self, results: pd.DataFrame, suffix: str = ""):
-        """Save results to configured output path."""
+        """Save results to configured output path.
+
+        Parameters
+        ----------
+        results : pd.DataFrame
+            Results dataframe to save
+        suffix : str, optional
+            Suffix to add to filename, by default ""
+        """
         output_config = self.config["output"]
         output_path = Path(output_config["path"])
 
@@ -278,8 +391,111 @@ class CopairsRunner:
 
         logger.info(f"Saved results to {output_path}")
 
+    def plot_map_results(
+        self,
+        map_results: pd.DataFrame,
+        save_path: Optional[Union[str, Path]] = None,
+    ) -> Optional[plt.Figure]:
+        """Create and optionally save a scatter plot of mean average precision vs -log10(p-value).
+
+        Parameters
+        ----------
+        map_results : pd.DataFrame
+            Results from mean_average_precision containing 'mean_average_precision',
+            'corrected_p_value', and 'below_corrected_p' columns
+        save_path : str or Path, optional
+            If provided, save the plot to this path. If None, uses config settings.
+
+        Returns
+        -------
+        plt.Figure or None
+            The matplotlib figure object if created, None if plotting is disabled
+        """
+        # Check if plotting is enabled
+        plot_config = self.config.get("plotting", {})
+        if not plot_config.get("enabled", False):
+            return None
+
+        # Get plot parameters from config
+        title = plot_config.get("title")
+        xlabel = plot_config.get("xlabel", "mAP")
+        ylabel = plot_config.get("ylabel", "-log10(p-value)")
+        annotation_prefix = plot_config.get("annotation_prefix", "Significant")
+        figsize = tuple(plot_config.get("figsize", [8, 6]))
+        dpi = plot_config.get("dpi", 100)
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+        # Calculate percentage of significant results
+        significant_ratio = map_results["below_corrected_p"].mean()
+
+        # Create scatter plot
+        ax.scatter(
+            data=map_results,
+            x="mean_average_precision",
+            y="-log10(p-value)",
+            c="below_corrected_p",
+            cmap="tab10",
+            s=20,
+            alpha=0.7,
+        )
+
+        # Add significance threshold line
+        ax.axhline(-np.log10(0.05), color="black", linestyle="--", linewidth=1)
+
+        # Add annotation
+        ax.text(
+            0.65,
+            1.5,
+            f"{annotation_prefix} = {100 * significant_ratio:.2f}%",
+            transform=ax.transData,
+            va="center",
+            ha="left",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+        )
+
+        # Set labels and title
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        if title:
+            ax.set_title(title)
+
+        # Adjust layout
+        plt.tight_layout()
+
+        # Save plot if path is provided
+        if save_path is None:
+            save_path = plot_config.get("path")
+
+        if save_path:
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Get format from config or infer from extension
+            plot_format = plot_config.get("format")
+            if not plot_format and save_path.suffix:
+                plot_format = save_path.suffix[1:]  # Remove the dot
+            elif not plot_format:
+                plot_format = "png"
+
+            fig.savefig(save_path, format=plot_format, bbox_inches="tight")
+            logger.info(f"Saved plot to {save_path}")
+
+            # Close figure to free memory
+            plt.close(fig)
+            return None  # Return None since figure is closed
+
+        return fig
+
     def run(self) -> pd.DataFrame:
-        """Run the complete analysis pipeline."""
+        """Run the complete analysis pipeline.
+
+        Returns
+        -------
+        pd.DataFrame
+            Final analysis results
+        """
         logger.info("Starting copairs analysis")
 
         # 1. Load data
@@ -301,7 +517,14 @@ class CopairsRunner:
         # 6. Run mean average precision
         final_results = self.run_mean_average_precision(ap_results)
 
-        # 7. Save final results
+        # 7. Generate and save plot if enabled
+        if (
+            "mean_average_precision" in self.config
+            and "-log10(p-value)" in final_results.columns
+        ):
+            self.plot_map_results(final_results)
+
+        # 8. Save final results
         self.save_results(final_results)
 
         logger.info("Analysis complete")
@@ -311,7 +534,7 @@ class CopairsRunner:
 def run_copairs_analysis(
     config: Union[Dict[str, Any], str, Path], **kwargs
 ) -> pd.DataFrame:
-    """Run copairs analysis - conveniece function.
+    """Run copairs analysis - convenience function.
 
     Parameters
     ----------

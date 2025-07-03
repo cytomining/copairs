@@ -38,3 +38,14 @@ mean_average_precision:
 output:
   path: "data/activity_map_runner.csv"
   save_ap_scores: true  # Save AP scores to match notebook output
+
+plotting:
+  enabled: true
+  path: "output/map_activity_plot.png"
+  format: "png"  # or pdf, svg, etc.
+  title: "Phenotypic Activity Assessment"
+  xlabel: "mAP"
+  ylabel: "-log10(p-value)"
+  annotation_prefix: "Phenotypically active"
+  figsize: [8, 6]
+  dpi: 100

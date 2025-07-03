@@ -51,3 +51,14 @@ mean_average_precision:
 output:
   path: "data/target_maps_runner.csv"
   save_ap_scores: false
+
+plotting:
+  enabled: true
+  path: "output/map_consistency_plot.png"
+  format: "png"  # or pdf, svg, etc.
+  title: "Phenotypic Consistency Assessment"
+  xlabel: "mAP"
+  ylabel: "-log10(p-value)"
+  annotation_prefix: "Phenotypically consistent"
+  figsize: [8, 6]
+  dpi: 100
