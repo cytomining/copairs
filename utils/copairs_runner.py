@@ -38,10 +38,42 @@ class CopairsRunner:
     - Plotting mAP vs -log10(p-value) scatter plots
     - Saving results
 
-    Note: By default, metadata columns are identified using the regex "^Metadata".
-    You can override this by setting data.metadata_regex in your config.
+    Configuration Notes:
+    - By default, metadata columns are identified using the regex "^Metadata".
+      You can override this by setting data.metadata_regex in your config.
+    - To enable plotting, add a "plotting" section to your config with "enabled: true".
 
-    To enable plotting, add a "plotting" section to your config with "enabled: true".
+    Parameter Passing:
+    The runner validates that required parameters are present but passes ALL parameters
+    specified in the config to the underlying copairs functions. This means you can
+    specify any additional parameters supported by the copairs functions:
+
+    For average_precision and multilabel.average_precision:
+    - Required: pos_sameby, pos_diffby, neg_sameby, neg_diffby
+    - Optional: batch_size (default: 20000), distance (default: "cosine"),
+      progress_bar (default: True), and others
+
+    For mean_average_precision:
+    - Required: sameby, null_size, threshold, seed
+    - Optional: progress_bar (default: True), max_workers (default: CPU count + 4),
+      cache_dir (default: None), and others
+
+    Example config with optional parameters:
+    ```yaml
+    average_precision:
+      params:
+        pos_sameby: ["Metadata_gene_symbol"]
+        pos_diffby: []
+        neg_sameby: []
+        neg_diffby: ["Metadata_cell_line"]
+        batch_size: 50000  # Optional: larger batch for more memory
+        distance: "euclidean"  # Optional: different distance metric
+    ```
+
+    Refer to the copairs function signatures for complete parameter details:
+    - copairs.map.average_precision
+    - copairs.map.multilabel.average_precision
+    - copairs.map.mean_average_precision
     """
 
     def __init__(self, config: Union[Dict[str, Any], str, Path]):
