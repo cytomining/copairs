@@ -5,10 +5,10 @@
 cd "$(dirname "$0")"
 
 # Create data directory if it doesn't exist
-mkdir -p ../../data
+mkdir -p ../data
 
 # Download the data file if it doesn't exist
-DATA_FILE="../../data/2016_04_01_a549_48hr_batch1_plateSQ00014812.csv"
+DATA_FILE="../data/2016_04_01_a549_48hr_batch1_plateSQ00014812.csv"
 if [ ! -f "$DATA_FILE" ]; then
     echo "Downloading data file..."
     COMMIT="da8ae6a3bc103346095d61b4ee02f08fc85a5d98"
