@@ -16,6 +16,10 @@ preprocessing:
   - type: dropna
     columns: ["Metadata_target"]
   
+  # Aggregate replicates by taking median of features (as done in notebook)
+  - type: aggregate_replicates
+    groupby: ["Metadata_broad_sample", "Metadata_target"]
+  
   # Split the pipe-separated target values into lists for multilabel analysis
   - type: split_multilabel
     column: "Metadata_target"

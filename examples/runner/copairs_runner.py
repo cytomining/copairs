@@ -156,6 +156,20 @@ class CopairsRunner:
                     f"Filtered to {len(df)} rows based on {len(valid_values)} values from {csv_path}"
                 )
 
+            elif step_type == "aggregate_replicates":
+                # Aggregate replicates by taking median of features
+                groupby_cols = step["groupby"]
+                feature_cols = self.get_feature_columns(df)
+                
+                # Keep only groupby columns and features (matching notebook behavior)
+                keep_cols = groupby_cols + feature_cols
+                df = df[keep_cols]
+                
+                # Group and aggregate only feature columns
+                df = df.groupby(groupby_cols, as_index=False)[feature_cols].median()
+                
+                logger.info(f"Aggregated to {len(df)} rows by grouping on {groupby_cols}")
+
             else:
                 logger.warning(f"Unknown preprocessing type: {step_type}")
 
