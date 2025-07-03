@@ -589,7 +589,7 @@ class CopairsRunner:
             elif not plot_format:
                 plot_format = "png"
 
-            fig.savefig(save_path, format=plot_format, bbox_inches="tight", dpi=300)
+            fig.savefig(save_path, format=plot_format, bbox_inches="tight")
             logger.info(f"Saved plot to {save_path}")
 
             # Close figure to free memory
