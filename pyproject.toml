@@ -3,7 +3,7 @@ name = "copairs"
 version = "0.5.2"
 description = "Find pairs and compute metrics between them"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9,<=3.12"
 license = {file = "LICENSE.txt"}
 keywords = ["pairwise", "replication"]
 authors = [
@@ -27,6 +27,13 @@ dev = [
 plot = ["plotly"]
 test = ["scikit-learn", "pytest"]
 demo = ["notebook", "matplotlib"]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]>=0.29.1",
+    "mkdocs-section-index",
+    "mkdocs-jupyter"
+]
 
 [project.urls]
 "Homepage" = "https://github.com/cytomining/copairs"
