@@ -1,8 +1,6 @@
 # copairs
 
-Find pairs and compute metrics between them.
-
-copairs is a Python package for finding pairs of profiles based on metadata attributes and computing metrics between them. It's designed for analyzing high-dimensional biological data, particularly in drug discovery and cell profiling applications.
+`copairs` is a Python package for finding groups of profiles based on metadata and calculate mean Average Precision to assess intra- vs inter-group similarities.
 
 ## Installation
 
@@ -10,20 +8,23 @@ copairs is a Python package for finding pairs of profiles based on metadata attr
 pip install copairs
 ```
 
-## Key Features
+## Citation
+If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):
 
-- **Flexible pair finding**: Define pairs based on metadata constraints (same/different attributes)
-- **Efficient computation**: Optimized for large-scale profile datasets
-- **Mean Average Precision (mAP)**: Assess profile quality and phenotypic activity
-- **Replication analysis**: Evaluate consistency across replicates
+Kalinin, A.A., Arevalo, J., Serrano, E., Vulliard, L., Tsang, H., Bornholdt, M., Muñoz, A.F., Sivagurunathan, S., Rajwa, B., Carpenter, A.E., Way, G.P. and Singh, S., 2025. A versatile information retrieval framework for evaluating profile strength and similarity. _Nature Communications_ 16, 5181. doi:10.1038/s41467-025-60306-2
 
-## Getting Started
-
-Check out the [Phenotypic Activity example](examples/phenotypic_activity.ipynb) to see how copairs can be used to assess phenotypic activity of perturbations using mean average precision (mAP).
-
-## Core Modules
-
-- **[matching](api/matching.md)**: Find pairs based on metadata constraints
-- **[compute](api/compute.md)**: Calculate similarity metrics between profiles
-- **[map](api/map.md)**: Compute Mean Average Precision scores
-- **[replicating](api/replicating.md)**: Analyze replication consistency
+BibTeX:
+```
+@article{kalinin2025versatile,
+  author       = {Kalinin, Alexandr A. and Arevalo, John and Serrano, Erik and Vulliard, Loan and Tsang, Hillary and Bornholdt, Michael and Muñoz, Alán F. and Sivagurunathan, Suganya and Rajwa, Bartek and Carpenter, Anne E. and Way, Gregory P. and Singh, Shantanu},
+  title        = {A versatile information retrieval framework for evaluating profile strength and similarity},
+  journal      = {Nature Communications},
+  year         = {2025},
+  volume       = {16},
+  number       = {1},
+  pages        = {5181},
+  doi          = {10.1038/s41467-025-60306-2},
+  url          = {https://doi.org/10.1038/s41467-025-60306-2},
+  issn         = {2041-1723}
+}
+```
