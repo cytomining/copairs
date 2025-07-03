@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   deploy:
@@ -36,13 +37,14 @@ jobs:
         run: |
           export JUPYTER_PLATFORM_DIRS=1
           uv run mkdocs build --strict
-      
-      - name: Upload build artifacts (for PRs)
+
+      - name: Deploy PR preview
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: rossjrw/pr-preview-action@v1
         with:
-          name: docs-site
-          path: site/
+          source-dir: site           # built HTML
+          preview-branch: gh-pages   # must match your Pages branch
+          umbrella-dir: pr-preview   # files → gh-pages/pr-preview/pr-<num>/          
       
       - name: Deploy to GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
