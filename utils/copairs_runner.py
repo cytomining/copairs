@@ -204,7 +204,7 @@ class CopairsRunner:
         - split_multilabel: Split pipe-separated values into lists
         - filter_by_external_csv: Filter based on external CSV file
         - aggregate_replicates: Aggregate by taking median of features
-        - add_column_from_query: Add boolean column from query evaluation
+        - add_column_from_query: Add column from pandas eval expression (optional: fill_value)
 
         External function steps (parameters under 'params'):
         - apply_assign_reference: Apply copairs.matching.assign_reference_index
@@ -292,13 +292,27 @@ class CopairsRunner:
                 )
 
             elif step_type == "add_column_from_query":
-                # Add a new boolean column based on evaluating a query
+                # Add a new column based on evaluating a query expression
                 query = step["query"]
                 # Use provided column name or default to the query itself
                 column_name = step.get("column_name", query)
                 df[column_name] = df.eval(query)
+
+                # Handle NaN values if fill_value is specified
+                nan_count = df[column_name].isna().sum()
+                if "fill_value" in step and nan_count > 0:
+                    fill_value = step["fill_value"]
+                    df[column_name] = df[column_name].fillna(fill_value)
+                    logger.info(f"Filled {nan_count} NaN values with {fill_value}")
+
+                # Log the result
+                nan_info = (
+                    f" ({nan_count} NaN values)"
+                    if nan_count > 0 and "fill_value" not in step
+                    else ""
+                )
                 logger.info(
-                    f"Added column '{column_name}' with {df[column_name].sum()} True values"
+                    f"Added column '{column_name}' (dtype: {df[column_name].dtype}){nan_info}"
                 )
 
             else:

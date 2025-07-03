@@ -19,7 +19,8 @@ preprocessing:
     # Example: Add a column for high-dose EGFR inhibitors
   - type: add_column_from_query
     query: '(Metadata_moa == "EGFR inhibitor") & (Metadata_mmoles_per_liter > 1)'
-    column_name: "is_high_dose_EGFR_inhibitor"
+    column_name: "Metadata_is_high_dose_EGFR_inhibitor"
+    fill_value: False  # Optional: fill NaN values (e.g., when moa or concentration is missing)
 
 average_precision:
   params:
