@@ -7,23 +7,26 @@ data:
 
 preprocessing:
   # Filter to only active compounds based on activity analysis
-  - type: filter_by_external_csv
-    csv_path: "data/activity_map_runner.csv"
-    filter_column: "Metadata_broad_sample"
-    condition: "below_corrected_p"
+  - type: filter_active
+    params:
+      activity_csv: "data/activity_map_runner.csv"
+      on_column: "Metadata_broad_sample"
   
   # Remove rows with missing targets (implicit in notebook via query)
   - type: dropna
-    columns: ["Metadata_target"]
+    params:
+      columns: ["Metadata_target"]
   
   # Aggregate replicates by taking median of features (as done in notebook)
   - type: aggregate_replicates
-    groupby: ["Metadata_broad_sample", "Metadata_target"]
+    params:
+      groupby: ["Metadata_broad_sample", "Metadata_target"]
   
   # Split the pipe-separated target values into lists for multilabel analysis
   - type: split_multilabel
-    column: "Metadata_target"
-    separator: "|"
+    params:
+      column: "Metadata_target"
+      separator: "|"
 
 average_precision:
   # Use multilabel since compounds have multiple targets (separated by |)

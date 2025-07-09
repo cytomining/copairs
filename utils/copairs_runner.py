@@ -12,9 +12,8 @@
 
 """Generic runner for copairs analyses with configuration support."""
 
-import json
 import logging
-from typing import Any, Dict, List, Union, Optional
+from typing import Any, Dict, Union, Optional
 from pathlib import Path
 
 import yaml
@@ -34,7 +33,7 @@ class CopairsRunner:
 
     This runner supports:
     - Loading data from CSV/Parquet files
-    - Preprocessing steps (filtering, reference assignment)
+    - Preprocessing steps (filtering, reference assignment, metadata merging, aggregation)
     - Running average precision calculations
     - Running mean average precision with significance testing
     - Plotting mAP vs -log10(p-value) scatter plots
@@ -84,299 +83,64 @@ class CopairsRunner:
         Parameters
         ----------
         config : dict, str, or Path
-            Configuration dictionary or path to YAML/JSON config file
+            Configuration dictionary or path to YAML config file
         """
+        # Load config if it's a file path
         if isinstance(config, (str, Path)):
-            config = self.load_config(config)
+            with open(config, "r") as f:
+                config = yaml.safe_load(f)
+
         self.config = config
-        self.validate_config()
 
-    @staticmethod
-    def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
-        """Load configuration from YAML or JSON file.
-
-        Parameters
-        ----------
-        config_path : str or Path
-            Path to YAML or JSON configuration file
-
-        Returns
-        -------
-        dict
-            Configuration dictionary
-        """
-        config_path = Path(config_path)
-
-        with open(config_path, "r") as f:
-            if config_path.suffix in [".yaml", ".yml"]:
-                return yaml.safe_load(f)
-            elif config_path.suffix == ".json":
-                return json.load(f)
-            else:
-                raise ValueError(f"Unsupported config format: {config_path.suffix}")
-
-    def validate_config(self):
-        """Validate configuration has required fields.
-
-        Raises
-        ------
-        ValueError
-            If required configuration fields are missing
-        """
-        required = ["data", "average_precision", "output"]
-        for field in required:
-            if field not in self.config:
-                raise ValueError(f"Missing required config field: {field}")
-
-        # Validate average_precision params
-        ap_params = self.config["average_precision"].get("params", {})
-        required_ap = ["pos_sameby", "pos_diffby", "neg_sameby", "neg_diffby"]
-        for field in required_ap:
-            if field not in ap_params:
-                raise ValueError(f"Missing required average_precision param: {field}")
-
-        # Validate mean_average_precision params if present
-        if "mean_average_precision" in self.config:
-            map_params = self.config["mean_average_precision"].get("params", {})
-            required_map = ["sameby", "null_size", "threshold", "seed"]
-            for field in required_map:
-                if field not in map_params:
-                    raise ValueError(
-                        f"Missing required mean_average_precision param: {field}"
-                    )
-
-        # Validate plotting params if present
-        if "plotting" in self.config and self.config["plotting"].get("enabled", False):
-            plot_config = self.config["plotting"]
-            if "mean_average_precision" not in self.config:
-                logger.warning(
-                    "Plotting is enabled but mean_average_precision is not configured. "
-                    "No plots will be generated."
-                )
-
-    def load_data(self) -> pd.DataFrame:
-        """Load data from configured path.
+    def run(self) -> pd.DataFrame:
+        """Run the complete analysis pipeline.
 
         Returns
         -------
         pd.DataFrame
-            Loaded data
-
-        Raises
-        ------
-        ValueError
-            If file format is not supported
+            Final analysis results
         """
-        data_config = self.config["data"]
-        path = Path(data_config["path"])
+        logger.info("Starting copairs analysis")
 
+        # 1. Load data
+        path = Path(self.config["data"]["path"])
         logger.info(f"Loading data from {path}")
-
-        if path.suffix == ".parquet":
-            df = pd.read_parquet(path)
-        elif path.suffix in [".csv", ".gz"]:
-            df = pd.read_csv(path)
-        else:
-            raise ValueError(f"Unsupported file format: {path.suffix}")
-
+        df = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
         logger.info(f"Loaded {len(df)} rows with {len(df.columns)} columns")
-        return df
 
-    def preprocess_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply preprocessing steps to data.
+        # 2. Preprocess
+        df = self.preprocess_data(df)
 
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Input dataframe
-
-        Returns
-        -------
-        pd.DataFrame
-            Preprocessed dataframe
-
-        Notes
-        -----
-        Available preprocessing steps:
-
-        Direct parameter steps (parameters at step level):
-        - filter: Filter rows using pandas query
-        - dropna: Drop rows with NaN values
-        - remove_nan_features: Remove feature columns containing NaN
-        - split_multilabel: Split pipe-separated values into lists
-        - filter_by_external_csv: Filter based on external CSV file
-        - aggregate_replicates: Aggregate by taking median of features
-        - add_column_from_query: Add column from pandas eval expression (optional: fill_value)
-
-        External function steps (parameters under 'params'):
-        - apply_assign_reference: Apply copairs.matching.assign_reference_index
-
-        The 'apply_' prefix indicates steps that call external functions
-        and require parameters to be nested under 'params'.
-        """
-        if "preprocessing" not in self.config:
-            return df
-
-        for step in self.config["preprocessing"]:
-            step_type = step["type"]
-            logger.info(f"Applying preprocessing: {step_type}")
-
-            if step_type == "filter":
-                query = step["query"]
-                df = df.query(query)
-                logger.info(f"After filter '{query}': {len(df)} rows")
-
-            elif step_type == "apply_assign_reference":
-                params = step["params"]
-                df = assign_reference_index(df, **params)
-
-            elif step_type == "dropna":
-                columns = step.get("columns")
-                df = df.dropna(subset=columns)
-                logger.info(f"After dropna: {len(df)} rows")
-
-            elif step_type == "remove_nan_features":
-                # Remove features with any NaN values
-                feature_cols = self.get_feature_columns(df)
-                nan_cols = df[feature_cols].isna().any()
-                nan_cols = nan_cols[nan_cols].index.tolist()
-                if nan_cols:
-                    df = df.drop(columns=nan_cols)
-                    logger.info(f"Removed {len(nan_cols)} features with NaN values")
-
-            elif step_type == "split_multilabel":
-                # Split pipe-separated values into lists
-                column = step["column"]
-                separator = step.get("separator", "|")
-                df[column] = df[column].str.split(separator)
-                logger.info(f"Split multilabel column '{column}' by '{separator}'")
-
-            elif step_type == "filter_by_external_csv":
-                # Filter data based on values from an external CSV file
-                csv_path = Path(step["csv_path"])
-                filter_column = step["filter_column"]
-                csv_column = step.get("csv_column", filter_column)
-                condition = step.get("condition", "below_corrected_p")
-
-                # Load the external CSV
-                external_df = pd.read_csv(csv_path)
-
-                # Get values that meet the condition
-                if condition in external_df.columns:
-                    # Boolean column filter
-                    valid_values = external_df[external_df[condition]][
-                        csv_column
-                    ].tolist()
-                else:
-                    # Use all values if condition column doesn't exist
-                    valid_values = external_df[csv_column].tolist()
-
-                # Filter the main dataframe
-                df = df[df[filter_column].isin(valid_values)]
-                logger.info(
-                    f"Filtered to {len(df)} rows based on {len(valid_values)} values from {csv_path}"
-                )
-
-            elif step_type == "aggregate_replicates":
-                # Aggregate replicates by taking median of features
-                groupby_cols = step["groupby"]
-                feature_cols = self.get_feature_columns(df)
-
-                # Keep only groupby columns and features (matching notebook behavior)
-                keep_cols = groupby_cols + feature_cols
-                df = df[keep_cols]
-
-                # Group and aggregate only feature columns
-                df = df.groupby(groupby_cols, as_index=False)[feature_cols].median()
-
-                logger.info(
-                    f"Aggregated to {len(df)} rows by grouping on {groupby_cols}"
-                )
-
-            elif step_type == "add_column_from_query":
-                # Add a new column based on evaluating a query expression
-                query = step["query"]
-                # Use provided column name or default to the query itself
-                column_name = step.get("column_name", query)
-                df[column_name] = df.eval(query)
-
-                # Handle NaN values if fill_value is specified
-                nan_count = df[column_name].isna().sum()
-                if "fill_value" in step and nan_count > 0:
-                    fill_value = step["fill_value"]
-                    df[column_name] = df[column_name].fillna(fill_value)
-                    logger.info(f"Filled {nan_count} NaN values with {fill_value}")
-
-                # Log the result
-                nan_info = (
-                    f" ({nan_count} NaN values)"
-                    if nan_count > 0 and "fill_value" not in step
-                    else ""
-                )
-                logger.info(
-                    f"Added column '{column_name}' (dtype: {df[column_name].dtype}){nan_info}"
-                )
-
-            else:
-                logger.warning(f"Unknown preprocessing type: {step_type}")
-
-        return df
-
-    def get_feature_columns(self, df: pd.DataFrame) -> List[str]:
-        """Get feature columns from dataframe.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Input dataframe
-
-        Returns
-        -------
-        list of str
-            Feature column names
-        """
-        data_config = self.config["data"]
-
-        if "feature_columns" in data_config:
-            # Explicit list of columns
-            return data_config["feature_columns"]
-        elif "feature_regex" in data_config:
-            # Regex pattern for features
-            return df.filter(regex=data_config["feature_regex"]).columns.tolist()
-        else:
-            # Default: all non-metadata columns
-            metadata_regex = data_config.get("metadata_regex", "^Metadata")
-            metadata_cols = df.filter(regex=metadata_regex).columns
-            return [col for col in df.columns if col not in metadata_cols]
-
-    def extract_data(self, df: pd.DataFrame) -> tuple:
-        """Extract metadata and feature data.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Input dataframe
-
-        Returns
-        -------
-        tuple
-            (metadata, features) where metadata is a DataFrame and features is a numpy array
-        """
-        data_config = self.config["data"]
-
-        # Get metadata
-        metadata_regex = data_config.get("metadata_regex", "^Metadata")
-        metadata = df.filter(regex=metadata_regex)
-
-        # Get features
-        feature_cols = self.get_feature_columns(df)
+        # 3. Extract metadata and features
+        metadata = df.filter(regex="^Metadata")
+        feature_cols = [col for col in df.columns if not col.startswith("Metadata")]
         features = df[feature_cols].values
-
         logger.info(
             f"Extracted {metadata.shape[1]} metadata columns and {features.shape[1]} features"
         )
 
-        return metadata, features
+        # 4. Run average precision
+        ap_results = self.run_average_precision(metadata, features)
+
+        # 5. Save AP results if requested
+        if self.config["output"].get("save_ap_scores", False):
+            self.save_results(ap_results, suffix="ap_scores")
+
+        # 6. Run mean average precision
+        final_results = self.run_mean_average_precision(ap_results)
+
+        # 7. Generate and save plot if enabled
+        if (
+            "mean_average_precision" in self.config
+            and "-log10(p-value)" in final_results.columns
+        ):
+            self.plot_map_results(final_results)
+
+        # 8. Save final results
+        self.save_results(final_results)
+
+        logger.info("Analysis complete")
+        return final_results
 
     def run_average_precision(
         self, metadata: pd.DataFrame, features: np.ndarray
@@ -457,15 +221,12 @@ class CopairsRunner:
                 output_path.stem + f"_{suffix}" + output_path.suffix
             )
 
-        # Create directory if needed
+        # Create directory if needed and save
         output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Save based on file extension
         if output_path.suffix == ".parquet":
             results.to_parquet(output_path, index=False)
         else:
             results.to_csv(output_path, index=False)
-
         logger.info(f"Saved results to {output_path}")
 
     def plot_map_results(
@@ -598,93 +359,208 @@ class CopairsRunner:
 
         return fig
 
-    def run(self) -> pd.DataFrame:
-        """Run the complete analysis pipeline.
+    def preprocess_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply preprocessing steps to data.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe
 
         Returns
         -------
         pd.DataFrame
-            Final analysis results
+            Preprocessed dataframe
+
+        Notes
+        -----
+        Available preprocessing steps (all parameters must be under 'params'):
+
+        - filter: Filter rows using pandas query syntax
+        - dropna: Drop rows with NaN values in specified columns
+        - remove_nan_features: Remove feature columns containing NaN
+        - split_multilabel: Split pipe-separated values into lists
+        - filter_active: Filter based on activity CSV with below_corrected_p column
+        - aggregate_replicates: Aggregate by taking median of features
+        - merge_metadata: Merge external CSV metadata
+        - filter_single_replicates: Remove groups with < min_replicates members
+        - apply_assign_reference: Apply copairs.matching.assign_reference_index
+
+        Example:
+        ```yaml
+        preprocessing:
+          - type: filter
+            params:
+              query: "Metadata_mmoles_per_liter > 0.1"
+          - type: filter_active
+            params:
+              activity_csv: "data/activity_map.csv"
+              on: "Metadata_broad_sample"
+        ```
         """
-        logger.info("Starting copairs analysis")
+        if "preprocessing" not in self.config:
+            return df
 
-        # 1. Load data
-        df = self.load_data()
+        for step in self.config["preprocessing"]:
+            step_type = step["type"]
+            logger.info(f"Applying preprocessing: {step_type}")
 
-        # 2. Preprocess
-        df = self.preprocess_data(df)
+            # Get parameters from the params section
+            params = step.get("params", {})
+            if not params and step_type != "remove_nan_features":
+                # remove_nan_features doesn't require params
+                raise ValueError(
+                    f"Preprocessing step '{step_type}' requires a 'params' section"
+                )
 
-        # 3. Extract metadata and features
-        metadata, features = self.extract_data(df)
-
-        # 4. Run average precision
-        ap_results = self.run_average_precision(metadata, features)
-
-        # 5. Save AP results if requested
-        if self.config["output"].get("save_ap_scores", False):
-            self.save_results(ap_results, suffix="ap_scores")
-
-        # 6. Run mean average precision
-        final_results = self.run_mean_average_precision(ap_results)
-
-        # 7. Generate and save plot if enabled
-        if (
-            "mean_average_precision" in self.config
-            and "-log10(p-value)" in final_results.columns
-        ):
-            self.plot_map_results(final_results)
-
-        # 8. Save final results
-        self.save_results(final_results)
-
-        logger.info("Analysis complete")
-        return final_results
-
-
-def run_copairs_analysis(
-    config: Union[Dict[str, Any], str, Path], **kwargs
-) -> pd.DataFrame:
-    """Run copairs analysis - convenience function.
-
-    Parameters
-    ----------
-    config : dict, str, or Path
-        Configuration dictionary or path to config file
-    **kwargs
-        Additional parameters to override config values
-
-    Returns
-    -------
-    pd.DataFrame
-        Analysis results
-    """
-    # Load config if path provided
-    if isinstance(config, (str, Path)):
-        config = CopairsRunner.load_config(config)
-
-    # Apply overrides
-    if kwargs:
-        import copy
-
-        config = copy.deepcopy(config)
-        for key, value in kwargs.items():
-            if "." in key:
-                # Handle nested keys like 'average_precision.params.batch_size'
-                parts = key.split(".")
-                current = config
-                for part in parts[:-1]:
-                    current = current.setdefault(part, {})
-                current[parts[-1]] = value
+            # Use getattr to call the appropriate preprocessing method
+            method_name = f"_preprocess_{step_type}"
+            if hasattr(self, method_name):
+                try:
+                    df = getattr(self, method_name)(df, params)
+                except KeyError as e:
+                    raise ValueError(
+                        f"Missing required parameter {e} for preprocessing step '{step_type}'"
+                    ) from e
             else:
-                config[key] = value
+                logger.warning(f"Unknown preprocessing type: {step_type}")
 
-    # Run analysis
-    runner = CopairsRunner(config)
-    return runner.run()
+        return df
+
+    def _get_feature_columns(self, df: pd.DataFrame) -> list:
+        """Get non-metadata columns."""
+        return [col for col in df.columns if not col.startswith("Metadata")]
+
+    def _preprocess_filter(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Filter rows using pandas query syntax."""
+        df = df.query(params["query"])
+        logger.info(f"After filter '{params['query']}': {len(df)} rows")
+        return df
+
+    def _preprocess_apply_assign_reference(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Apply copairs.matching.assign_reference_index."""
+        return assign_reference_index(df, **params)
+
+    def _preprocess_dropna(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Drop rows with NaN values."""
+        columns = params.get("columns")
+        df = df.dropna(subset=columns)
+        logger.info(f"After dropna: {len(df)} rows")
+        return df
+
+    def _preprocess_remove_nan_features(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Remove feature columns containing NaN."""
+        feature_cols = self._get_feature_columns(df)
+        nan_cols = df[feature_cols].isna().any()
+        nan_cols = nan_cols[nan_cols].index.tolist()
+
+        if nan_cols:
+            df = df.drop(columns=nan_cols)
+            logger.info(f"Removed {len(nan_cols)} features with NaN values")
+        return df
+
+    def _preprocess_split_multilabel(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Split pipe-separated values into lists."""
+        column = params["column"]
+        separator = params.get("separator", "|")
+        df[column] = df[column].str.split(separator)
+        logger.info(f"Split multilabel column '{column}' by '{separator}'")
+        return df
+
+    def _preprocess_filter_active(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Filter to active compounds based on below_corrected_p column."""
+        activity_csv = Path(params["activity_csv"])
+        on_column = params["on_column"]
+        filter_column = params.get("filter_column", "below_corrected_p")
+
+        # Load activity data
+        activity_df = pd.read_csv(activity_csv)
+
+        # Get active compounds
+        active_values = activity_df[activity_df[filter_column] == True][
+            on_column
+        ].unique()
+
+        df = df[df[on_column].isin(active_values)]
+
+        logger.info(f"Filtered to {len(df)} active compounds from {activity_csv}")
+        return df
+
+    def _preprocess_aggregate_replicates(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Aggregate replicates by taking median of features."""
+        groupby_cols = params["groupby"]
+        feature_cols = self._get_feature_columns(df)
+
+        df = df.groupby(groupby_cols, as_index=False)[feature_cols].median()
+
+        logger.info(f"Aggregated to {len(df)} rows by grouping on {groupby_cols}")
+        return df
+
+    def _preprocess_merge_metadata(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Merge external metadata from CSV file."""
+        source_path = Path(params["source"])
+        on_columns = params["on"] if isinstance(params["on"], list) else [params["on"]]
+        how = params.get("how", "left")
+
+        # Load external metadata
+        metadata_df = pd.read_csv(source_path)
+        logger.info(f"Loaded metadata from {source_path}: {len(metadata_df)} rows")
+
+        original_len = len(df)
+        df = df.merge(metadata_df, on=on_columns, how=how)
+
+        logger.info(
+            f"Merged metadata on {on_columns} ({how} join): "
+            f"{original_len} -> {len(df)} rows"
+        )
+        return df
+
+    def _preprocess_filter_single_replicates(
+        self, df: pd.DataFrame, params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Remove groups with insufficient replicates."""
+        groupby_cols = params["groupby"]
+        min_replicates = params.get("min_replicates", 2)
+
+        # Count replicates per group
+        group_counts = df.groupby(groupby_cols).size()
+
+        # Keep only groups with enough replicates
+        valid_groups = group_counts[group_counts >= min_replicates].index
+
+        # Filter to valid groups
+        original_len = len(df)
+        if len(groupby_cols) == 1:
+            df = df[df[groupby_cols[0]].isin(valid_groups)]
+        else:
+            valid_df = pd.DataFrame(list(valid_groups), columns=groupby_cols)
+            df = df.merge(valid_df, on=groupby_cols, how="inner")
+
+        filtered_count = original_len - len(df)
+        logger.info(
+            f"Filtered {filtered_count} rows with < {min_replicates} replicates, "
+            f"kept {len(df)} rows"
+        )
+        return df
 
 
 if __name__ == "__main__":
-    # Example usage
     import argparse
 
     parser = argparse.ArgumentParser(description="Run copairs analysis")
@@ -696,5 +572,5 @@ if __name__ == "__main__":
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
 
-    results = run_copairs_analysis(args.config)
+    results = CopairsRunner(args.config).run()
     print(f"Analysis complete. Results shape: {results.shape}")
