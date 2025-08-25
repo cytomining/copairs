@@ -491,9 +491,24 @@ def null_dist_cached(
         # Define the cache file name based on the configuration
         cache_file = cache_dir / f"n{total}_k{num_pos}.npy"
 
-        # If the cache file exists, load the null distribution from it
+        # If the cache file exists, try to load the null distribution from it
         if cache_file.is_file():
-            null_dist = np.load(cache_file)
+            try:
+                null_dist = np.load(cache_file)
+            except (ValueError, OSError, EOFError) as e:
+                # Cache file is corrupted or incomplete, remove it and regenerate
+                import warnings
+
+                warnings.warn(
+                    f"Failed to load cache file {cache_file}: {e}. Regenerating..."
+                )
+                cache_file.unlink(missing_ok=True)
+
+                # Compute the null distribution
+                null_dist = random_ap(null_size, num_pos, total, seed)
+
+                # Save the new distribution to the cache
+                np.save(cache_file, null_dist)
         else:
             # If the cache file doesn't exist, compute the null distribution
             null_dist = random_ap(null_size, num_pos, total, seed)
