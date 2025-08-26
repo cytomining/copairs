@@ -1,8 +1,8 @@
 """Functions to compute distances and ranks using numpy operations."""
 
 import os
-import itertools
 import warnings
+import itertools
 from typing import Tuple, Union, Callable, Optional
 from pathlib import Path
 from multiprocessing.pool import ThreadPool
@@ -501,7 +501,6 @@ def null_dist_cached(
                 warnings.warn(
                     f"Failed to load cache file {cache_file}: {e}. Regenerating..."
                 )
-                cache_file.unlink()
                 cache_file.unlink(missing_ok=True)
 
                 # Compute the null distribution
