@@ -2,6 +2,7 @@
 
 import os
 import itertools
+import warnings
 from typing import Tuple, Union, Callable, Optional
 from pathlib import Path
 from multiprocessing.pool import ThreadPool
@@ -495,13 +496,12 @@ def null_dist_cached(
         if cache_file.is_file():
             try:
                 null_dist = np.load(cache_file)
-            except (ValueError, OSError, EOFError) as e:
+            except ValueError as e:
                 # Cache file is corrupted or incomplete, remove it and regenerate
-                import warnings
-
                 warnings.warn(
                     f"Failed to load cache file {cache_file}: {e}. Regenerating..."
                 )
+                cache_file.unlink()
                 cache_file.unlink(missing_ok=True)
 
                 # Compute the null distribution
