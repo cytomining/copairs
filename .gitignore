@@ -164,3 +164,4 @@ examples/cache/
 .vscode/
 
 CLAUDE.md
+.claude/
