@@ -10,6 +10,7 @@ from copairs import compute
 from copairs.matching import UnpairedException, find_pairs
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
+from .normalization import normalize_ap
 
 logger = logging.getLogger("copairs")
 
@@ -147,6 +148,7 @@ def average_precision(
     pd.DataFrame
         A DataFrame containing the following columns:
         - 'average_precision': The calculated average precision score for each profile.
+        - 'normalized_average_precision': The normalized AP score (scale-independent).
         - 'n_pos_pairs': The number of positive pairs for each profile.
         - 'n_total_pairs': The total number of pairs for each profile.
         - Additional metadata columns from the input.
@@ -217,6 +219,16 @@ def average_precision(
     meta.loc[paired_ix, "average_precision"] = ap_scores
     meta.loc[paired_ix, "n_pos_pairs"] = null_confs[:, 0]
     meta.loc[paired_ix, "n_total_pairs"] = null_confs[:, 1]
+    
+    # Compute normalized AP scores
+    logger.info("Computing normalized average precision...")
+    meta["normalized_average_precision"] = np.nan
+    # Compute normalized scores for profiles with pairs
+    M = null_confs[:, 0]  # n_pos_pairs
+    L = null_confs[:, 1]  # n_total_pairs
+    N = L - M  # n_neg_pairs
+    normalized_scores = normalize_ap(ap_scores, M, N)
+    meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
     return meta

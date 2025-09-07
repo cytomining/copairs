@@ -59,6 +59,7 @@ def mean_average_precision(
     pd.DataFrame
         DataFrame with the following columns:
         - `mean_average_precision`: Mean AP score for each group.
+        - `mean_normalized_average_precision`: Mean normalized AP score (scale-independent).
         - `p_value`: p-value comparing mAP to the null distribution.
         - `corrected_p_value`: Adjusted p-value after multiple testing correction.
         - `below_p`: Boolean indicating if the p-value is below the threshold.
@@ -93,9 +94,10 @@ def mean_average_precision(
     map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
         {
             "average_precision": ["mean", lambda x: list(x.index)],
+            "normalized_average_precision": "mean",
         }
     )
-    map_scores.columns = sameby + ["mean_average_precision", "indices"]
+    map_scores.columns = sameby + ["mean_average_precision", "indices", "mean_normalized_average_precision"]
 
     # Compute p-values for each group using the null distributions
     params = map_scores[["mean_average_precision", "indices"]]
