@@ -97,7 +97,11 @@ def mean_average_precision(
             "normalized_average_precision": "mean",
         }
     )
-    map_scores.columns = sameby + ["mean_average_precision", "indices", "mean_normalized_average_precision"]
+    map_scores.columns = sameby + [
+        "mean_average_precision",
+        "indices",
+        "mean_normalized_average_precision",
+    ]
 
     # Compute p-values for each group using the null distributions
     params = map_scores[["mean_average_precision", "indices"]]

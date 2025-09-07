@@ -219,7 +219,7 @@ def average_precision(
     meta.loc[paired_ix, "average_precision"] = ap_scores
     meta.loc[paired_ix, "n_pos_pairs"] = null_confs[:, 0]
     meta.loc[paired_ix, "n_total_pairs"] = null_confs[:, 1]
-    
+
     # Compute normalized AP scores
     logger.info("Computing normalized average precision...")
     meta["normalized_average_precision"] = np.nan
