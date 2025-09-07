@@ -244,3 +244,22 @@ def test_progress_bar_consistency():
         for progress_bar in (True, False)
     ]
     assert with_pb.equals(no_pb), "The progress_bar argument changed results"
+
+
+def test_multilabel_has_normalized_ap():
+    """Test that multilabel AP includes normalized_average_precision column."""
+    length = 10
+    vocab_size = {"p": 3, "w": 5, "l": 4}
+    n_feats = 8
+    multilabel_col = "l"
+    rng = np.random.default_rng(SEED)
+
+    meta = simulate_random_dframe(length, vocab_size, ["l"], [], rng)
+    meta = meta.groupby(["p", "w"])["l"].unique().reset_index()
+    feats = rng.uniform(size=(len(meta), n_feats))
+
+    result = multilabel_average_precision(
+        meta, feats, ["l"], [], [], ["l"], multilabel_col
+    )
+
+    assert "normalized_average_precision" in result.columns
