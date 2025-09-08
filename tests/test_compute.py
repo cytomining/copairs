@@ -1,10 +1,10 @@
 """Test pairwise distance calculation functions."""
 
-import pytest
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from copairs import compute
 
