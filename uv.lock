@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.8"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -650,7 +650,7 @@ wheels = [
 
 [[package]]
 name = "copairs"
-version = "0.5.1"
+version = "0.5.2"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
@@ -685,6 +685,9 @@ test = [
 [package.dev-dependencies]
 dev = [
     { name = "jupyter" },
+    { name = "pytest" },
+    { name = "scikit-learn", version = "1.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "scikit-learn", version = "1.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "trepan3k" },
 ]
 test = [
@@ -713,6 +716,8 @@ provides-extras = ["dev", "plot", "test", "demo"]
 [package.metadata.requires-dev]
 dev = [
     { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "scikit-learn", specifier = ">=1.3.2" },
     { name = "trepan3k", specifier = ">=1.3.1" },
 ]
 test = [
