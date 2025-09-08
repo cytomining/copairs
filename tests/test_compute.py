@@ -1,5 +1,9 @@
 """Test pairwise distance calculation functions."""
 
+import pytest
+import tempfile
+from pathlib import Path
+
 import numpy as np
 
 from copairs import compute
@@ -196,3 +200,40 @@ def test_hamming():
     hamming_fn = compute.get_similarity_fn("hamming")
     hamming = hamming_fn(feats, pairs, batch_size)
     assert np.allclose(hamming_gt, hamming)
+
+
+def test_null_dist_cached():
+    """Test that null_dist_cached creates and uses cache."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cache_dir = Path(tmpdir)
+
+        # Generate null distribution with caching
+        null_dist = compute.null_dist_cached(
+            num_pos=5, total=20, seed=42, null_size=100, cache_dir=cache_dir
+        )
+
+        # Check it created a valid distribution
+        assert len(null_dist) == 100
+        assert np.all(null_dist >= 0)
+        assert np.all(null_dist <= 1)
+
+
+def test_null_dist_cached_corrupt():
+    """Test that null_dist_cached handles corrupted cache."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cache_dir = Path(tmpdir)
+
+        # Create a corrupted cache file
+        cache_file = cache_dir / "n20_k5.npy"
+        cache_file.write_text("corrupted data")
+
+        # Should regenerate despite corruption
+        with pytest.warns(UserWarning, match="Failed to load cache file"):
+            null_dist = compute.null_dist_cached(
+                num_pos=5, total=20, seed=42, null_size=100, cache_dir=cache_dir
+            )
+
+        # Check it generated a valid distribution
+        assert len(null_dist) == 100
+        assert np.all(null_dist >= 0)
+        assert np.all(null_dist <= 1)
