@@ -162,5 +162,5 @@ cython_debug/
 examples/data/
 examples/cache/
 .vscode/
-.claude/
 CLAUDE.md
+.claude/
