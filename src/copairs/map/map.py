@@ -127,8 +127,16 @@ def silent_thread_map(fn, *iterables, **kwargs):
 
     Parameters
     ----------
-    max_workers  : [default: min(32, cpu_count() + 4)].
-    chunksize  : [default: 1].
+    fn : callable
+        Function to map over iterables.
+    *iterables : tuple
+        Iterables to map over.
+    **kwargs : dict
+        Additional keyword arguments. Accepts:
+        - max_workers : int, optional
+            Maximum number of workers [default: min(32, cpu_count() + 4)].
+        - chunksize : int, optional
+            Size of chunks for each worker [default: 1].
     """
     # Based on tqdm's original implementation for consistency
     # (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
