@@ -424,6 +424,53 @@ def ap_contiguous(
     return ap_scores, null_confs
 
 
+def auc_contiguous(rel_k_list: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    """Compute AUC-ROC (auc) scores from relevance labels.
+
+    This function calculates Average Precision (AP) scores for each profile based on
+    relevance labels and their associated counts. It also returns configurations
+    indicating the number of positive and total pairs for each profile.
+
+    Parameters
+    ----------
+    rel_k_list : np.ndarray
+        Array of relevance labels (1 for positive pairs, 0 for negative pairs), sorted
+        by descending similarity within profiles.
+    counts : np.ndarray
+        Array indicating how many times each profile appears in the rank list.
+
+    Returns
+    -------
+    ap_scores : np.ndarray
+        Array of Average Precision scores for each profile.
+    null_confs : np.ndarray
+        Array of configurations, where each row corresponds to:
+        - Number of positive pairs (`num_pos`).
+        - Total number of pairs (`counts`).
+    """
+    # segment starts
+    cutoffs = to_cutoffs(counts)
+
+    # positives/negatives per segment
+    num_pos = np.add.reduceat(rel_k_list, cutoffs, dtype=np.uint32)
+    num_total = counts.astype(np.uint32, copy=False)
+    num_neg = num_total - num_pos
+
+    # 1-based ranks within each segment
+    k = np.arange(1, rel_k_list.size + 1, dtype=np.uint32) - np.repeat(cutoffs, counts)
+
+    # sum of ranks of positive items per segment
+    sum_pos_ranks = np.add.reduceat(k * rel_k_list, cutoffs)
+
+    # Mann–Whitney U and AUC
+    U = sum_pos_ranks - (num_pos * (num_pos + 1) // 2)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        auc = 1 - U / (num_pos * num_neg)
+
+    null_confs = np.stack([num_pos, counts], axis=1)
+    return auc, null_confs
+
+
 def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     """Generate random Average Precision (AP) scores to create a null distribution.
 
