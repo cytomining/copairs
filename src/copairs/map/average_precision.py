@@ -209,12 +209,15 @@ def average_precision(
     # Compute average precision scores and associated configurations
     logger.info("Computing average precision...")
     ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
+    logger.info("Computing roc auc...")
+    auc_scores, _ = compute.auc_contiguous(rel_k_list, counts)
 
     # Add AP scores and pair counts to the metadata DataFrame
     logger.info("Creating result DataFrame...")
     meta["n_pos_pairs"] = 0
     meta["n_total_pairs"] = 0
     meta.loc[paired_ix, "average_precision"] = ap_scores
+    meta.loc[paired_ix, "roc_auc"] = auc_scores
     meta.loc[paired_ix, "n_pos_pairs"] = null_confs[:, 0]
     meta.loc[paired_ix, "n_total_pairs"] = null_confs[:, 1]
 
