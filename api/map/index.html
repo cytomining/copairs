@@ -1,0 +1,3520 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Find pairs and compute metrics between them">
+      
+      
+      
+      
+        <link rel="prev" href="../compute/">
+      
+      
+        <link rel="next" href="../replicating/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.15">
+    
+    
+      
+        <title>map - copairs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#copairsmap" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="copairs" class="md-header__button md-logo" aria-label="copairs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            copairs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              map
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/cytomining/copairs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="copairs" class="md-nav__button md-logo" aria-label="copairs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    copairs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/cytomining/copairs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Examples
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Examples
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/finding_pairs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Finding Pairs
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/phenotypic_activity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    mAP for phenotypic activity assesement
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/phenotypic_consistency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    mAP for phenotypic consistency assesement
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/null_size/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Determining null size for mAP p-value calculation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    API Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../matching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    matching
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    compute
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    map
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    map
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#copairs.map" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;map
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.mean_average_precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;mean_average_precision
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.average_precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;average_precision
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;filter
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.map" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;map
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.multilabel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;multilabel
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../replicating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    replicating
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    plot
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#copairs.map" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;map
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.mean_average_precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;mean_average_precision
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.average_precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;average_precision
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;filter
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.map" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;map
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#copairs.map.multilabel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;multilabel
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="copairsmap">copairs.map<a class="headerlink" href="#copairsmap" title="Permanent link">&para;</a></h1>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<h2 id="copairs.map" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-module"></code>            <code>copairs.map</code>
+
+
+<a href="#copairs.map" class="headerlink" title="Permanent link">&para;</a></h2>
+
+    <div class="doc doc-contents first">
+
+        <p>Module to compute mAP-based metrics.</p>
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="copairs.map.mean_average_precision" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">mean_average_precision</span><span class="p">(</span><span class="n">ap_scores</span><span class="p">,</span> <span class="n">sameby</span><span class="p">,</span> <span class="n">null_size</span><span class="p">,</span> <span class="n">threshold</span><span class="p">,</span> <span class="n">seed</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">max_workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cache_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#copairs.map.mean_average_precision" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Calculate the Mean Average Precision (mAP) score and associated p-values.</p>
+<p>This function computes the Mean Average Precision (mAP) score by grouping profiles
+based on the specified criteria (<code>sameby</code>). It calculates the significance of mAP
+scores by comparing them to a null distribution and performs multiple testing
+corrections.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>ap_scores</code></b>
+              (<code><span title="pandas.DataFrame">DataFrame</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>DataFrame containing individual Average Precision (AP) scores and pair statistics
+(e.g., number of positive pairs <code>n_pos_pairs</code> and total pairs <code>n_total_pairs</code>).</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>sameby</code></b>
+              (<code><span title="list">list</span> or <span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Metadata column(s) used to group profiles for mAP calculation.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>null_size</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Number of samples in the null distribution for significance testing.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>threshold</code></b>
+              (<code><span title="float">float</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>p-value threshold for identifying significant MaP scores.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>seed</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Random seed for reproducibility.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>progress_bar</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>True</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether or not to show tqdm's progress bar.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>max_workers</code></b>
+              (<code><span title="int">int</span></code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Number of workers used. Default defined by tqdm's <code>thread_map</code>.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>cache_dir</code></b>
+              (<code><span title="str">str</span> or <span title="pathlib.Path">Path</span></code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Location to save the cache.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>progress_bar</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>True</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether or not to show tqdm's progress bar.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="pandas.DataFrame">DataFrame</span></code>
+          –
+          <div class="doc-md-description">
+            <p>DataFrame with the following columns:
+- <code>mean_average_precision</code>: Mean AP score for each group.
+- <code>p_value</code>: p-value comparing mAP to the null distribution.
+- <code>corrected_p_value</code>: Adjusted p-value after multiple testing correction.
+- <code>below_p</code>: Boolean indicating if the p-value is below the threshold.
+- <code>below_corrected_p</code>: Boolean indicating if the corrected p-value is below the threshold.</p>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/map.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">mean_average_precision</span><span class="p">(</span>
+    <span class="n">ap_scores</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">sameby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">null_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">progress_bar</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">max_workers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">cache_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate the Mean Average Precision (mAP) score and associated p-values.</span>
+
+<span class="sd">    This function computes the Mean Average Precision (mAP) score by grouping profiles</span>
+<span class="sd">    based on the specified criteria (`sameby`). It calculates the significance of mAP</span>
+<span class="sd">    scores by comparing them to a null distribution and performs multiple testing</span>
+<span class="sd">    corrections.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    ap_scores : pd.DataFrame</span>
+<span class="sd">        DataFrame containing individual Average Precision (AP) scores and pair statistics</span>
+<span class="sd">        (e.g., number of positive pairs `n_pos_pairs` and total pairs `n_total_pairs`).</span>
+<span class="sd">    sameby : list or str</span>
+<span class="sd">        Metadata column(s) used to group profiles for mAP calculation.</span>
+<span class="sd">    null_size : int</span>
+<span class="sd">        Number of samples in the null distribution for significance testing.</span>
+<span class="sd">    threshold : float</span>
+<span class="sd">        p-value threshold for identifying significant MaP scores.</span>
+<span class="sd">    seed : int</span>
+<span class="sd">        Random seed for reproducibility.</span>
+<span class="sd">    progress_bar : bool</span>
+<span class="sd">        Whether or not to show tqdm&#39;s progress bar.</span>
+<span class="sd">    max_workers : int</span>
+<span class="sd">        Number of workers used. Default defined by tqdm&#39;s `thread_map`.</span>
+<span class="sd">    cache_dir : str or Path</span>
+<span class="sd">        Location to save the cache.</span>
+<span class="sd">    progress_bar : bool</span>
+<span class="sd">        Whether or not to show tqdm&#39;s progress bar.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        DataFrame with the following columns:</span>
+<span class="sd">        - `mean_average_precision`: Mean AP score for each group.</span>
+<span class="sd">        - `p_value`: p-value comparing mAP to the null distribution.</span>
+<span class="sd">        - `corrected_p_value`: Adjusted p-value after multiple testing correction.</span>
+<span class="sd">        - `below_p`: Boolean indicating if the p-value is below the threshold.</span>
+<span class="sd">        - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Filter out invalid or incomplete AP scores</span>
+    <span class="n">ap_scores</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">&quot;~average_precision.isna() and n_pos_pairs &gt; 0&quot;</span><span class="p">)</span>
+    <span class="n">ap_scores</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing null_dist...&quot;</span><span class="p">)</span>
+    <span class="c1"># Extract configurations for null distribution generation</span>
+    <span class="n">null_confs</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="p">[[</span><span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">,</span> <span class="s2">&quot;n_total_pairs&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+    <span class="n">null_confs</span><span class="p">,</span> <span class="n">rev_ix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">null_confs</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">return_inverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># Generate null distributions for each unique configuration</span>
+    <span class="n">null_dists</span> <span class="o">=</span> <span class="n">compute</span><span class="o">.</span><span class="n">get_null_dists</span><span class="p">(</span>
+        <span class="n">null_confs</span><span class="p">,</span> <span class="n">null_size</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">,</span> <span class="n">cache_dir</span><span class="o">=</span><span class="n">cache_dir</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="n">progress_bar</span>
+    <span class="p">)</span>
+    <span class="n">ap_scores</span><span class="p">[</span><span class="s2">&quot;null_ix&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rev_ix</span>
+
+    <span class="c1"># Function to calculate the p-value for a mAP score based on the null distribution</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_p_value</span><span class="p">(</span><span class="n">params</span><span class="p">):</span>
+        <span class="n">map_score</span><span class="p">,</span> <span class="n">indices</span> <span class="o">=</span> <span class="n">params</span>
+        <span class="n">null_dist</span> <span class="o">=</span> <span class="n">null_dists</span><span class="p">[</span><span class="n">rev_ix</span><span class="p">[</span><span class="n">indices</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">num</span> <span class="o">=</span> <span class="p">(</span><span class="n">null_dist</span> <span class="o">&gt;</span> <span class="n">map_score</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+        <span class="n">p_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">num</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">null_size</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># Add 1 for stability</span>
+        <span class="k">return</span> <span class="n">p_value</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing p-values...&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Group by the specified metadata column(s) and calculate mean AP</span>
+    <span class="n">map_scores</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">sameby</span><span class="p">,</span> <span class="n">observed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">as_index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;average_precision&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;mean&quot;</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">index</span><span class="p">)],</span>
+        <span class="p">}</span>
+    <span class="p">)</span>
+    <span class="n">map_scores</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="n">sameby</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;mean_average_precision&quot;</span><span class="p">,</span> <span class="s2">&quot;indices&quot;</span><span class="p">]</span>
+
+    <span class="c1"># Compute p-values for each group using the null distributions</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="n">map_scores</span><span class="p">[[</span><span class="s2">&quot;mean_average_precision&quot;</span><span class="p">,</span> <span class="s2">&quot;indices&quot;</span><span class="p">]]</span>
+
+    <span class="k">if</span> <span class="n">progress_bar</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">tqdm.contrib.concurrent</span><span class="w"> </span><span class="kn">import</span> <span class="n">thread_map</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">thread_map</span> <span class="o">=</span> <span class="n">silent_thread_map</span>
+
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;p_value&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">thread_map</span><span class="p">(</span>
+        <span class="n">get_p_value</span><span class="p">,</span> <span class="n">params</span><span class="o">.</span><span class="n">values</span><span class="p">,</span> <span class="n">leave</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">max_workers</span><span class="o">=</span><span class="n">max_workers</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Perform multiple testing correction on p-values</span>
+    <span class="n">reject</span><span class="p">,</span> <span class="n">pvals_corrected</span><span class="p">,</span> <span class="n">alphacSidak</span><span class="p">,</span> <span class="n">alphacBonf</span> <span class="o">=</span> <span class="n">multipletests</span><span class="p">(</span>
+        <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;p_value&quot;</span><span class="p">],</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;fdr_bh&quot;</span>
+    <span class="p">)</span>
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;corrected_p_value&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pvals_corrected</span>
+
+    <span class="c1"># Mark scores below the p-value threshold</span>
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;below_p&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;p_value&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">threshold</span>
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;below_corrected_p&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;corrected_p_value&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">threshold</span>
+
+    <span class="k">return</span> <span class="n">map_scores</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<h3 id="copairs.map.average_precision" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-module"></code>            <code>average_precision</code>
+
+
+<a href="#copairs.map.average_precision" class="headerlink" title="Permanent link">&para;</a></h3>
+
+    <div class="doc doc-contents ">
+
+        <p>Functions to compute average precision.</p>
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.average_precision.average_precision" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">average_precision</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">feats</span><span class="p">,</span> <span class="n">pos_sameby</span><span class="p">,</span> <span class="n">pos_diffby</span><span class="p">,</span> <span class="n">neg_sameby</span><span class="p">,</span> <span class="n">neg_diffby</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">20000</span><span class="p">,</span> <span class="n">distance</span><span class="o">=</span><span class="s1">&#39;cosine&#39;</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#copairs.map.average_precision.average_precision" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Calculate average precision (AP) scores for pairs of profiles based on their similarity.</p>
+<p>This function identifies positive and negative pairs of profiles using  metadata
+rules, computes their similarity scores, and calculates average precision
+scores for each profile. The results include the number of positive and total pairs
+for each profile.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>meta</code></b>
+              (<code><span title="pandas.DataFrame">DataFrame</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Metadata of the profiles, including columns used for defining pairs.
+This DataFrame should include the columns specified in <code>pos_sameby</code>,
+<code>pos_diffby</code>, <code>neg_sameby</code>, and <code>neg_diffby</code>.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>feats</code></b>
+              (<code><span title="numpy.ndarray">ndarray</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Feature matrix representing the profiles, where rows correspond to profiles
+and columns to features.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>pos_sameby</code></b>
+              (<code><span title="list">list</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Metadata columns used to define positive pairs. Two profiles are considered a
+positive pair if they belong to the same group that is not a control group.
+For example, replicate profiles of the same compound are positive pairs and
+should share the same value in a column identifying compounds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>pos_diffby</code></b>
+              (<code><span title="list">list</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Metadata columns used to differentiate positive pairs. Positive pairs do not need
+to differ in any metadata columns, so this is typically left empty. However,
+if necessary (e.g., to account for batch effects), you can specify columns
+such as batch identifiers.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>neg_sameby</code></b>
+              (<code><span title="list">list</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Metadata columns used to define negative pairs. Typically left empty, as profiles
+forming a negative pair (e.g., a compound and a DMSO/control) do not need to
+share any metadata values. This ensures comparisons are made without enforcing
+unnecessary constraints.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>neg_diffby</code></b>
+              (<code><span title="list">list</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Metadata columns used to differentiate negative pairs. Two profiles are considered
+a negative pair if one belongs to a compound group and the other to a DMSO/
+control group. They must differ in specified metadata columns, such as those
+identifying the compound and the treatment index, to ensure comparisons are
+only made between compounds and DMSO controls (not between different compounds).</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>batch_size</code></b>
+              (<code><span title="int">int</span></code>, default:
+                  <code>20000</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>The batch size for similarity computations to optimize memory usage.
+Default is 20000.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>distance</code></b>
+              (<code><span title="str">str</span></code>, default:
+                  <code>&#39;cosine&#39;</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>The distance function used for computing similarities. Default is "cosine".</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="pandas.DataFrame">DataFrame</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A DataFrame containing the following columns:
+- 'average_precision': The calculated average precision score for each profile.
+- 'n_pos_pairs': The number of positive pairs for each profile.
+- 'n_total_pairs': The total number of pairs for each profile.
+- Additional metadata columns from the input.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="            UnpairedException (copairs.matching.UnpairedException)" href="../matching/#copairs.matching.UnpairedException">UnpairedException</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If no positive or negative pairs are found in the dataset.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>Positive Pair Rules:<ul>
+<li>Positive pairs are defined by <code>pos_sameby</code> (profiles share these metadata values)
+  and optionally differentiated by <code>pos_diffby</code> (profiles must differ in these metadata values if specified).</li>
+</ul>
+</li>
+<li>Negative Pair Rules:<ul>
+<li>Negative pairs are defined by <code>neg_diffby</code> (profiles differ in these metadata values)
+  and optionally constrained by <code>neg_sameby</code> (profiles share these metadata values if specified).</li>
+</ul>
+</li>
+</ul>
+</details>
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/average_precision.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">average_precision</span><span class="p">(</span>
+    <span class="n">meta</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">feats</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">pos_sameby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">pos_diffby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">neg_sameby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">neg_diffby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20000</span><span class="p">,</span>
+    <span class="n">distance</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;cosine&quot;</span><span class="p">,</span>
+    <span class="n">progress_bar</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate average precision (AP) scores for pairs of profiles based on their similarity.</span>
+
+<span class="sd">    This function identifies positive and negative pairs of profiles using  metadata</span>
+<span class="sd">    rules, computes their similarity scores, and calculates average precision</span>
+<span class="sd">    scores for each profile. The results include the number of positive and total pairs</span>
+<span class="sd">    for each profile.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    meta : pd.DataFrame</span>
+<span class="sd">        Metadata of the profiles, including columns used for defining pairs.</span>
+<span class="sd">        This DataFrame should include the columns specified in `pos_sameby`,</span>
+<span class="sd">        `pos_diffby`, `neg_sameby`, and `neg_diffby`.</span>
+
+<span class="sd">    feats : np.ndarray</span>
+<span class="sd">        Feature matrix representing the profiles, where rows correspond to profiles</span>
+<span class="sd">        and columns to features.</span>
+
+<span class="sd">    pos_sameby : list</span>
+<span class="sd">        Metadata columns used to define positive pairs. Two profiles are considered a</span>
+<span class="sd">        positive pair if they belong to the same group that is not a control group.</span>
+<span class="sd">        For example, replicate profiles of the same compound are positive pairs and</span>
+<span class="sd">        should share the same value in a column identifying compounds.</span>
+
+<span class="sd">    pos_diffby : list</span>
+<span class="sd">        Metadata columns used to differentiate positive pairs. Positive pairs do not need</span>
+<span class="sd">        to differ in any metadata columns, so this is typically left empty. However,</span>
+<span class="sd">        if necessary (e.g., to account for batch effects), you can specify columns</span>
+<span class="sd">        such as batch identifiers.</span>
+
+<span class="sd">    neg_sameby : list</span>
+<span class="sd">        Metadata columns used to define negative pairs. Typically left empty, as profiles</span>
+<span class="sd">        forming a negative pair (e.g., a compound and a DMSO/control) do not need to</span>
+<span class="sd">        share any metadata values. This ensures comparisons are made without enforcing</span>
+<span class="sd">        unnecessary constraints.</span>
+
+<span class="sd">    neg_diffby : list</span>
+<span class="sd">        Metadata columns used to differentiate negative pairs. Two profiles are considered</span>
+<span class="sd">        a negative pair if one belongs to a compound group and the other to a DMSO/</span>
+<span class="sd">        control group. They must differ in specified metadata columns, such as those</span>
+<span class="sd">        identifying the compound and the treatment index, to ensure comparisons are</span>
+<span class="sd">        only made between compounds and DMSO controls (not between different compounds).</span>
+
+<span class="sd">    batch_size : int</span>
+<span class="sd">        The batch size for similarity computations to optimize memory usage.</span>
+<span class="sd">        Default is 20000.</span>
+
+<span class="sd">    distance : str</span>
+<span class="sd">        The distance function used for computing similarities. Default is &quot;cosine&quot;.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        A DataFrame containing the following columns:</span>
+<span class="sd">        - &#39;average_precision&#39;: The calculated average precision score for each profile.</span>
+<span class="sd">        - &#39;n_pos_pairs&#39;: The number of positive pairs for each profile.</span>
+<span class="sd">        - &#39;n_total_pairs&#39;: The total number of pairs for each profile.</span>
+<span class="sd">        - Additional metadata columns from the input.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    UnpairedException</span>
+<span class="sd">        If no positive or negative pairs are found in the dataset.</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    - Positive Pair Rules:</span>
+<span class="sd">        * Positive pairs are defined by `pos_sameby` (profiles share these metadata values)</span>
+<span class="sd">          and optionally differentiated by `pos_diffby` (profiles must differ in these metadata values if specified).</span>
+<span class="sd">    - Negative Pair Rules:</span>
+<span class="sd">        * Negative pairs are defined by `neg_diffby` (profiles differ in these metadata values)</span>
+<span class="sd">          and optionally constrained by `neg_sameby` (profiles share these metadata values if specified).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Combine all metadata columns needed for pair definitions</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="n">flatten_str_list</span><span class="p">(</span><span class="n">pos_sameby</span><span class="p">,</span> <span class="n">pos_diffby</span><span class="p">,</span> <span class="n">neg_sameby</span><span class="p">,</span> <span class="n">neg_diffby</span><span class="p">)</span>
+
+    <span class="c1"># Validate and filter metadata to ensure the required columns are present and usable</span>
+    <span class="n">meta</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="n">evaluate_and_filter</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+    <span class="n">validate_pipeline_input</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">feats</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+
+    <span class="c1"># Get the distance function for similarity calculations (e.g., cosine)</span>
+    <span class="n">similarity_fn</span> <span class="o">=</span> <span class="n">compute</span><span class="o">.</span><span class="n">get_similarity_fn</span><span class="p">(</span><span class="n">distance</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="n">progress_bar</span><span class="p">)</span>
+
+    <span class="c1"># Reset metadata index for consistent indexing</span>
+    <span class="n">meta</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Indexing metadata...&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Identify positive pairs based on `pos_sameby` and `pos_diffby`</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Finding positive pairs...&quot;</span><span class="p">)</span>
+    <span class="n">pos_pairs</span> <span class="o">=</span> <span class="n">find_pairs</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">sameby</span><span class="o">=</span><span class="n">pos_sameby</span><span class="p">,</span> <span class="n">diffby</span><span class="o">=</span><span class="n">pos_diffby</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pos_pairs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">UnpairedException</span><span class="p">(</span><span class="s2">&quot;Unable to find positive pairs.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Identify negative pairs based on `neg_sameby` and `neg_diffby`</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Finding negative pairs...&quot;</span><span class="p">)</span>
+    <span class="n">neg_pairs</span> <span class="o">=</span> <span class="n">find_pairs</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">sameby</span><span class="o">=</span><span class="n">neg_sameby</span><span class="p">,</span> <span class="n">diffby</span><span class="o">=</span><span class="n">neg_diffby</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">neg_pairs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">UnpairedException</span><span class="p">(</span><span class="s2">&quot;Unable to find negative pairs.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Compute similarities for positive pairs</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing positive similarities...&quot;</span><span class="p">)</span>
+    <span class="n">pos_sims</span> <span class="o">=</span> <span class="n">similarity_fn</span><span class="p">(</span><span class="n">feats</span><span class="p">,</span> <span class="n">pos_pairs</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">)</span>
+
+    <span class="c1"># Compute similarities for negative pairs</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing negative similarities...&quot;</span><span class="p">)</span>
+    <span class="n">neg_sims</span> <span class="o">=</span> <span class="n">similarity_fn</span><span class="p">(</span><span class="n">feats</span><span class="p">,</span> <span class="n">neg_pairs</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">)</span>
+
+    <span class="c1"># Build rank lists for calculating average precision</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Building rank lists...&quot;</span><span class="p">)</span>
+    <span class="n">paired_ix</span><span class="p">,</span> <span class="n">rel_k_list</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="n">build_rank_lists</span><span class="p">(</span>
+        <span class="n">pos_pairs</span><span class="p">,</span> <span class="n">neg_pairs</span><span class="p">,</span> <span class="n">pos_sims</span><span class="p">,</span> <span class="n">neg_sims</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Compute average precision scores and associated configurations</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing average precision...&quot;</span><span class="p">)</span>
+    <span class="n">ap_scores</span><span class="p">,</span> <span class="n">null_confs</span> <span class="o">=</span> <span class="n">compute</span><span class="o">.</span><span class="n">ap_contiguous</span><span class="p">(</span><span class="n">rel_k_list</span><span class="p">,</span> <span class="n">counts</span><span class="p">)</span>
+
+    <span class="c1"># Add AP scores and pair counts to the metadata DataFrame</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Creating result DataFrame...&quot;</span><span class="p">)</span>
+    <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;n_total_pairs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">meta</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">paired_ix</span><span class="p">,</span> <span class="s2">&quot;average_precision&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ap_scores</span>
+    <span class="n">meta</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">paired_ix</span><span class="p">,</span> <span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">null_confs</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
+    <span class="n">meta</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">paired_ix</span><span class="p">,</span> <span class="s2">&quot;n_total_pairs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">null_confs</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Finished.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">meta</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.average_precision.build_rank_lists" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">build_rank_lists</span><span class="p">(</span><span class="n">pos_pairs</span><span class="p">,</span> <span class="n">neg_pairs</span><span class="p">,</span> <span class="n">pos_sims</span><span class="p">,</span> <span class="n">neg_sims</span><span class="p">)</span></code>
+
+<a href="#copairs.map.average_precision.build_rank_lists" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build rank lists for calculating average precision.</p>
+<p>This function processes positive and negative pairs along with their similarity scores
+to construct rank lists and determine unique profile indices with their associated counts.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>pos_pairs</code></b>
+              (<code><span title="numpy.ndarray">ndarray</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Array of positive pair indices, where each pair is represented as a pair of integers.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>neg_pairs</code></b>
+              (<code><span title="numpy.ndarray">ndarray</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Array of negative pair indices, where each pair is represented as a pair of integers.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>pos_sims</code></b>
+              (<code><span title="numpy.ndarray">ndarray</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Array of similarity scores for positive pairs.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>neg_sims</code></b>
+              (<code><span title="numpy.ndarray">ndarray</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Array of similarity scores for negative pairs.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+<b><code>paired_ix</code></b> (              <code><span title="numpy.ndarray">ndarray</span></code>
+)          –
+          <div class="doc-md-description">
+            <p>Unique indices of profiles that appear in the rank lists.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+<b><code>rel_k_list</code></b> (              <code><span title="numpy.ndarray">ndarray</span></code>
+)          –
+          <div class="doc-md-description">
+            <p>Array of relevance labels (1 for positive pairs, 0 for negative pairs) sorted by
+decreasing similarity within each profile.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+<b><code>counts</code></b> (              <code><span title="numpy.ndarray">ndarray</span></code>
+)          –
+          <div class="doc-md-description">
+            <p>Array of counts indicating how many times each profile index appears in the rank lists.</p>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/average_precision.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span>
+<span class="normal">20</span>
+<span class="normal">21</span>
+<span class="normal">22</span>
+<span class="normal">23</span>
+<span class="normal">24</span>
+<span class="normal">25</span>
+<span class="normal">26</span>
+<span class="normal">27</span>
+<span class="normal">28</span>
+<span class="normal">29</span>
+<span class="normal">30</span>
+<span class="normal">31</span>
+<span class="normal">32</span>
+<span class="normal">33</span>
+<span class="normal">34</span>
+<span class="normal">35</span>
+<span class="normal">36</span>
+<span class="normal">37</span>
+<span class="normal">38</span>
+<span class="normal">39</span>
+<span class="normal">40</span>
+<span class="normal">41</span>
+<span class="normal">42</span>
+<span class="normal">43</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">build_rank_lists</span><span class="p">(</span>
+    <span class="n">pos_pairs</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">neg_pairs</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">pos_sims</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">neg_sims</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build rank lists for calculating average precision.</span>
+
+<span class="sd">    This function processes positive and negative pairs along with their similarity scores</span>
+<span class="sd">    to construct rank lists and determine unique profile indices with their associated counts.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    pos_pairs : np.ndarray</span>
+<span class="sd">        Array of positive pair indices, where each pair is represented as a pair of integers.</span>
+
+<span class="sd">    neg_pairs : np.ndarray</span>
+<span class="sd">        Array of negative pair indices, where each pair is represented as a pair of integers.</span>
+
+<span class="sd">    pos_sims : np.ndarray</span>
+<span class="sd">        Array of similarity scores for positive pairs.</span>
+
+<span class="sd">    neg_sims : np.ndarray</span>
+<span class="sd">        Array of similarity scores for negative pairs.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    paired_ix : np.ndarray</span>
+<span class="sd">        Unique indices of profiles that appear in the rank lists.</span>
+
+<span class="sd">    rel_k_list : np.ndarray</span>
+<span class="sd">        Array of relevance labels (1 for positive pairs, 0 for negative pairs) sorted by</span>
+<span class="sd">        decreasing similarity within each profile.</span>
+
+<span class="sd">    counts : np.ndarray</span>
+<span class="sd">        Array of counts indicating how many times each profile index appears in the rank lists.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Combine relevance labels: 1 for positive pairs, 0 for negative pairs</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+        <span class="p">[</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">pos_pairs</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">),</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">neg_pairs</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">),</span>
+        <span class="p">]</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Flatten positive and negative pair indices for ranking</span>
+    <span class="n">ix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">pos_pairs</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">neg_pairs</span><span class="o">.</span><span class="n">ravel</span><span class="p">()])</span>
+
+    <span class="c1"># Expand similarity scores to match the flattened pair indices</span>
+    <span class="n">sim_all</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">pos_sims</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">neg_sims</span><span class="p">,</span> <span class="mi">2</span><span class="p">)])</span>
+
+    <span class="c1"># Sort by index (lexicographical order) and then by similarity (descending)</span>
+    <span class="c1"># `1 - sim_all` ensures higher similarity values appear first, prioritizing</span>
+    <span class="c1"># pairs with stronger similarity scores for ranking.</span>
+    <span class="c1"># `ix` acts as a secondary criterion, ensuring consistent ordering of pairs</span>
+    <span class="c1"># with equal similarity scores by their indices (lexicographical order).</span>
+    <span class="n">ix_sort</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">lexsort</span><span class="p">([</span><span class="mi">1</span> <span class="o">-</span> <span class="n">sim_all</span><span class="p">,</span> <span class="n">ix</span><span class="p">])</span>
+
+    <span class="c1"># Create the rank list of relevance labels sorted by similarity and index</span>
+    <span class="n">rel_k_list</span> <span class="o">=</span> <span class="n">labels</span><span class="p">[</span><span class="n">ix_sort</span><span class="p">]</span>
+
+    <span class="c1"># Find unique profile indices and count their occurrences in the pairs</span>
+    <span class="n">paired_ix</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">ix</span><span class="p">,</span> <span class="n">return_counts</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">paired_ix</span><span class="p">,</span> <span class="n">rel_k_list</span><span class="p">,</span> <span class="n">counts</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.average_precision.p_values" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">p_values</span><span class="p">(</span><span class="n">dframe</span><span class="p">,</span> <span class="n">null_size</span><span class="p">,</span> <span class="n">seed</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#copairs.map.average_precision.p_values" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute p-values for average precision scores based on a null distribution.</p>
+<p>This function calculates the p-values for each profile in the input DataFrame,
+comparing their average precision scores (<code>average_precision</code>) against a null
+distribution generated for their specific configurations (number of positive
+and total pairs). Profiles with no positive pairs are excluded from the p-value calculation.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>dframe</code></b>
+              (<code><span title="pandas.DataFrame">DataFrame</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>A DataFrame containing the following columns:
+- <code>average_precision</code>: The AP scores for each profile.
+- <code>n_pos_pairs</code>: Number of positive pairs for each profile.
+- <code>n_total_pairs</code>: Total number of pairs (positive + negative) for each profile.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>null_size</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The number of samples to generate in the null distribution for significance testing.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>seed</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Random seed for reproducibility of the null distribution.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>progress_bar</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>True</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether or not to show tqdm's progress bar.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="numpy.ndarray">ndarray</span></code>
+          –
+          <div class="doc-md-description">
+            <p>An array of p-values for each profile in the DataFrame. Profiles with no positive
+pairs will have NaN as their p-value.</p>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/average_precision.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">p_values</span><span class="p">(</span>
+    <span class="n">dframe</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">null_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">progress_bar</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute p-values for average precision scores based on a null distribution.</span>
+
+<span class="sd">    This function calculates the p-values for each profile in the input DataFrame,</span>
+<span class="sd">    comparing their average precision scores (`average_precision`) against a null</span>
+<span class="sd">    distribution generated for their specific configurations (number of positive</span>
+<span class="sd">    and total pairs). Profiles with no positive pairs are excluded from the p-value calculation.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    dframe : pd.DataFrame</span>
+<span class="sd">        A DataFrame containing the following columns:</span>
+<span class="sd">        - `average_precision`: The AP scores for each profile.</span>
+<span class="sd">        - `n_pos_pairs`: Number of positive pairs for each profile.</span>
+<span class="sd">        - `n_total_pairs`: Total number of pairs (positive + negative) for each profile.</span>
+<span class="sd">    null_size : int</span>
+<span class="sd">        The number of samples to generate in the null distribution for significance testing.</span>
+<span class="sd">    seed : int</span>
+<span class="sd">        Random seed for reproducibility of the null distribution.</span>
+<span class="sd">    progress_bar : bool</span>
+<span class="sd">        Whether or not to show tqdm&#39;s progress bar.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        An array of p-values for each profile in the DataFrame. Profiles with no positive</span>
+<span class="sd">        pairs will have NaN as their p-value.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Create a mask to filter profiles with at least one positive pair</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="n">dframe</span><span class="p">[</span><span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span>
+
+    <span class="c1"># Initialize the p-values array with NaN for all profiles</span>
+    <span class="n">pvals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">dframe</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+    <span class="c1"># Extract the average precision scores and null configurations for valid profiles</span>
+    <span class="n">scores</span> <span class="o">=</span> <span class="n">dframe</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">mask</span><span class="p">,</span> <span class="s2">&quot;average_precision&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+    <span class="n">null_confs</span> <span class="o">=</span> <span class="n">dframe</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">mask</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">,</span> <span class="s2">&quot;n_total_pairs&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+
+    <span class="c1"># Compute p-values for profiles with valid configurations using the null distribution</span>
+    <span class="n">pvals</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span> <span class="o">=</span> <span class="n">compute</span><span class="o">.</span><span class="n">p_values</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">null_confs</span><span class="p">,</span> <span class="n">null_size</span><span class="p">,</span> <span class="n">seed</span><span class="p">,</span> <span class="n">progress_bar</span><span class="p">)</span>
+
+    <span class="c1"># Return the array of p-values, including NaN for invalid profiles</span>
+    <span class="k">return</span> <span class="n">pvals</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-module">
+
+
+
+<h3 id="copairs.map.filter" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-module"></code>            <code>filter</code>
+
+
+<a href="#copairs.map.filter" class="headerlink" title="Permanent link">&para;</a></h3>
+
+    <div class="doc doc-contents ">
+
+        <p>Functions to support query-like syntax when finding the matches.</p>
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.filter.apply_filters" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">apply_filters</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">query_list</span><span class="p">)</span></code>
+
+<a href="#copairs.map.filter.apply_filters" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Combine and apply query filters to a DataFrame.</p>
+<p>This function takes a list of query expressions and applies them to a DataFrame
+to filter its rows. If no query expressions are provided, the original DataFrame
+is returned unchanged.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>df</code></b>
+              (<code><span title="pandas.DataFrame">DataFrame</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The DataFrame to which the filters will be applied.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>query_list</code></b>
+              (<code><span title="typing.List">List</span>[<span title="str">str</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>A list of query expressions (e.g., "column_name &gt; 5"). These expressions
+should follow the syntax supported by <code>pd.DataFrame.query</code>.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="pandas.DataFrame">DataFrame</span></code>
+          –
+          <div class="doc-md-description">
+            <p>The DataFrame filtered based on the provided query expressions.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code>ValueError:</code>
+            –
+          <div class="doc-md-description">
+            <ul>
+<li>If the combined query results in an empty DataFrame.</li>
+<li>If the combined query expression is invalid.</li>
+</ul>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/filter.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">apply_filters</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">query_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Combine and apply query filters to a DataFrame.</span>
+
+<span class="sd">    This function takes a list of query expressions and applies them to a DataFrame</span>
+<span class="sd">    to filter its rows. If no query expressions are provided, the original DataFrame</span>
+<span class="sd">    is returned unchanged.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pd.DataFrame</span>
+<span class="sd">        The DataFrame to which the filters will be applied.</span>
+<span class="sd">    query_list : List[str]</span>
+<span class="sd">        A list of query expressions (e.g., &quot;column_name &gt; 5&quot;). These expressions</span>
+<span class="sd">        should follow the syntax supported by `pd.DataFrame.query`.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        The DataFrame filtered based on the provided query expressions.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError:</span>
+<span class="sd">        - If the combined query results in an empty DataFrame.</span>
+<span class="sd">        - If the combined query expression is invalid.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># If no queries are provided, return the original DataFrame unchanged</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">query_list</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">df</span>
+
+    <span class="c1"># Combine the query expressions into a single string using logical AND (&amp;)</span>
+    <span class="n">combined_query</span> <span class="o">=</span> <span class="s2">&quot; &amp; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">query</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">for</span> <span class="n">query</span> <span class="ow">in</span> <span class="n">query_list</span><span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Apply the combined query to filter the DataFrame</span>
+        <span class="n">df_filtered</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="n">combined_query</span><span class="p">)</span>
+
+        <span class="c1"># Raise an error if the filtered DataFrame is empty</span>
+        <span class="k">if</span> <span class="n">df_filtered</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No data matched the query: </span><span class="si">{</span><span class="n">combined_query</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="c1"># Handle any issues with the query expression and provide feedback</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Invalid combined query expression: </span><span class="si">{</span><span class="n">combined_query</span><span class="si">}</span><span class="s2">. Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Return the filtered DataFrame</span>
+    <span class="k">return</span> <span class="n">df_filtered</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.filter.evaluate_and_filter" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">evaluate_and_filter</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span></code>
+
+<a href="#copairs.map.filter.evaluate_and_filter" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Evaluate query filters and filter the metadata DataFrame based on specified columns.</p>
+<p>This function processes column specifications, extracts any filter conditions,
+applies these conditions to the metadata DataFrame, and returns the filtered metadata
+along with the updated list of columns.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>df</code></b>
+              (<code><span title="pandas.DataFrame">DataFrame</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The metadata DataFrame containing information about profiles to be filtered.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>columns</code></b>
+              (<code><span title="typing.List">List</span>[<span title="str">str</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>A list of metadata column names.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="typing.Tuple">Tuple</span>[<span title="pandas.DataFrame">DataFrame</span>, <span title="typing.List">List</span>[<span title="str">str</span>]]</code>
+          –
+          <div class="doc-md-description">
+            <ul>
+<li>The filtered metadata DataFrame.</li>
+<li>The updated list of columns after processing any filter specifications.</li>
+</ul>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/filter.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">evaluate_and_filter</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">columns</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Evaluate query filters and filter the metadata DataFrame based on specified columns.</span>
+
+<span class="sd">    This function processes column specifications, extracts any filter conditions,</span>
+<span class="sd">    applies these conditions to the metadata DataFrame, and returns the filtered metadata</span>
+<span class="sd">    along with the updated list of columns.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pd.DataFrame</span>
+<span class="sd">        The metadata DataFrame containing information about profiles to be filtered.</span>
+<span class="sd">    columns : List[str]</span>
+<span class="sd">        A list of metadata column names.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    Tuple[pd.DataFrame, List[str]]</span>
+<span class="sd">        - The filtered metadata DataFrame.</span>
+<span class="sd">        - The updated list of columns after processing any filter specifications.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Extract query filters from the column specifications</span>
+    <span class="n">query_list</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="n">extract_filters</span><span class="p">(</span><span class="n">columns</span><span class="p">,</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+
+    <span class="c1"># Apply the extracted filters to the metadata DataFrame</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">apply_filters</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">query_list</span><span class="p">)</span>
+
+    <span class="c1"># Return the filtered metadata DataFrame and the updated list of columns</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">,</span> <span class="n">columns</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.filter.extract_filters" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">extract_filters</span><span class="p">(</span><span class="n">columns</span><span class="p">,</span> <span class="n">df_columns</span><span class="p">)</span></code>
+
+<a href="#copairs.map.filter.extract_filters" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Extract and validate query filters from selected metadata columns.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>columns</code></b>
+              (<code><span title="typing.List">List</span>[<span title="str">str</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>A list of selected metadata column names or query expressions. Query expressions
+should follow a valid syntax (e.g., "metadata_column &gt; 5" or "metadata_column == 'value'").</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>df_columns</code></b>
+              (<code><span title="typing.List">List</span>[<span title="str">str</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>All available metadata column names to validate against.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="typing.Tuple">Tuple</span>[<span title="typing.List">List</span>[<span title="str">str</span>], <span title="typing.List">List</span>[<span title="str">str</span>]]</code>
+          –
+          <div class="doc-md-description">
+            <ul>
+<li><code>queries_to_eval</code>: A list of valid query expressions to evaluate.</li>
+<li><code>parsed_cols</code>: A list of valid metadata column names extracted from the input <code>columns</code>.</li>
+</ul>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code>ValueError:</code>
+            –
+          <div class="doc-md-description">
+            <ul>
+<li>If a metadata column or query expression is invalid (e.g., references a non-existent column).</li>
+<li>If duplicate queries are found for the same metadata column.</li>
+</ul>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/filter.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">extract_filters</span><span class="p">(</span>
+    <span class="n">columns</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">df_columns</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extract and validate query filters from selected metadata columns.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    columns : List[str]</span>
+<span class="sd">        A list of selected metadata column names or query expressions. Query expressions</span>
+<span class="sd">        should follow a valid syntax (e.g., &quot;metadata_column &gt; 5&quot; or &quot;metadata_column == &#39;value&#39;&quot;).</span>
+<span class="sd">    df_columns : List[str]</span>
+<span class="sd">        All available metadata column names to validate against.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    Tuple[List[str], List[str]]</span>
+<span class="sd">        - `queries_to_eval`: A list of valid query expressions to evaluate.</span>
+<span class="sd">        - `parsed_cols`: A list of valid metadata column names extracted from the input `columns`.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError:</span>
+<span class="sd">        - If a metadata column or query expression is invalid (e.g., references a non-existent column).</span>
+<span class="sd">        - If duplicate queries are found for the same metadata column.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Initialize lists to store parsed metadata column names and query expressions</span>
+    <span class="n">parsed_cols</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">queries_to_eval</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1"># Iterate through each entry in the selected metadata columns</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">columns</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df_columns</span><span class="p">:</span>
+            <span class="c1"># If the entry is a valid metadata column name, add it to parsed_cols</span>
+            <span class="n">parsed_cols</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">col</span><span class="p">)</span>
+            <span class="k">continue</span>
+
+        <span class="c1"># Use regex to extract metadata column names from query expressions</span>
+        <span class="n">column_names</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(\w+)\s*[=&lt;&gt;!]+&quot;</span><span class="p">,</span> <span class="n">col</span><span class="p">)</span>
+
+        <span class="c1"># Validate the extracted metadata column names against all available metadata columns</span>
+        <span class="n">valid_column_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">col</span> <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">column_names</span> <span class="k">if</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df_columns</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">valid_column_names</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid query or metadata column name: </span><span class="si">{</span><span class="n">col</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Add valid query expressions and associated metadata columns</span>
+        <span class="n">queries_to_eval</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">col</span><span class="p">)</span>
+        <span class="n">parsed_cols</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">valid_column_names</span><span class="p">)</span>
+
+        <span class="c1"># Check for duplicate metadata columns in the parsed list</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parsed_cols</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">parsed_cols</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Duplicate queries for column: </span><span class="si">{</span><span class="n">col</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Return the queries to evaluate and the parsed metadata column names</span>
+    <span class="k">return</span> <span class="n">queries_to_eval</span><span class="p">,</span> <span class="n">parsed_cols</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.filter.flatten_str_list" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">flatten_str_list</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span></code>
+
+<a href="#copairs.map.filter.flatten_str_list" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a single list with all the params given.</p>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/filter.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">flatten_str_list</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a single list with all the params given.&quot;&quot;&quot;</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="n">columns</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">col</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">itertools</span><span class="o">.</span><span class="n">chain</span><span class="o">.</span><span class="n">from_iterable</span><span class="p">(</span><span class="n">col</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">col</span><span class="p">)</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">columns</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">columns</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.filter.validate_pipeline_input" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">validate_pipeline_input</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">feats</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span></code>
+
+<a href="#copairs.map.filter.validate_pipeline_input" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Validate the metadata and features for consistency and completeness.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>meta</code></b>
+              (<code><span title="pandas.DataFrame">DataFrame</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The metadata DataFrame describing the profiles.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>feats</code></b>
+              (<code><span title="numpy.ndarray">ndarray</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The feature matrix where rows correspond to profiles in the metadata.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>columns</code></b>
+              (<code><span title="typing.List">List</span>[<span title="str">str</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>List of column names in the metadata to validate for null values.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code>ValueError:</code>
+            –
+          <div class="doc-md-description">
+            <ul>
+<li>If any of the specified metadata columns contain null values.</li>
+<li>If the number of rows in the metadata and features are not equal.</li>
+<li>If the feature matrix contains null values.</li>
+</ul>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/filter.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span>
+<span class="normal">20</span>
+<span class="normal">21</span>
+<span class="normal">22</span>
+<span class="normal">23</span>
+<span class="normal">24</span>
+<span class="normal">25</span>
+<span class="normal">26</span>
+<span class="normal">27</span>
+<span class="normal">28</span>
+<span class="normal">29</span>
+<span class="normal">30</span>
+<span class="normal">31</span>
+<span class="normal">32</span>
+<span class="normal">33</span>
+<span class="normal">34</span>
+<span class="normal">35</span>
+<span class="normal">36</span>
+<span class="normal">37</span>
+<span class="normal">38</span>
+<span class="normal">39</span>
+<span class="normal">40</span>
+<span class="normal">41</span>
+<span class="normal">42</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">validate_pipeline_input</span><span class="p">(</span>
+    <span class="n">meta</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">feats</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">columns</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate the metadata and features for consistency and completeness.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    meta : pd.DataFrame</span>
+<span class="sd">        The metadata DataFrame describing the profiles.</span>
+<span class="sd">    feats : np.ndarray</span>
+<span class="sd">        The feature matrix where rows correspond to profiles in the metadata.</span>
+<span class="sd">    columns : List[str]</span>
+<span class="sd">        List of column names in the metadata to validate for null values.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError:</span>
+<span class="sd">        - If any of the specified metadata columns contain null values.</span>
+<span class="sd">        - If the number of rows in the metadata and features are not equal.</span>
+<span class="sd">        - If the feature matrix contains null values.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Check for null values in the specified metadata columns</span>
+    <span class="k">if</span> <span class="n">meta</span><span class="p">[</span><span class="n">columns</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;metadata columns should not have null values.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Check if the number of rows in metadata matches the feature matrix</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">feats</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Metadata and features must have the same number of rows.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Check for null values in the feature matrix</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">feats</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;features should not have null values.&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-module">
+
+
+
+<h3 id="copairs.map.map" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-module"></code>            <code>map</code>
+
+
+<a href="#copairs.map.map" class="headerlink" title="Permanent link">&para;</a></h3>
+
+    <div class="doc doc-contents ">
+
+        <p>Functions to compute mean average precision.</p>
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.map.mean_average_precision" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">mean_average_precision</span><span class="p">(</span><span class="n">ap_scores</span><span class="p">,</span> <span class="n">sameby</span><span class="p">,</span> <span class="n">null_size</span><span class="p">,</span> <span class="n">threshold</span><span class="p">,</span> <span class="n">seed</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">max_workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cache_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#copairs.map.map.mean_average_precision" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Calculate the Mean Average Precision (mAP) score and associated p-values.</p>
+<p>This function computes the Mean Average Precision (mAP) score by grouping profiles
+based on the specified criteria (<code>sameby</code>). It calculates the significance of mAP
+scores by comparing them to a null distribution and performs multiple testing
+corrections.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>ap_scores</code></b>
+              (<code><span title="pandas.DataFrame">DataFrame</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>DataFrame containing individual Average Precision (AP) scores and pair statistics
+(e.g., number of positive pairs <code>n_pos_pairs</code> and total pairs <code>n_total_pairs</code>).</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>sameby</code></b>
+              (<code><span title="list">list</span> or <span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Metadata column(s) used to group profiles for mAP calculation.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>null_size</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Number of samples in the null distribution for significance testing.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>threshold</code></b>
+              (<code><span title="float">float</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>p-value threshold for identifying significant MaP scores.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>seed</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Random seed for reproducibility.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>progress_bar</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>True</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether or not to show tqdm's progress bar.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>max_workers</code></b>
+              (<code><span title="int">int</span></code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Number of workers used. Default defined by tqdm's <code>thread_map</code>.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>cache_dir</code></b>
+              (<code><span title="str">str</span> or <span title="pathlib.Path">Path</span></code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Location to save the cache.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>progress_bar</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>True</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether or not to show tqdm's progress bar.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="pandas.DataFrame">DataFrame</span></code>
+          –
+          <div class="doc-md-description">
+            <p>DataFrame with the following columns:
+- <code>mean_average_precision</code>: Mean AP score for each group.
+- <code>p_value</code>: p-value comparing mAP to the null distribution.
+- <code>corrected_p_value</code>: Adjusted p-value after multiple testing correction.
+- <code>below_p</code>: Boolean indicating if the p-value is below the threshold.
+- <code>below_corrected_p</code>: Boolean indicating if the corrected p-value is below the threshold.</p>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/map.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">mean_average_precision</span><span class="p">(</span>
+    <span class="n">ap_scores</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">sameby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">null_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">progress_bar</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">max_workers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">cache_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate the Mean Average Precision (mAP) score and associated p-values.</span>
+
+<span class="sd">    This function computes the Mean Average Precision (mAP) score by grouping profiles</span>
+<span class="sd">    based on the specified criteria (`sameby`). It calculates the significance of mAP</span>
+<span class="sd">    scores by comparing them to a null distribution and performs multiple testing</span>
+<span class="sd">    corrections.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    ap_scores : pd.DataFrame</span>
+<span class="sd">        DataFrame containing individual Average Precision (AP) scores and pair statistics</span>
+<span class="sd">        (e.g., number of positive pairs `n_pos_pairs` and total pairs `n_total_pairs`).</span>
+<span class="sd">    sameby : list or str</span>
+<span class="sd">        Metadata column(s) used to group profiles for mAP calculation.</span>
+<span class="sd">    null_size : int</span>
+<span class="sd">        Number of samples in the null distribution for significance testing.</span>
+<span class="sd">    threshold : float</span>
+<span class="sd">        p-value threshold for identifying significant MaP scores.</span>
+<span class="sd">    seed : int</span>
+<span class="sd">        Random seed for reproducibility.</span>
+<span class="sd">    progress_bar : bool</span>
+<span class="sd">        Whether or not to show tqdm&#39;s progress bar.</span>
+<span class="sd">    max_workers : int</span>
+<span class="sd">        Number of workers used. Default defined by tqdm&#39;s `thread_map`.</span>
+<span class="sd">    cache_dir : str or Path</span>
+<span class="sd">        Location to save the cache.</span>
+<span class="sd">    progress_bar : bool</span>
+<span class="sd">        Whether or not to show tqdm&#39;s progress bar.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        DataFrame with the following columns:</span>
+<span class="sd">        - `mean_average_precision`: Mean AP score for each group.</span>
+<span class="sd">        - `p_value`: p-value comparing mAP to the null distribution.</span>
+<span class="sd">        - `corrected_p_value`: Adjusted p-value after multiple testing correction.</span>
+<span class="sd">        - `below_p`: Boolean indicating if the p-value is below the threshold.</span>
+<span class="sd">        - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Filter out invalid or incomplete AP scores</span>
+    <span class="n">ap_scores</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">&quot;~average_precision.isna() and n_pos_pairs &gt; 0&quot;</span><span class="p">)</span>
+    <span class="n">ap_scores</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing null_dist...&quot;</span><span class="p">)</span>
+    <span class="c1"># Extract configurations for null distribution generation</span>
+    <span class="n">null_confs</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="p">[[</span><span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">,</span> <span class="s2">&quot;n_total_pairs&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+    <span class="n">null_confs</span><span class="p">,</span> <span class="n">rev_ix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">null_confs</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">return_inverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># Generate null distributions for each unique configuration</span>
+    <span class="n">null_dists</span> <span class="o">=</span> <span class="n">compute</span><span class="o">.</span><span class="n">get_null_dists</span><span class="p">(</span>
+        <span class="n">null_confs</span><span class="p">,</span> <span class="n">null_size</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">,</span> <span class="n">cache_dir</span><span class="o">=</span><span class="n">cache_dir</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="n">progress_bar</span>
+    <span class="p">)</span>
+    <span class="n">ap_scores</span><span class="p">[</span><span class="s2">&quot;null_ix&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rev_ix</span>
+
+    <span class="c1"># Function to calculate the p-value for a mAP score based on the null distribution</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_p_value</span><span class="p">(</span><span class="n">params</span><span class="p">):</span>
+        <span class="n">map_score</span><span class="p">,</span> <span class="n">indices</span> <span class="o">=</span> <span class="n">params</span>
+        <span class="n">null_dist</span> <span class="o">=</span> <span class="n">null_dists</span><span class="p">[</span><span class="n">rev_ix</span><span class="p">[</span><span class="n">indices</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">num</span> <span class="o">=</span> <span class="p">(</span><span class="n">null_dist</span> <span class="o">&gt;</span> <span class="n">map_score</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+        <span class="n">p_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">num</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">null_size</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># Add 1 for stability</span>
+        <span class="k">return</span> <span class="n">p_value</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing p-values...&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Group by the specified metadata column(s) and calculate mean AP</span>
+    <span class="n">map_scores</span> <span class="o">=</span> <span class="n">ap_scores</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">sameby</span><span class="p">,</span> <span class="n">observed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">as_index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;average_precision&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;mean&quot;</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">index</span><span class="p">)],</span>
+        <span class="p">}</span>
+    <span class="p">)</span>
+    <span class="n">map_scores</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="n">sameby</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;mean_average_precision&quot;</span><span class="p">,</span> <span class="s2">&quot;indices&quot;</span><span class="p">]</span>
+
+    <span class="c1"># Compute p-values for each group using the null distributions</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="n">map_scores</span><span class="p">[[</span><span class="s2">&quot;mean_average_precision&quot;</span><span class="p">,</span> <span class="s2">&quot;indices&quot;</span><span class="p">]]</span>
+
+    <span class="k">if</span> <span class="n">progress_bar</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">tqdm.contrib.concurrent</span><span class="w"> </span><span class="kn">import</span> <span class="n">thread_map</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">thread_map</span> <span class="o">=</span> <span class="n">silent_thread_map</span>
+
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;p_value&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">thread_map</span><span class="p">(</span>
+        <span class="n">get_p_value</span><span class="p">,</span> <span class="n">params</span><span class="o">.</span><span class="n">values</span><span class="p">,</span> <span class="n">leave</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">max_workers</span><span class="o">=</span><span class="n">max_workers</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Perform multiple testing correction on p-values</span>
+    <span class="n">reject</span><span class="p">,</span> <span class="n">pvals_corrected</span><span class="p">,</span> <span class="n">alphacSidak</span><span class="p">,</span> <span class="n">alphacBonf</span> <span class="o">=</span> <span class="n">multipletests</span><span class="p">(</span>
+        <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;p_value&quot;</span><span class="p">],</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;fdr_bh&quot;</span>
+    <span class="p">)</span>
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;corrected_p_value&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pvals_corrected</span>
+
+    <span class="c1"># Mark scores below the p-value threshold</span>
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;below_p&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;p_value&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">threshold</span>
+    <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;below_corrected_p&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">map_scores</span><span class="p">[</span><span class="s2">&quot;corrected_p_value&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">threshold</span>
+
+    <span class="k">return</span> <span class="n">map_scores</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.map.silent_thread_map" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">silent_thread_map</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="o">*</span><span class="n">iterables</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
+
+<a href="#copairs.map.map.silent_thread_map" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Map iterables and kwargs to a function.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>fn</code></b>
+              (<code><span title="callable">callable</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Function to map over iterables.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>*iterables</code></b>
+              (<code><span title="tuple">tuple</span></code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Iterables to map over.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>**kwargs</code></b>
+              (<code><span title="dict">dict</span></code>, default:
+                  <code>{}</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Additional keyword arguments. Accepts:
+- max_workers : int, optional
+    Maximum number of workers [default: min(32, cpu_count() + 4)].
+- chunksize : int, optional
+    Size of chunks for each worker [default: 1].</p>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/map.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">silent_thread_map</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="o">*</span><span class="n">iterables</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map iterables and kwargs to a function.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    fn : callable</span>
+<span class="sd">        Function to map over iterables.</span>
+<span class="sd">    *iterables : tuple</span>
+<span class="sd">        Iterables to map over.</span>
+<span class="sd">    **kwargs : dict</span>
+<span class="sd">        Additional keyword arguments. Accepts:</span>
+<span class="sd">        - max_workers : int, optional</span>
+<span class="sd">            Maximum number of workers [default: min(32, cpu_count() + 4)].</span>
+<span class="sd">        - chunksize : int, optional</span>
+<span class="sd">            Size of chunks for each worker [default: 1].</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Based on tqdm&#39;s original implementation for consistency</span>
+    <span class="c1"># (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).</span>
+
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">max_workers</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;max_workers&quot;</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="mi">32</span><span class="p">,</span> <span class="n">cpu_count</span><span class="p">()</span> <span class="o">+</span> <span class="mi">4</span><span class="p">))</span>
+    <span class="n">chunksize</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;chunksize&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">max_workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">ex</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">ex</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="o">*</span><span class="n">iterables</span><span class="p">,</span> <span class="n">chunksize</span><span class="o">=</span><span class="n">chunksize</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">))</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-module">
+
+
+
+<h3 id="copairs.map.multilabel" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-module"></code>            <code>multilabel</code>
+
+
+<a href="#copairs.map.multilabel" class="headerlink" title="Permanent link">&para;</a></h3>
+
+    <div class="doc doc-contents ">
+
+        <p>Functions to compute mAP with multilabel support.</p>
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="copairs.map.multilabel.average_precision" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">average_precision</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">feats</span><span class="p">,</span> <span class="n">pos_sameby</span><span class="p">,</span> <span class="n">pos_diffby</span><span class="p">,</span> <span class="n">neg_sameby</span><span class="p">,</span> <span class="n">neg_diffby</span><span class="p">,</span> <span class="n">multilabel_col</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">20000</span><span class="p">,</span> <span class="n">distance</span><span class="o">=</span><span class="s1">&#39;cosine&#39;</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#copairs.map.multilabel.average_precision" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute average precision with multilabel support.</p>
+
+
+<details class="see-also" open>
+  <summary>See Also</summary>
+  <p>copairs.map.average_precision : Average precision without multilabel support.</p>
+</details>
+
+            <details class="quote">
+              <summary>Source code in <code>src/copairs/map/multilabel.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">average_precision</span><span class="p">(</span>
+    <span class="n">meta</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">feats</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">pos_sameby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">pos_diffby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">neg_sameby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">neg_diffby</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">multilabel_col</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="mi">20000</span><span class="p">,</span>
+    <span class="n">distance</span><span class="o">=</span><span class="s2">&quot;cosine&quot;</span><span class="p">,</span>
+    <span class="n">progress_bar</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Compute average precision with multilabel support.</span>
+
+<span class="sd">    See Also</span>
+<span class="sd">    --------</span>
+<span class="sd">    copairs.map.average_precision : Average precision without multilabel support.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="n">flatten_str_list</span><span class="p">(</span><span class="n">pos_sameby</span><span class="p">,</span> <span class="n">pos_diffby</span><span class="p">,</span> <span class="n">neg_sameby</span><span class="p">,</span> <span class="n">neg_diffby</span><span class="p">)</span>
+    <span class="n">meta</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="n">evaluate_and_filter</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+    <span class="n">validate_pipeline_input</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">feats</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+    <span class="n">distance_fn</span> <span class="o">=</span> <span class="n">compute</span><span class="o">.</span><span class="n">get_similarity_fn</span><span class="p">(</span><span class="n">distance</span><span class="p">,</span> <span class="n">progress_bar</span><span class="o">=</span><span class="n">progress_bar</span><span class="p">)</span>
+    <span class="c1"># Critical!, otherwise the indexing wont work</span>
+    <span class="n">meta</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Indexing metadata...&quot;</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Finding positive pairs...&quot;</span><span class="p">)</span>
+    <span class="n">pos_pairs</span><span class="p">,</span> <span class="n">keys</span><span class="p">,</span> <span class="n">pos_counts</span> <span class="o">=</span> <span class="n">find_pairs_multilabel</span><span class="p">(</span>
+        <span class="n">meta</span><span class="p">,</span> <span class="n">sameby</span><span class="o">=</span><span class="n">pos_sameby</span><span class="p">,</span> <span class="n">diffby</span><span class="o">=</span><span class="n">pos_diffby</span><span class="p">,</span> <span class="n">multilabel_col</span><span class="o">=</span><span class="n">multilabel_col</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pos_pairs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">UnpairedException</span><span class="p">(</span><span class="s2">&quot;Unable to find positive pairs.&quot;</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Finding negative pairs...&quot;</span><span class="p">)</span>
+    <span class="n">neg_pairs</span> <span class="o">=</span> <span class="n">find_pairs_multilabel</span><span class="p">(</span>
+        <span class="n">meta</span><span class="p">,</span> <span class="n">sameby</span><span class="o">=</span><span class="n">neg_sameby</span><span class="p">,</span> <span class="n">diffby</span><span class="o">=</span><span class="n">neg_diffby</span><span class="p">,</span> <span class="n">multilabel_col</span><span class="o">=</span><span class="n">multilabel_col</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">neg_pairs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">UnpairedException</span><span class="p">(</span><span class="s2">&quot;Unable to find any negative pairs.&quot;</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Dropping dups in negative pairs...&quot;</span><span class="p">)</span>
+    <span class="n">neg_pairs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">neg_pairs</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing positive similarities...&quot;</span><span class="p">)</span>
+    <span class="n">pos_sims</span> <span class="o">=</span> <span class="n">distance_fn</span><span class="p">(</span><span class="n">feats</span><span class="p">,</span> <span class="n">pos_pairs</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing negative similarities...&quot;</span><span class="p">)</span>
+    <span class="n">neg_sims</span> <span class="o">=</span> <span class="n">distance_fn</span><span class="p">(</span><span class="n">feats</span><span class="p">,</span> <span class="n">neg_pairs</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Computing AP per label...&quot;</span><span class="p">)</span>
+    <span class="n">negs_for</span> <span class="o">=</span> <span class="n">_create_neg_query_solver</span><span class="p">(</span><span class="n">neg_pairs</span><span class="p">,</span> <span class="n">neg_sims</span><span class="p">)</span>
+    <span class="n">ap_scores_list</span><span class="p">,</span> <span class="n">null_confs_list</span><span class="p">,</span> <span class="n">ix_list</span> <span class="o">=</span> <span class="n">_build_rank_lists_multi</span><span class="p">(</span>
+        <span class="n">pos_pairs</span><span class="p">,</span> <span class="n">pos_sims</span><span class="p">,</span> <span class="n">pos_counts</span><span class="p">,</span> <span class="n">negs_for</span>
+    <span class="p">)</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Creating result DataFrame...&quot;</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="s2">&quot;Here the positive pairs are per-item inside multilabel_col&quot;</span>
+    <span class="c1"># TODO Check if multi-label key is necessary</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">keys</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;average_precision&quot;</span><span class="p">:</span> <span class="n">ap_scores_list</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
+                <span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">:</span> <span class="n">null_confs_list</span><span class="p">[</span><span class="n">i</span><span class="p">][:,</span> <span class="mi">0</span><span class="p">],</span>
+                <span class="s2">&quot;n_total_pairs&quot;</span><span class="p">:</span> <span class="n">null_confs_list</span><span class="p">[</span><span class="n">i</span><span class="p">][:,</span> <span class="mi">1</span><span class="p">],</span>
+                <span class="s2">&quot;ix&quot;</span><span class="p">:</span> <span class="n">ix_list</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
+                <span class="n">multilabel_col</span><span class="p">:</span> <span class="n">key</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">results</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">meta</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">multilabel_col</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">right_on</span><span class="o">=</span><span class="s2">&quot;ix&quot;</span><span class="p">,</span> <span class="n">left_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="s2">&quot;ix&quot;</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">results</span><span class="p">[</span><span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">results</span><span class="p">[</span><span class="s2">&quot;n_pos_pairs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">)</span>
+    <span class="n">results</span><span class="p">[</span><span class="s2">&quot;n_total_pairs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">results</span><span class="p">[</span><span class="s2">&quot;n_total_pairs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Finished.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">results</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["content.code.copy"], "search": "../../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.56ea9cef.min.js"></script>
+      
+    
+  </body>
+</html>
