@@ -606,7 +606,7 @@ def p_values(
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
 
     # Generate null distributions for each unique configuration
-    null_dists = get_null_dists(confs, null_size, seed, progress_bar)
+    null_dists = get_null_dists(confs, null_size, seed, progress_bar=progress_bar)
 
     # Sort null distributions for efficient p-value computation
     null_dists.sort(axis=1)
