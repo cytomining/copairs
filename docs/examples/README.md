@@ -12,8 +12,8 @@ pip install copairs[demo]
 ## Running examples
 
 ```bash
-cd examples
-notebook
+cd docs/examples
+jupyter notebook
 ```
 
 ## List of examples

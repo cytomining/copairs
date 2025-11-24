@@ -482,7 +482,7 @@ class MatcherMultilabel:
 
 
 def find_pairs(
-    dframe: Union[pd.DataFrame, duckdb.duckdb.DuckDBPyRelation],
+    dframe: Union[pd.DataFrame, duckdb.DuckDBPyRelation],
     sameby: Union[str, ColumnList],
     diffby: Union[str, ColumnList],
     rev: bool = False,
@@ -541,7 +541,7 @@ def _validate(sameby, diffby):
 
 
 def find_pairs_multilabel(
-    dframe: Union[pd.DataFrame, duckdb.duckdb.DuckDBPyRelation],
+    dframe: Union[pd.DataFrame, duckdb.DuckDBPyRelation],
     sameby: Union[str, ColumnList],
     diffby: Union[str, ColumnList],
     multilabel_col: str,
@@ -553,7 +553,7 @@ def find_pairs_multilabel(
 
     Parameters
     ----------
-    dframe : Union[pd.DataFrame, duckdb.duckdb.DuckDBPyRelation]
+    dframe : Union[pd.DataFrame, duckdb.DuckDBPyRelation]
         Input DataFrame.
     sameby : Union[str, ColumnList]
         List of column names to consider for finding identical values.
