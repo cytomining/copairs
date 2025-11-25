@@ -3,7 +3,7 @@ name = "copairs"
 version = "0.5.2"
 description = "Find pairs and compute metrics between them"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13"
 license = {file = "LICENSE.txt"}
 keywords = ["pairwise", "replication"]
 authors = [
@@ -19,13 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "ipdb>=0.13.13",
-    "jupyter>=1.1.1",
-    "ruff",
-]
 plot = ["plotly"]
-test = ["scikit-learn", "pytest"]
 demo = ["notebook", "matplotlib"]
 docs = [
     "mkdocs",
@@ -60,8 +54,8 @@ length-sort = true
 dev = [
     "jupyter>=1.1.1",
     "pytest>=8.3.4",
+    "ruff",
     "scikit-learn>=1.3.2",
-    "trepan3k>=1.3.1",
 ]
 test = [
     "pytest>=8.3.4",
