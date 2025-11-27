@@ -10,6 +10,7 @@ from copairs import compute
 from copairs.matching import UnpairedException, find_pairs_multilabel
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
+from .normalization import normalize_ap
 
 logger = logging.getLogger("copairs")
 
@@ -82,6 +83,8 @@ def average_precision(
     """
     Compute average precision with multilabel support.
 
+    Returns normalized_average_precision in addition to average_precision.
+
     See Also
     --------
     copairs.map.average_precision : Average precision without multilabel support.
@@ -129,9 +132,16 @@ def average_precision(
     "Here the positive pairs are per-item inside multilabel_col"
     # TODO Check if multi-label key is necessary
     for i, key in enumerate(keys):
+        # Compute normalized AP for this label group
+        M = null_confs_list[i][:, 0]  # n_pos_pairs
+        L = null_confs_list[i][:, 1]  # n_total_pairs
+        N = L - M  # n_neg_pairs
+        normalized_scores = normalize_ap(ap_scores_list[i], M, N)
+
         result = pd.DataFrame(
             {
                 "average_precision": ap_scores_list[i],
+                "normalized_average_precision": normalized_scores,
                 "n_pos_pairs": null_confs_list[i][:, 0],
                 "n_total_pairs": null_confs_list[i][:, 1],
                 "ix": ix_list[i],
