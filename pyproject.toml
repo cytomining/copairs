@@ -19,6 +19,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dev = [
+    "jupyter>=1.1.1",
+    "pytest>=8.3.4",
+    "ruff",
+    "scikit-learn>=1.3.2",
+]
+test = [
+    "pytest>=8.3.4",
+    "scikit-learn>=1.3.2",
+]
 plot = ["plotly"]
 demo = ["notebook", "matplotlib"]
 docs = [
@@ -60,4 +70,13 @@ dev = [
 test = [
     "pytest>=8.3.4",
     "scikit-learn>=1.3.2",
+]
+plot = ["plotly"]
+demo = ["notebook", "matplotlib"]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]>=0.29.1",
+    "mkdocs-section-index",
+    "mkdocs-jupyter"
 ]

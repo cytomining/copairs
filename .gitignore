@@ -159,7 +159,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-examples/data/*
+docs/examples/data/*
+!docs/examples/data/.gitkeep
 examples/cache/
 examples/results/
 .vscode/
