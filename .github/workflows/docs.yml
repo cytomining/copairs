@@ -15,7 +15,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Configure Git Credentials
         run: |
@@ -23,7 +23,7 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
       
       - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: '3.11'
       
@@ -39,7 +39,7 @@ jobs:
       
       - name: Upload build artifacts (for PRs)
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: docs-site
           path: site/
