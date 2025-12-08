@@ -15,6 +15,35 @@ from copairs import compute
 logger = logging.getLogger("copairs")
 
 
+def simes_pvalue(pvalues: np.ndarray) -> float:
+    """Combine p-values using Simes' method.
+
+    Simes' method provides a combined p-value that is valid under independence
+    and positive dependence (PRDS condition).
+
+    Parameters
+    ----------
+    pvalues : np.ndarray
+        Array of p-values to combine.
+
+    Returns
+    -------
+    float
+        Combined p-value.
+    """
+    pvalues = np.asarray(pvalues)
+    n = len(pvalues)
+    if n == 0:
+        return 1.0
+    if n == 1:
+        return float(pvalues[0])
+    sorted_pvals = np.sort(pvalues)
+    # Simes' formula: min(n * p_(i) / i) for i = 1, ..., n
+    ranks = np.arange(1, n + 1)
+    adjusted = n * sorted_pvals / ranks
+    return float(np.min(adjusted))
+
+
 def mean_average_precision(
     ap_scores: pd.DataFrame,
     sameby: List[str],
@@ -24,6 +53,7 @@ def mean_average_precision(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    hierarchical_by: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -51,8 +81,20 @@ def mean_average_precision(
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
         Location to save the cache.
-    progress_bar : bool
-        Whether or not to show tqdm's progress bar.
+    hierarchical_by : list, optional
+        Metadata column(s) for hierarchical FDR correction. When specified, enables
+        two-stage testing (Yekutieli 2008):
+
+        - Stage 1: Aggregate p-values within each group defined by `hierarchical_by`
+          using Simes' method, then apply BH correction at the group level.
+        - Stage 2: For groups that pass Stage 1, apply BH correction to the
+          individual tests within each group.
+
+        This reduces over-correction when testing related hypotheses (e.g., multiple
+        doses of the same compound). The `hierarchical_by` columns must be a subset
+        of `sameby`. For example, with `sameby=['compound', 'dose']` and
+        `hierarchical_by=['compound']`, mAP is calculated per compound×dose, but
+        FDR correction accounts for the grouped structure.
 
     Returns
     -------
@@ -64,6 +106,16 @@ def mean_average_precision(
         - `corrected_p_value`: Adjusted p-value after multiple testing correction.
         - `below_p`: Boolean indicating if the p-value is below the threshold.
         - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.
+
+        When `hierarchical_by` is used, additional columns are included:
+        - `stage1_p_value`: Group-level p-value from Stage 1 (Simes' aggregation).
+        - `stage1_corrected_p_value`: BH-corrected Stage 1 p-value.
+        - `stage1_significant`: Whether the group passed Stage 1.
+
+    References
+    ----------
+    Yekutieli, D. (2008). "Hierarchical false discovery rate-controlling methodology."
+    Journal of the American Statistical Association, 103(481):309-316.
     """
     # Filter out invalid or incomplete AP scores
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
@@ -119,10 +171,67 @@ def mean_average_precision(
     map_scores["p_value"] = p_values
 
     # Perform multiple testing correction on p-values
-    reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
-        map_scores["p_value"], method="fdr_bh"
-    )
-    map_scores["corrected_p_value"] = pvals_corrected
+    if hierarchical_by is None:
+        # Standard BH correction across all tests
+        reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
+            map_scores["p_value"], method="fdr_bh"
+        )
+        map_scores["corrected_p_value"] = pvals_corrected
+    else:
+        # Hierarchical FDR correction (Yekutieli 2008)
+        # Validate that hierarchical_by is a subset of sameby
+        if not set(hierarchical_by).issubset(set(sameby)):
+            raise ValueError(
+                f"hierarchical_by columns {hierarchical_by} must be a subset of "
+                f"sameby columns {sameby}"
+            )
+
+        if set(hierarchical_by) == set(sameby):
+            raise ValueError(
+                f"hierarchical_by columns {hierarchical_by} must be a proper subset of "
+                f"sameby columns {sameby}. If they are equal, use standard correction "
+                f"by not specifying hierarchical_by."
+            )
+
+        logger.info("Applying hierarchical FDR correction...")
+
+        # Stage 1: Aggregate p-values to group level using Simes' method
+        stage1_pvals = map_scores.groupby(hierarchical_by, observed=True).agg(
+            {"p_value": simes_pvalue}
+        )
+        stage1_pvals.columns = ["stage1_p_value"]
+
+        # Apply BH correction at the group level
+        reject_stage1, stage1_corrected, _, _ = multipletests(
+            stage1_pvals["stage1_p_value"], method="fdr_bh"
+        )
+        stage1_pvals["stage1_corrected_p_value"] = stage1_corrected
+        stage1_pvals["stage1_significant"] = reject_stage1
+
+        # Merge Stage 1 results back to map_scores
+        map_scores = map_scores.merge(
+            stage1_pvals.reset_index(), on=hierarchical_by, how="left"
+        )
+
+        # Stage 2: For groups that passed Stage 1, apply BH within each group
+        # For groups that didn't pass, set corrected_p_value to 1.0
+        map_scores["corrected_p_value"] = 1.0
+
+        for group_key, group_df in map_scores.groupby(hierarchical_by, observed=True):
+            if not group_df["stage1_significant"].iloc[0]:
+                # Group didn't pass Stage 1, skip
+                continue
+
+            group_indices = group_df.index
+            group_pvals = group_df["p_value"].values
+
+            if len(group_pvals) == 1:
+                # Single test in group, no additional correction needed
+                map_scores.loc[group_indices, "corrected_p_value"] = group_pvals[0]
+            else:
+                # Apply BH correction within the group
+                _, group_corrected, _, _ = multipletests(group_pvals, method="fdr_bh")
+                map_scores.loc[group_indices, "corrected_p_value"] = group_corrected
 
     # Mark scores below the p-value threshold
     map_scores["below_p"] = map_scores["p_value"] < threshold
@@ -153,5 +262,6 @@ def silent_thread_map(fn, *iterables, **kwargs):
     kwargs = kwargs.copy()
     max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
     chunksize = kwargs.pop("chunksize", 1)
+    kwargs.pop("leave", None)  # Remove tqdm-specific kwarg
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
