@@ -273,7 +273,11 @@ def test_exact_null_dist_used_when_small():
         cache_dir = Path(tmpdir)
 
         null_dist = compute.null_dist_cached(
-            num_pos=num_pos, total=total, seed=42, null_size=null_size, cache_dir=cache_dir
+            num_pos=num_pos,
+            total=total,
+            seed=42,
+            null_size=null_size,
+            cache_dir=cache_dir,
         )
 
         # Should be padded to null_size
@@ -295,7 +299,11 @@ def test_random_null_dist_used_when_large():
         cache_dir = Path(tmpdir)
 
         null_dist = compute.null_dist_cached(
-            num_pos=num_pos, total=total, seed=42, null_size=null_size, cache_dir=cache_dir
+            num_pos=num_pos,
+            total=total,
+            seed=42,
+            null_size=null_size,
+            cache_dir=cache_dir,
         )
 
         # Should have null_size samples
