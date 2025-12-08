@@ -1,6 +1,7 @@
 """Test pairwise distance calculation functions."""
 
 import tempfile
+from math import comb
 from pathlib import Path
 
 import numpy as np
@@ -237,3 +238,71 @@ def test_null_dist_cached_corrupt():
         assert len(null_dist) == 100
         assert np.all(null_dist >= 0)
         assert np.all(null_dist <= 1)
+
+
+def test_exact_ap():
+    """Test exact_ap computes AP for all possible rankings."""
+    num_pos = 3
+    total = 6
+    n_combinations = comb(total, num_pos)  # 20 combinations
+
+    exact_dist = compute.exact_ap(num_pos, total)
+
+    # Should have exactly C(total, num_pos) AP scores
+    assert len(exact_dist) == n_combinations
+    assert np.all(exact_dist >= 0)
+    assert np.all(exact_dist <= 1)
+
+    # Best case: all positives at the start (positions 0, 1, 2)
+    # AP = (1/1 + 2/2 + 3/3) / 3 = 1.0
+    assert np.max(exact_dist) == pytest.approx(1.0)
+
+    # Worst case: all positives at the end (positions 3, 4, 5)
+    # AP = (1/4 + 2/5 + 3/6) / 3 = (0.25 + 0.4 + 0.5) / 3 ≈ 0.383
+    assert np.min(exact_dist) == pytest.approx((1 / 4 + 2 / 5 + 3 / 6) / 3)
+
+
+def test_exact_null_dist_used_when_small():
+    """Test that exact computation is used when combinations < null_size."""
+    num_pos = 3
+    total = 6
+    null_size = 100
+    n_combinations = comb(total, num_pos)  # 20 < 100
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cache_dir = Path(tmpdir)
+
+        null_dist = compute.null_dist_cached(
+            num_pos=num_pos, total=total, seed=42, null_size=null_size, cache_dir=cache_dir
+        )
+
+        # Should be padded to null_size
+        assert len(null_dist) == null_size
+
+        # Should contain exactly n_combinations unique values (the exact distribution)
+        unique_values = np.unique(null_dist)
+        assert len(unique_values) == n_combinations
+
+
+def test_random_null_dist_used_when_large():
+    """Test that random sampling is used when combinations > null_size."""
+    num_pos = 10
+    total = 100
+    null_size = 1000
+    # comb(100, 10) = 17,310,309,456,440 >> 1000
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cache_dir = Path(tmpdir)
+
+        null_dist = compute.null_dist_cached(
+            num_pos=num_pos, total=total, seed=42, null_size=null_size, cache_dir=cache_dir
+        )
+
+        # Should have null_size samples
+        assert len(null_dist) == null_size
+
+        # With random sampling, we expect many unique values (not exactly n_combinations)
+        unique_values = np.unique(null_dist)
+        # Random sampling won't produce exactly 1000 unique values due to collisions
+        # but should be reasonably close
+        assert len(unique_values) > 500
