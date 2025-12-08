@@ -480,12 +480,18 @@ def exact_ap(num_pos: int, total: int) -> np.ndarray:
         A 1D array containing the Average Precision scores for all possible
         rankings of `num_pos` positives among `total` items.
     """
+    n_combinations = comb(total, num_pos)
+
     # Generate all combinations of positions for positives
     # Each combination is a tuple of sorted indices where positives could appear
     all_combinations = itertools.combinations(range(total), num_pos)
 
     # Convert to array of shape (n_combinations, num_pos)
-    rel_k = np.array(list(all_combinations), dtype=np.uint16)
+    # Use fromiter with count for efficient preallocation, then reshape
+    dtype = np.uint16 if total < 2**16 else np.uint32
+    flat_iter = itertools.chain.from_iterable(all_combinations)
+    rel_k = np.fromiter(flat_iter, dtype=dtype, count=n_combinations * num_pos)
+    rel_k = rel_k.reshape(n_combinations, num_pos)
 
     # Compute AP for each combination
     return average_precision(rel_k)
