@@ -15,35 +15,6 @@ from copairs import compute
 logger = logging.getLogger("copairs")
 
 
-def simes_pvalue(pvalues: np.ndarray) -> float:
-    """Combine p-values using Simes' method.
-
-    Simes' method provides a combined p-value that is valid under independence
-    and positive dependence (PRDS condition).
-
-    Parameters
-    ----------
-    pvalues : np.ndarray
-        Array of p-values to combine.
-
-    Returns
-    -------
-    float
-        Combined p-value.
-    """
-    pvalues = np.asarray(pvalues)
-    n = len(pvalues)
-    if n == 0:
-        return 1.0
-    if n == 1:
-        return float(pvalues[0])
-    sorted_pvals = np.sort(pvalues)
-    # Simes' formula: min(n * p_(i) / i) for i = 1, ..., n
-    ranks = np.arange(1, n + 1)
-    adjusted = n * sorted_pvals / ranks
-    return float(np.min(adjusted))
-
-
 def mean_average_precision(
     ap_scores: pd.DataFrame,
     sameby: List[str],
@@ -83,18 +54,19 @@ def mean_average_precision(
         Location to save the cache.
     hierarchical_by : list, optional
         Metadata column(s) for hierarchical FDR correction. When specified, enables
-        two-stage testing (Yekutieli 2008):
+        two-stage testing:
 
-        - Stage 1: Aggregate p-values within each group defined by `hierarchical_by`
-          using Simes' method, then apply BH correction at the group level.
+        - Stage 1: Use minimum p-value within each group defined by `hierarchical_by`,
+          then apply BH correction at the group level. A group passes if any member
+          is significant.
         - Stage 2: For groups that pass Stage 1, apply BH correction to the
           individual tests within each group.
 
-        This reduces over-correction when testing related hypotheses (e.g., multiple
-        doses of the same compound). The `hierarchical_by` columns must be a subset
-        of `sameby`. For example, with `sameby=['compound', 'dose']` and
-        `hierarchical_by=['compound']`, mAP is calculated per compound×dose, but
-        FDR correction accounts for the grouped structure.
+        This is designed for dose-response data where only high doses are expected
+        to be active. The `hierarchical_by` columns must be a subset of `sameby`.
+        For example, with `sameby=['compound', 'dose']` and `hierarchical_by=['compound']`,
+        mAP is calculated per compound×dose, but FDR correction accounts for the
+        grouped structure.
 
     Returns
     -------
@@ -108,14 +80,10 @@ def mean_average_precision(
         - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.
 
         When `hierarchical_by` is used, additional columns are included:
-        - `stage1_p_value`: Group-level p-value from Stage 1 (Simes' aggregation).
+        - `stage1_p_value`: Group-level p-value from Stage 1 (minimum p-value).
         - `stage1_corrected_p_value`: BH-corrected Stage 1 p-value.
         - `stage1_significant`: Whether the group passed Stage 1.
 
-    References
-    ----------
-    Yekutieli, D. (2008). "Hierarchical false discovery rate-controlling methodology."
-    Journal of the American Statistical Association, 103(481):309-316.
     """
     # Filter out invalid or incomplete AP scores
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
@@ -195,9 +163,10 @@ def mean_average_precision(
 
         logger.info("Applying hierarchical FDR correction...")
 
-        # Stage 1: Aggregate p-values to group level using Simes' method
+        # Stage 1: Aggregate p-values to group level using minimum p-value
+        # Min-p is appropriate for dose-response where only high doses are expected to be active
         stage1_pvals = map_scores.groupby(hierarchical_by, observed=True).agg(
-            {"p_value": simes_pvalue}
+            {"p_value": "min"}
         )
         stage1_pvals.columns = ["stage1_p_value"]
 

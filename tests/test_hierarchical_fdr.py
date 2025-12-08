@@ -4,40 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from copairs.map.map import simes_pvalue, mean_average_precision
-
-
-class TestSimesPvalue:
-    """Tests for Simes' p-value combination method."""
-
-    def test_single_pvalue(self):
-        """Single p-value should be returned as-is."""
-        assert simes_pvalue(np.array([0.05])) == 0.05
-
-    def test_empty_pvalues(self):
-        """Empty array should return 1.0."""
-        assert simes_pvalue(np.array([])) == 1.0
-
-    def test_all_significant(self):
-        """All small p-values should give small combined p-value."""
-        pvals = np.array([0.001, 0.002, 0.003])
-        combined = simes_pvalue(pvals)
-        # Simes: min(n * p_(i) / i) = min(3*0.001/1, 3*0.002/2, 3*0.003/3)
-        #                           = min(0.003, 0.003, 0.003) = 0.003
-        assert np.isclose(combined, 0.003)
-
-    def test_one_significant(self):
-        """One small p-value among large ones."""
-        pvals = np.array([0.01, 0.5, 0.9])
-        combined = simes_pvalue(pvals)
-        # Simes: min(3*0.01/1, 3*0.5/2, 3*0.9/3) = min(0.03, 0.75, 0.9) = 0.03
-        assert np.isclose(combined, 0.03)
-
-    def test_all_nonsignificant(self):
-        """All large p-values should give large combined p-value."""
-        pvals = np.array([0.5, 0.6, 0.7])
-        combined = simes_pvalue(pvals)
-        assert combined > 0.4  # Should be relatively large
+from copairs.map.map import mean_average_precision
 
 
 class TestHierarchicalFDR:
