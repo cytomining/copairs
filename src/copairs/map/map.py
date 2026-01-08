@@ -231,6 +231,5 @@ def silent_thread_map(fn, *iterables, **kwargs):
     kwargs = kwargs.copy()
     max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
     chunksize = kwargs.pop("chunksize", 1)
-    kwargs.pop("leave", None)  # Remove tqdm-specific kwarg
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
