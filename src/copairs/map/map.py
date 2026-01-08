@@ -201,6 +201,8 @@ def mean_average_precision(
     if hierarchical_by is None:
         map_scores = apply_fdr_correction(map_scores)
     else:
+        # Includes stage1_* columns for transparency. Could drop these in future
+        # for cleaner output (only corrected_p_value is needed downstream).
         map_scores = apply_hierarchical_fdr_correction(
             map_scores, hierarchical_by, sameby
         )
