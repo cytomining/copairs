@@ -8,11 +8,112 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
-from statsmodels.stats.multitest import multipletests
 
 from copairs import compute
 
+from .hierarchical_fdr import apply_fdr_correction, apply_hierarchical_fdr
+
 logger = logging.getLogger("copairs")
+
+
+def get_map_pvalue(
+    ap_scores: pd.DataFrame,
+    sameby: List[str],
+    null_size: int,
+    seed: int,
+    progress_bar: bool = True,
+    max_workers: Optional[int] = None,
+    cache_dir: Optional[Union[str, Path]] = None,
+) -> pd.DataFrame:
+    """Compute mAP scores and p-values from AP scores.
+
+    This function groups AP scores by the specified columns, computes the mean
+    Average Precision (mAP) for each group, and calculates p-values by comparing
+    against null distributions.
+
+    Parameters
+    ----------
+    ap_scores : pd.DataFrame
+        DataFrame containing individual Average Precision (AP) scores and pair statistics
+        (e.g., number of positive pairs `n_pos_pairs` and total pairs `n_total_pairs`).
+    sameby : list or str
+        Metadata column(s) used to group profiles for mAP calculation.
+    null_size : int
+        Number of samples in the null distribution for significance testing.
+    seed : int
+        Random seed for reproducibility.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
+    max_workers : int
+        Number of workers used. Default defined by tqdm's `thread_map`.
+    cache_dir : str or Path
+        Location to save the cache.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with the following columns:
+        - Columns from `sameby` (group identifiers).
+        - `mean_average_precision`: Mean AP score for each group.
+        - `mean_normalized_average_precision`: Mean normalized AP score (scale-independent).
+        - `p_value`: p-value comparing mAP to the null distribution.
+        - `indices`: List of indices in the original ap_scores for this group.
+
+    """
+    # Filter out invalid or incomplete AP scores
+    ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
+    ap_scores = ap_scores.reset_index(drop=True).copy()
+
+    logger.info("Computing null_dist...")
+    # Extract configurations for null distribution generation
+    null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
+    null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
+
+    # Generate null distributions for each unique configuration
+    null_dists = compute.get_null_dists(
+        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
+    )
+    ap_scores["null_ix"] = rev_ix
+
+    # Function to calculate the p-value for a mAP score based on the null distribution
+    def get_p_value(params):
+        map_score, indices = params
+        null_dist = null_dists[rev_ix[indices]].mean(axis=0)
+        num = (null_dist > map_score).sum()
+        p_value = (num + 1) / (null_size + 1)  # Add 1 for stability
+        return p_value
+
+    logger.info("Computing p-values...")
+
+    # Group by the specified metadata column(s) and calculate mean AP
+    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
+        {
+            "average_precision": ["mean", lambda x: list(x.index)],
+            "normalized_average_precision": "mean",
+        }
+    )
+    map_scores.columns = sameby + [
+        "mean_average_precision",
+        "indices",
+        "mean_normalized_average_precision",
+    ]
+
+    # Compute p-values for each group using the null distributions
+    params = map_scores[["mean_average_precision", "indices"]]
+
+    if progress_bar:
+        from tqdm.contrib.concurrent import thread_map
+
+        p_values = thread_map(
+            get_p_value, params.values, leave=False, max_workers=max_workers
+        )
+    else:
+        p_values = silent_thread_map(
+            get_p_value, params.values, max_workers=max_workers
+        )
+    map_scores["p_value"] = p_values
+
+    return map_scores
 
 
 def mean_average_precision(
@@ -85,124 +186,24 @@ def mean_average_precision(
         - `stage1_significant`: Whether the group passed Stage 1.
 
     """
-    # Filter out invalid or incomplete AP scores
-    ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
-    ap_scores = ap_scores.reset_index(drop=True).copy()
-
-    logger.info("Computing null_dist...")
-    # Extract configurations for null distribution generation
-    null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
-    null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
-
-    # Generate null distributions for each unique configuration
-    null_dists = compute.get_null_dists(
-        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
+    # Step 1: Compute mAP scores and p-values
+    map_scores = get_map_pvalue(
+        ap_scores=ap_scores,
+        sameby=sameby,
+        null_size=null_size,
+        seed=seed,
+        progress_bar=progress_bar,
+        max_workers=max_workers,
+        cache_dir=cache_dir,
     )
-    ap_scores["null_ix"] = rev_ix
 
-    # Function to calculate the p-value for a mAP score based on the null distribution
-    def get_p_value(params):
-        map_score, indices = params
-        null_dist = null_dists[rev_ix[indices]].mean(axis=0)
-        num = (null_dist > map_score).sum()
-        p_value = (num + 1) / (null_size + 1)  # Add 1 for stability
-        return p_value
-
-    logger.info("Computing p-values...")
-
-    # Group by the specified metadata column(s) and calculate mean AP
-    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
-        {
-            "average_precision": ["mean", lambda x: list(x.index)],
-            "normalized_average_precision": "mean",
-        }
-    )
-    map_scores.columns = sameby + [
-        "mean_average_precision",
-        "indices",
-        "mean_normalized_average_precision",
-    ]
-
-    # Compute p-values for each group using the null distributions
-    params = map_scores[["mean_average_precision", "indices"]]
-
-    if progress_bar:
-        from tqdm.contrib.concurrent import thread_map
-
-        p_values = thread_map(
-            get_p_value, params.values, leave=False, max_workers=max_workers
-        )
-    else:
-        p_values = silent_thread_map(
-            get_p_value, params.values, max_workers=max_workers
-        )
-    map_scores["p_value"] = p_values
-
-    # Perform multiple testing correction on p-values
+    # Step 2: Apply multiple testing correction
     if hierarchical_by is None:
-        # Standard BH correction across all tests
-        reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
-            map_scores["p_value"], method="fdr_bh"
-        )
-        map_scores["corrected_p_value"] = pvals_corrected
+        map_scores = apply_fdr_correction(map_scores)
     else:
-        # Hierarchical FDR correction (Yekutieli 2008)
-        # Validate that hierarchical_by is a subset of sameby
-        if not set(hierarchical_by).issubset(set(sameby)):
-            raise ValueError(
-                f"hierarchical_by columns {hierarchical_by} must be a subset of "
-                f"sameby columns {sameby}"
-            )
+        map_scores = apply_hierarchical_fdr(map_scores, hierarchical_by, sameby)
 
-        if set(hierarchical_by) == set(sameby):
-            raise ValueError(
-                f"hierarchical_by columns {hierarchical_by} must be a proper subset of "
-                f"sameby columns {sameby}. If they are equal, use standard correction "
-                f"by not specifying hierarchical_by."
-            )
-
-        logger.info("Applying hierarchical FDR correction...")
-
-        # Stage 1: Aggregate p-values to group level using minimum p-value
-        # Min-p is appropriate for dose-response where only high doses are expected to be active
-        stage1_pvals = map_scores.groupby(hierarchical_by, observed=True).agg(
-            {"p_value": "min"}
-        )
-        stage1_pvals.columns = ["stage1_p_value"]
-
-        # Apply BH correction at the group level
-        reject_stage1, stage1_corrected, _, _ = multipletests(
-            stage1_pvals["stage1_p_value"], method="fdr_bh"
-        )
-        stage1_pvals["stage1_corrected_p_value"] = stage1_corrected
-        stage1_pvals["stage1_significant"] = reject_stage1
-
-        # Merge Stage 1 results back to map_scores
-        map_scores = map_scores.merge(
-            stage1_pvals.reset_index(), on=hierarchical_by, how="left"
-        )
-
-        # Stage 2: For groups that passed Stage 1, apply BH within each group
-        # For groups that didn't pass, set corrected_p_value to 1.0
-        map_scores["corrected_p_value"] = 1.0
-
-        for group_key, group_df in map_scores.groupby(hierarchical_by, observed=True):
-            if not group_df["stage1_significant"].iloc[0]:
-                # Group didn't pass Stage 1, skip
-                continue
-
-            group_indices = group_df.index
-            group_pvals = group_df["p_value"].values
-
-            if len(group_pvals) == 1:
-                # Single test in group, no additional correction needed
-                map_scores.loc[group_indices, "corrected_p_value"] = group_pvals[0]
-            else:
-                # Apply BH correction within the group
-                _, group_corrected, _, _ = multipletests(group_pvals, method="fdr_bh")
-                map_scores.loc[group_indices, "corrected_p_value"] = group_corrected
-
-    # Mark scores below the p-value threshold
+    # Step 3: Mark scores below the p-value threshold
     map_scores["below_p"] = map_scores["p_value"] < threshold
     map_scores["below_corrected_p"] = map_scores["corrected_p_value"] < threshold
 

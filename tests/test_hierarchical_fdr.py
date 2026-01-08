@@ -158,7 +158,14 @@ class TestHierarchicalFDR:
         # Hierarchical should generally find more or equal significant results
         # (less over-correction for related hypotheses)
         # Note: This is a probabilistic test, but with our setup it should hold
-        assert n_sig_hier >= n_sig_flat * 0.8  # Allow some tolerance
+        # Lower bound: hierarchical shouldn't be much worse than flat
+        assert n_sig_hier >= n_sig_flat * 0.8, (
+            f"Hierarchical found too few: {n_sig_hier} vs flat {n_sig_flat}"
+        )
+        # Upper bound: sanity check that hierarchical isn't wildly broken
+        assert n_sig_hier <= len(result_hier), (
+            f"Hierarchical found more than total tests: {n_sig_hier}"
+        )
 
     def test_hierarchical_stage1_groups_correctly(self, sample_ap_scores):
         """Stage 1 should have one p-value per compound."""

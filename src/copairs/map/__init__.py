@@ -1,7 +1,15 @@
 """Module to compute mAP-based metrics."""
 
 from . import multilabel
-from .map import mean_average_precision
+from .map import get_map_pvalue, mean_average_precision
+from .hierarchical_fdr import apply_fdr_correction, apply_hierarchical_fdr
 from .average_precision import average_precision
 
-__all__ = ["mean_average_precision", "multilabel", "average_precision"]
+__all__ = [
+    "mean_average_precision",
+    "get_map_pvalue",
+    "apply_fdr_correction",
+    "apply_hierarchical_fdr",
+    "multilabel",
+    "average_precision",
+]
