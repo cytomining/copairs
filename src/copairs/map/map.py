@@ -108,12 +108,15 @@ def mean_average_precision(
 
     if progress_bar:
         from tqdm.contrib.concurrent import thread_map
-    else:
-        thread_map = silent_thread_map
 
-    map_scores["p_value"] = thread_map(
-        get_p_value, params.values, leave=False, max_workers=max_workers
-    )
+        p_values = thread_map(
+            get_p_value, params.values, leave=False, max_workers=max_workers
+        )
+    else:
+        p_values = silent_thread_map(
+            get_p_value, params.values, max_workers=max_workers
+        )
+    map_scores["p_value"] = p_values
 
     # Perform multiple testing correction on p-values
     reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(

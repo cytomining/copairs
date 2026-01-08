@@ -151,3 +151,30 @@ def test_mean_average_precision_with_normalization():
             result["treatment"] == treatment, "mean_normalized_average_precision"
         ].values[0]
         assert abs(actual_norm_map - expected_norm_map) < 0.001
+
+
+def test_mean_average_precision_no_progress_bar():
+    """Test that mean_average_precision works with progress_bar=False."""
+    from copairs.map.map import mean_average_precision
+
+    ap_scores = pd.DataFrame(
+        {
+            "treatment": ["A", "A", "B", "B"],
+            "average_precision": [0.8, 0.7, 0.6, 0.5],
+            "normalized_average_precision": [0.6, 0.5, 0.4, 0.3],
+            "n_pos_pairs": [10, 10, 8, 8],
+            "n_total_pairs": [50, 50, 40, 40],
+        }
+    )
+
+    # This should not raise TypeError about 'leave' argument
+    result = mean_average_precision(
+        ap_scores=ap_scores,
+        sameby=["treatment"],
+        null_size=100,
+        threshold=0.05,
+        seed=42,
+        progress_bar=False,
+    )
+
+    assert len(result) == 2
