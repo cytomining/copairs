@@ -9,7 +9,7 @@ from statsmodels.stats.multitest import multipletests
 logger = logging.getLogger("copairs")
 
 
-def apply_hierarchical_fdr(
+def apply_hierarchical_fdr_correction(
     map_scores: pd.DataFrame,
     hierarchical_by: List[str],
     sameby: List[str],
