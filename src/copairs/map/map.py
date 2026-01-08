@@ -108,12 +108,15 @@ def mean_average_precision(
 
     if progress_bar:
         from tqdm.contrib.concurrent import thread_map
-    else:
-        thread_map = silent_thread_map
 
-    map_scores["p_value"] = thread_map(
-        get_p_value, params.values, leave=False, max_workers=max_workers
-    )
+        p_values = thread_map(
+            get_p_value, params.values, leave=False, max_workers=max_workers
+        )
+    else:
+        p_values = silent_thread_map(
+            get_p_value, params.values, max_workers=max_workers
+        )
+    map_scores["p_value"] = p_values
 
     # Perform multiple testing correction on p-values
     reject, pvals_corrected, alphacSidak, alphacBonf = multipletests(
@@ -150,6 +153,5 @@ def silent_thread_map(fn, *iterables, **kwargs):
     kwargs = kwargs.copy()
     max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
     chunksize = kwargs.pop("chunksize", 1)
-    kwargs.pop("leave", None)  # tqdm-specific arg, not used by ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
