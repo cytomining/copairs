@@ -201,7 +201,9 @@ def mean_average_precision(
     if hierarchical_by is None:
         map_scores = apply_fdr_correction(map_scores)
     else:
-        map_scores = apply_hierarchical_fdr_correction(map_scores, hierarchical_by, sameby)
+        map_scores = apply_hierarchical_fdr_correction(
+            map_scores, hierarchical_by, sameby
+        )
 
     # Step 3: Mark scores below the p-value threshold
     map_scores["below_p"] = map_scores["p_value"] < threshold
