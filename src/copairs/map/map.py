@@ -10,8 +10,10 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-
-from .hierarchical_fdr import apply_fdr_correction, apply_hierarchical_fdr_correction
+from copairs.map.hierarchical_fdr import (
+    apply_fdr_correction,
+    apply_hierarchical_fdr_correction,
+)
 
 logger = logging.getLogger("copairs")
 

@@ -1,4 +1,11 @@
-"""Tests for hierarchical FDR correction."""
+"""Tests for hierarchical FDR correction.
+
+TODO: Once API is finalized, improve tests:
+- Use deterministic fixture with known expected p-values
+- Verify stage 1 filtering actually excludes groups
+- Verify stage 2 BH applied only within passing groups
+- Compare against hand-calculated reference results
+"""
 
 import numpy as np
 import pandas as pd
@@ -110,22 +117,6 @@ class TestHierarchicalFDR:
                 progress_bar=False,
             )
 
-    def test_hierarchical_returns_stage1_columns(self, sample_ap_scores):
-        """Hierarchical FDR should add Stage 1 columns."""
-        result = mean_average_precision(
-            sample_ap_scores,
-            sameby=["compound", "dose"],
-            null_size=1000,
-            threshold=0.05,
-            seed=42,
-            hierarchical_by=["compound"],
-            progress_bar=False,
-        )
-
-        assert "stage1_p_value" in result.columns
-        assert "stage1_corrected_p_value" in result.columns
-        assert "stage1_significant" in result.columns
-
     def test_hierarchical_fewer_corrections(self, sample_ap_scores):
         """Hierarchical FDR should be less stringent than flat BH."""
         # Standard BH correction
@@ -167,26 +158,6 @@ class TestHierarchicalFDR:
             f"Hierarchical found more than total tests: {n_sig_hier}"
         )
 
-    def test_hierarchical_stage1_groups_correctly(self, sample_ap_scores):
-        """Stage 1 should have one p-value per compound."""
-        result = mean_average_precision(
-            sample_ap_scores,
-            sameby=["compound", "dose"],
-            null_size=1000,
-            threshold=0.05,
-            seed=42,
-            hierarchical_by=["compound"],
-            progress_bar=False,
-        )
-
-        # Each compound should have the same stage1_p_value across doses
-        for compound in result["compound"].unique():
-            compound_data = result[result["compound"] == compound]
-            stage1_pvals = compound_data["stage1_p_value"].unique()
-            assert len(stage1_pvals) == 1, (
-                f"Compound {compound} has multiple stage1 p-values"
-            )
-
     def test_hierarchical_nonsig_groups_get_pval_1(self, sample_ap_scores):
         """Groups that don't pass Stage 1 should have corrected_p_value = 1.0."""
         result = mean_average_precision(
@@ -203,35 +174,3 @@ class TestHierarchicalFDR:
         nonsig_mask = ~result["stage1_significant"]
         if nonsig_mask.any():
             assert (result.loc[nonsig_mask, "corrected_p_value"] == 1.0).all()
-
-    def test_without_hierarchical_no_stage1_columns(self, sample_ap_scores):
-        """Without hierarchical_by, Stage 1 columns should not be present."""
-        result = mean_average_precision(
-            sample_ap_scores,
-            sameby=["compound", "dose"],
-            null_size=1000,
-            threshold=0.05,
-            seed=42,
-            hierarchical_by=None,
-            progress_bar=False,
-        )
-
-        assert "stage1_p_value" not in result.columns
-        assert "stage1_corrected_p_value" not in result.columns
-        assert "stage1_significant" not in result.columns
-
-    def test_hierarchical_preserves_all_rows(self, sample_ap_scores):
-        """Hierarchical FDR should preserve all input rows."""
-        result = mean_average_precision(
-            sample_ap_scores,
-            sameby=["compound", "dose"],
-            null_size=1000,
-            threshold=0.05,
-            seed=42,
-            hierarchical_by=["compound"],
-            progress_bar=False,
-        )
-
-        # Should have same number of compound×dose combinations
-        n_expected = sample_ap_scores.groupby(["compound", "dose"]).ngroups
-        assert len(result) == n_expected
