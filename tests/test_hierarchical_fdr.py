@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from copairs.map.map import mean_average_precision
+from copairs.map.map import mean_average_precision, mean_average_precision_hierarchical
 
 
 class TestHierarchicalFDR:
@@ -94,26 +94,26 @@ class TestHierarchicalFDR:
     def test_hierarchical_by_validation_not_subset(self, sample_ap_scores):
         """hierarchical_by must be subset of sameby."""
         with pytest.raises(ValueError, match="must be a subset of"):
-            mean_average_precision(
+            mean_average_precision_hierarchical(
                 sample_ap_scores,
                 sameby=["compound", "dose"],
+                hierarchical_by=["other_column"],
                 null_size=100,
                 threshold=0.05,
                 seed=42,
-                hierarchical_by=["other_column"],
                 progress_bar=False,
             )
 
     def test_hierarchical_by_validation_equal_to_sameby(self, sample_ap_scores):
         """hierarchical_by must be proper subset of sameby."""
         with pytest.raises(ValueError, match="must be a proper subset"):
-            mean_average_precision(
+            mean_average_precision_hierarchical(
                 sample_ap_scores,
                 sameby=["compound"],
+                hierarchical_by=["compound"],
                 null_size=100,
                 threshold=0.05,
                 seed=42,
-                hierarchical_by=["compound"],
                 progress_bar=False,
             )
 
@@ -126,18 +126,17 @@ class TestHierarchicalFDR:
             null_size=1000,
             threshold=0.05,
             seed=42,
-            hierarchical_by=None,
             progress_bar=False,
         )
 
         # Hierarchical correction
-        result_hier = mean_average_precision(
+        result_hier = mean_average_precision_hierarchical(
             sample_ap_scores,
             sameby=["compound", "dose"],
+            hierarchical_by=["compound"],
             null_size=1000,
             threshold=0.05,
             seed=42,
-            hierarchical_by=["compound"],
             progress_bar=False,
         )
 
@@ -160,13 +159,13 @@ class TestHierarchicalFDR:
 
     def test_hierarchical_nonsig_groups_get_pval_1(self, sample_ap_scores):
         """Groups that don't pass Stage 1 should have corrected_p_value = 1.0."""
-        result = mean_average_precision(
+        result = mean_average_precision_hierarchical(
             sample_ap_scores,
             sameby=["compound", "dose"],
+            hierarchical_by=["compound"],
             null_size=1000,
             threshold=0.05,
             seed=42,
-            hierarchical_by=["compound"],
             progress_bar=False,
         )
 

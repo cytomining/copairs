@@ -127,14 +127,13 @@ def mean_average_precision(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
-    hierarchical_by: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
     This function computes the Mean Average Precision (mAP) score by grouping profiles
     based on the specified criteria (`sameby`). It calculates the significance of mAP
     scores by comparing them to a null distribution and performs multiple testing
-    corrections.
+    corrections using Benjamini-Hochberg FDR.
 
     Parameters
     ----------
@@ -155,21 +154,6 @@ def mean_average_precision(
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
         Location to save the cache.
-    hierarchical_by : list, optional
-        Metadata column(s) for hierarchical FDR correction. When specified, enables
-        two-stage testing:
-
-        - Stage 1: Use minimum p-value within each group defined by `hierarchical_by`,
-          then apply BH correction at the group level. A group passes if any member
-          is significant.
-        - Stage 2: For groups that pass Stage 1, apply BH correction to the
-          individual tests within each group.
-
-        This is designed for dose-response data where only high doses are expected
-        to be active. The `hierarchical_by` columns must be a subset of `sameby`.
-        For example, with `sameby=['compound', 'dose']` and `hierarchical_by=['compound']`,
-        mAP is calculated per compound×dose, but FDR correction accounts for the
-        grouped structure.
 
     Returns
     -------
@@ -182,10 +166,9 @@ def mean_average_precision(
         - `below_p`: Boolean indicating if the p-value is below the threshold.
         - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.
 
-        When `hierarchical_by` is used, additional columns are included:
-        - `stage1_p_value`: Group-level p-value from Stage 1 (minimum p-value).
-        - `stage1_corrected_p_value`: BH-corrected Stage 1 p-value.
-        - `stage1_significant`: Whether the group passed Stage 1.
+    See Also
+    --------
+    mean_average_precision_hierarchical : For hierarchical FDR correction with grouped data.
 
     """
     # Step 1: Compute mAP scores and p-values
@@ -200,14 +183,100 @@ def mean_average_precision(
     )
 
     # Step 2: Apply multiple testing correction
-    if hierarchical_by is None:
-        map_scores = apply_fdr_correction(map_scores)
-    else:
-        # Includes stage1_* columns for transparency. Could drop these in future
-        # for cleaner output (only corrected_p_value is needed downstream).
-        map_scores = apply_hierarchical_fdr_correction(
-            map_scores, hierarchical_by, sameby
-        )
+    map_scores = apply_fdr_correction(map_scores)
+
+    # Step 3: Mark scores below the p-value threshold
+    map_scores["below_p"] = map_scores["p_value"] < threshold
+    map_scores["below_corrected_p"] = map_scores["corrected_p_value"] < threshold
+
+    return map_scores
+
+
+def mean_average_precision_hierarchical(
+    ap_scores: pd.DataFrame,
+    sameby: List[str],
+    hierarchical_by: List[str],
+    null_size: int,
+    threshold: float,
+    seed: int,
+    progress_bar: bool = True,
+    max_workers: Optional[int] = None,
+    cache_dir: Optional[Union[str, Path]] = None,
+) -> pd.DataFrame:
+    """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
+
+    This function computes the Mean Average Precision (mAP) score by grouping profiles
+    based on the specified criteria (`sameby`). It applies hierarchical FDR correction
+    appropriate for grouped hypothesis testing, such as dose-response data.
+
+    Parameters
+    ----------
+    ap_scores : pd.DataFrame
+        DataFrame containing individual Average Precision (AP) scores and pair statistics
+        (e.g., number of positive pairs `n_pos_pairs` and total pairs `n_total_pairs`).
+    sameby : list or str
+        Metadata column(s) used to group profiles for mAP calculation.
+    hierarchical_by : list
+        Metadata column(s) for hierarchical FDR correction. Enables two-stage testing:
+
+        - Stage 1: Use minimum p-value within each group defined by `hierarchical_by`,
+          then apply BH correction at the group level. A group passes if any member
+          is significant.
+        - Stage 2: For groups that pass Stage 1, apply BH correction to the
+          individual tests within each group.
+
+        This is designed for dose-response data where only high doses are expected
+        to be active. The `hierarchical_by` columns must be a proper subset of `sameby`.
+        For example, with `sameby=['compound', 'dose']` and `hierarchical_by=['compound']`,
+        mAP is calculated per compound×dose, but FDR correction accounts for the
+        grouped structure.
+    null_size : int
+        Number of samples in the null distribution for significance testing.
+    threshold : float
+        p-value threshold for identifying significant MaP scores.
+    seed : int
+        Random seed for reproducibility.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
+    max_workers : int
+        Number of workers used. Default defined by tqdm's `thread_map`.
+    cache_dir : str or Path
+        Location to save the cache.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with the following columns:
+        - `mean_average_precision`: Mean AP score for each group.
+        - `mean_normalized_average_precision`: Mean normalized AP score (scale-independent).
+        - `p_value`: p-value comparing mAP to the null distribution.
+        - `corrected_p_value`: Adjusted p-value after multiple testing correction.
+        - `below_p`: Boolean indicating if the p-value is below the threshold.
+        - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.
+        - `stage1_p_value`: Group-level p-value from Stage 1 (minimum p-value).
+        - `stage1_corrected_p_value`: BH-corrected Stage 1 p-value.
+        - `stage1_significant`: Whether the group passed Stage 1.
+
+    See Also
+    --------
+    mean_average_precision : For standard BH FDR correction.
+
+    """
+    # Step 1: Compute mAP scores and p-values
+    map_scores = get_map_pvalue(
+        ap_scores=ap_scores,
+        sameby=sameby,
+        null_size=null_size,
+        seed=seed,
+        progress_bar=progress_bar,
+        max_workers=max_workers,
+        cache_dir=cache_dir,
+    )
+
+    # Step 2: Apply hierarchical multiple testing correction
+    # Includes stage1_* columns for transparency. Could drop these in future
+    # for cleaner output (only corrected_p_value is needed downstream).
+    map_scores = apply_hierarchical_fdr_correction(map_scores, hierarchical_by, sameby)
 
     # Step 3: Mark scores below the p-value threshold
     map_scores["below_p"] = map_scores["p_value"] < threshold
