@@ -195,10 +195,10 @@ def mean_average_precision(
 def mean_average_precision_hierarchical(
     ap_scores: pd.DataFrame,
     sameby: List[str],
-    hierarchical_by: List[str],
     null_size: int,
     threshold: float,
     seed: int,
+    hierarchical_by: List[str],
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
@@ -216,6 +216,12 @@ def mean_average_precision_hierarchical(
         (e.g., number of positive pairs `n_pos_pairs` and total pairs `n_total_pairs`).
     sameby : list or str
         Metadata column(s) used to group profiles for mAP calculation.
+    null_size : int
+        Number of samples in the null distribution for significance testing.
+    threshold : float
+        p-value threshold for identifying significant MaP scores.
+    seed : int
+        Random seed for reproducibility.
     hierarchical_by : list
         Metadata column(s) for hierarchical FDR correction. Enables two-stage testing:
 
@@ -230,12 +236,6 @@ def mean_average_precision_hierarchical(
         For example, with `sameby=['compound', 'dose']` and `hierarchical_by=['compound']`,
         mAP is calculated per compound×dose, but FDR correction accounts for the
         grouped structure.
-    null_size : int
-        Number of samples in the null distribution for significance testing.
-    threshold : float
-        p-value threshold for identifying significant MaP scores.
-    seed : int
-        Random seed for reproducibility.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
