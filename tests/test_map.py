@@ -6,7 +6,7 @@ import pytest
 from sklearn.metrics import average_precision_score
 
 from copairs import compute
-from copairs.map import average_precision
+from copairs.map import average_precision, median_average_precision
 from tests.helpers import simulate_random_dframe
 from copairs.matching import UnpairedException
 from copairs.map.multilabel import average_precision as multilabel_average_precision
@@ -263,3 +263,51 @@ def test_multilabel_has_normalized_ap():
     )
 
     assert "normalized_average_precision" in result.columns
+
+
+@pytest.mark.parametrize("progress_bar", [True, False])
+def test_median_average_precision(progress_bar: bool):
+    """Test the experimental median_average_precision function."""
+    length = 10
+    vocab_size = {"p": 5, "w": 3, "l": 4}
+    n_feats = 5
+    pos_sameby = ["l"]
+    pos_diffby = ["p"]
+    neg_sameby = []
+    neg_diffby = ["l"]
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(length, vocab_size, pos_sameby, pos_diffby, rng)
+    length = len(meta)
+    feats = rng.uniform(size=(length, n_feats))
+
+    ap_scores = average_precision(
+        meta,
+        feats,
+        pos_sameby,
+        pos_diffby,
+        neg_sameby,
+        neg_diffby,
+        progress_bar=progress_bar,
+    )
+
+    result = median_average_precision(
+        ap_scores,
+        sameby=pos_sameby,
+        null_size=100,
+        threshold=0.05,
+        seed=SEED,
+        progress_bar=progress_bar,
+    )
+
+    # Check expected columns exist
+    assert "median_average_precision" in result.columns
+    assert "median_normalized_average_precision" in result.columns
+    assert "p_value" in result.columns
+    assert "corrected_p_value" in result.columns
+    assert "below_p" in result.columns
+    assert "below_corrected_p" in result.columns
+
+    # Check values are in valid ranges
+    assert result["median_average_precision"].between(0, 1).all()
+    assert result["p_value"].between(0, 1).all()
+    assert result["corrected_p_value"].between(0, 1).all()
