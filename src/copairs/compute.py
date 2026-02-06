@@ -3,6 +3,7 @@
 import os
 import warnings
 import itertools
+from math import comb
 from typing import Tuple, Union, Callable, Optional
 from pathlib import Path
 from multiprocessing.pool import ThreadPool
@@ -460,6 +461,78 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     return null_dist
 
 
+def exact_ap(num_pos: int, total: int) -> np.ndarray:
+    """Compute exact null distribution by enumerating all possible rankings.
+
+    When the number of possible rankings is small, this computes the exact
+    null distribution instead of sampling.
+
+    Parameters
+    ----------
+    num_pos : int
+        Number of positive samples in each relevance list.
+    total : int
+        Total number of samples in each relevance list.
+
+    Returns
+    -------
+    np.ndarray
+        A 1D array containing the Average Precision scores for all possible
+        rankings of `num_pos` positives among `total` items.
+    """
+    n_combinations = comb(total, num_pos)
+
+    # Generate all combinations of positions for positives
+    # Each combination is a tuple of sorted indices where positives could appear
+    all_combinations = itertools.combinations(range(total), num_pos)
+
+    # Convert to array of shape (n_combinations, num_pos)
+    # Use fromiter with count for efficient preallocation, then reshape
+    dtype = np.uint16 if total < 2**16 else np.uint32
+    flat_iter = itertools.chain.from_iterable(all_combinations)
+    rel_k = np.fromiter(flat_iter, dtype=dtype, count=n_combinations * num_pos)
+    rel_k = rel_k.reshape(n_combinations, num_pos)
+
+    # Compute AP for each combination
+    return average_precision(rel_k)
+
+
+def _compute_null_dist(
+    num_pos: int, total: int, seed: int, null_size: int
+) -> np.ndarray:
+    """Compute null distribution, using exact method when feasible.
+
+    Parameters
+    ----------
+    num_pos : int
+        Number of positive pairs in the configuration.
+    total : int
+        Total number of pairs (positive + negative) in the configuration.
+    seed : int
+        Random seed for reproducibility.
+    null_size : int
+        Number of samples to generate in the null distribution.
+
+    Returns
+    -------
+    np.ndarray
+        Null distribution of shape (null_size,).
+    """
+    n_combinations = comb(total, num_pos)
+
+    if n_combinations <= null_size:
+        # Use exact computation - enumerate all possible rankings
+        exact_dist = exact_ap(num_pos, total)
+        # Tile to fill null_size for consistent interface
+        n_repeats = (null_size + n_combinations - 1) // n_combinations
+        null_dist = np.tile(exact_dist, n_repeats)[:null_size]
+    else:
+        # Use random sampling
+        null_dist = random_ap(null_size, num_pos, total, seed)
+
+    return null_dist
+
+
 def null_dist_cached(
     num_pos: int, total: int, seed: int, null_size: int, cache_dir: Path
 ) -> np.ndarray:
@@ -468,6 +541,10 @@ def null_dist_cached(
     This function calculates a null distribution for a specified number of positive
     pairs (`num_pos`) and total pairs (`total`). It uses caching to store and
     retrieve precomputed distributions, saving time and computational resources.
+
+    When the total number of possible rankings (C(total, num_pos)) is less than
+    or equal to null_size, the exact null distribution is computed by enumerating
+    all possible rankings instead of random sampling.
 
     Parameters
     ----------
@@ -504,19 +581,19 @@ def null_dist_cached(
                 cache_file.unlink(missing_ok=True)
 
                 # Compute the null distribution
-                null_dist = random_ap(null_size, num_pos, total, seed)
+                null_dist = _compute_null_dist(num_pos, total, seed, null_size)
 
                 # Save the new distribution to the cache
                 np.save(cache_file, null_dist)
         else:
             # If the cache file doesn't exist, compute the null distribution
-            null_dist = random_ap(null_size, num_pos, total, seed)
+            null_dist = _compute_null_dist(num_pos, total, seed, null_size)
 
             # Save the computed distribution to the cache
             np.save(cache_file, null_dist)
     else:
         # If no seed is provided, compute the null distribution without caching
-        null_dist = random_ap(null_size, num_pos, total, seed)
+        null_dist = _compute_null_dist(num_pos, total, seed, null_size)
 
     # Return the null distribution (loaded or computed)
     return null_dist
