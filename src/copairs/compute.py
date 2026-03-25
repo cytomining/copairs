@@ -460,6 +460,24 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     return null_dist
 
 
+def _atomic_save(path: Path, arr: np.ndarray) -> None:
+    """Save a numpy array atomically using write-to-temp + rename.
+
+    Prevents corruption when multiple parallel workers write the same cache file.
+    Uses os.replace which is atomic on POSIX when source and target are on the
+    same filesystem (guaranteed here since temp file is created in the same dir).
+    """
+    import tempfile
+
+    tmp = Path(tempfile.mktemp(dir=path.parent, suffix=".tmp.npy"))
+    try:
+        np.save(tmp, arr, allow_pickle=False)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def null_dist_cached(
     num_pos: int, total: int, seed: int, null_size: int, cache_dir: Path
 ) -> np.ndarray:
@@ -496,7 +514,7 @@ def null_dist_cached(
         if cache_file.is_file():
             try:
                 null_dist = np.load(cache_file)
-            except ValueError as e:
+            except (ValueError, EOFError, OSError) as e:
                 # Cache file is corrupted or incomplete, remove it and regenerate
                 warnings.warn(
                     f"Failed to load cache file {cache_file}: {e}. Regenerating..."
@@ -506,14 +524,14 @@ def null_dist_cached(
                 # Compute the null distribution
                 null_dist = random_ap(null_size, num_pos, total, seed)
 
-                # Save the new distribution to the cache
-                np.save(cache_file, null_dist)
+                # Atomic write to prevent corruption from parallel workers
+                _atomic_save(cache_file, null_dist)
         else:
             # If the cache file doesn't exist, compute the null distribution
             null_dist = random_ap(null_size, num_pos, total, seed)
 
-            # Save the computed distribution to the cache
-            np.save(cache_file, null_dist)
+            # Atomic write to prevent corruption from parallel workers
+            _atomic_save(cache_file, null_dist)
     else:
         # If no seed is provided, compute the null distribution without caching
         null_dist = random_ap(null_size, num_pos, total, seed)

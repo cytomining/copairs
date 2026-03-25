@@ -237,3 +237,36 @@ def test_null_dist_cached_corrupt():
         assert len(null_dist) == 100
         assert np.all(null_dist >= 0)
         assert np.all(null_dist <= 1)
+
+
+def _parallel_worker(args):
+    """Worker for parallel cache stress test."""
+    cache_dir, num_pos, total, seed, null_size = args
+    result = compute.null_dist_cached(num_pos, total, seed, null_size, Path(cache_dir))
+    # Read back to verify integrity
+    cache_file = Path(cache_dir) / f"n{total}_k{num_pos}.npy"
+    loaded = np.load(cache_file)
+    assert np.array_equal(result, loaded), "Cache read-back mismatch"
+    return result
+
+
+def test_null_dist_cached_parallel():
+    """Test that parallel workers don't corrupt the cache.
+
+    Spawns 16 workers all racing on the same cache key. Without atomic writes,
+    this reliably produces EOFError, ValueError, or silent data corruption.
+    """
+    from multiprocessing import Pool
+
+    num_pos, total, seed, null_size = 5, 100, 42, 100_000
+    n_workers = 16
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        args = [(tmpdir, num_pos, total, seed, null_size)] * n_workers
+
+        with Pool(n_workers) as pool:
+            results = pool.map(_parallel_worker, args)
+
+        # All workers should return identical results
+        for r in results:
+            assert np.array_equal(results[0], r)
