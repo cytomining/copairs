@@ -84,7 +84,7 @@ def build_rank_lists(
 
 def average_precision(
     meta: pd.DataFrame,
-    feats: pd.DataFrame,
+    feats: np.ndarray,
     pos_sameby: List[str],
     pos_diffby: List[str],
     neg_sameby: List[str],
