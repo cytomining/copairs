@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs.compute import compute_auc_pvalues
 from copairs.matching import UnpairedException, find_pairs
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
@@ -281,4 +282,47 @@ def p_values(
     pvals[mask] = compute.p_values(scores, null_confs, null_size, seed, progress_bar)
 
     # Return the array of p-values, including NaN for invalid profiles
+    return pvals
+
+
+def auc_p_values(dframe: pd.DataFrame) -> np.ndarray:
+    """Compute analytical p-values for ROC AUC scores based on Mann-Whitney U test.
+
+    This function calculates the analytical p-values for each profile in the input DataFrame,
+    using the Mann-Whitney U test (exact or asymptotic depending on sample size).
+
+    Parameters
+    ----------
+    dframe : pd.DataFrame
+        A DataFrame containing the following columns:
+        - `roc_auc`: The ROC AUC scores for each profile.
+        - `n_pos_pairs`: Number of positive pairs for each profile.
+        - `n_total_pairs`: Total number of pairs (positive + negative) for each profile.
+
+    Returns
+    -------
+    np.ndarray
+        An array of p-values for each profile in the DataFrame. Profiles with no positive
+        pairs will have NaN as their p-value.
+    """
+    # Create a mask to filter profiles with at least one positive pair
+    mask = dframe["n_pos_pairs"] > 0
+
+    # Initialize the p-values array with NaN for all profiles
+    pvals = np.full(len(dframe), np.nan, dtype=np.float32)
+
+    # Extract the AUC scores and configurations
+    valid_df = dframe.loc[mask]
+    auc_scores = valid_df["roc_auc"].values
+    n_pos = valid_df["n_pos_pairs"].values
+    n_total = valid_df["n_total_pairs"].values
+    n_neg = n_total - n_pos
+
+    # Convert AUC to U-statistic (number of correct pairs: pos > neg)
+    # auc = U_correct / (n_pos * n_neg) => U_correct = auc * n_pos * n_neg
+    u_scores = auc_scores * (n_pos * n_neg.astype(np.float64))
+
+    # Compute analytical p-values
+    pvals[mask] = compute_auc_pvalues(u_scores, n_pos, n_total)
+
     return pvals
