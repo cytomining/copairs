@@ -16,7 +16,6 @@ dependencies = [
   "tqdm",
   "statsmodels",
   "duckdb>=1.4.0",
-  "diskcache",
 ]
 
 [project.optional-dependencies]
