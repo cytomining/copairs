@@ -207,15 +207,18 @@ def test_null_dist_cached():
     with tempfile.TemporaryDirectory() as tmpdir:
         cache_dir = Path(tmpdir)
 
-        # Generate null distribution with caching
         null_dist = compute.null_dist_cached(
             num_pos=5, total=20, seed=42, null_size=100, cache_dir=cache_dir
         )
 
-        # Check it created a valid distribution
         assert len(null_dist) == 100
         assert np.all(null_dist >= 0)
         assert np.all(null_dist <= 1)
+
+        # Cache stores one .npy file per (total, num_pos) pair
+        npy_files = list(cache_dir.glob("*.npy"))
+        assert len(npy_files) == 1
+        assert npy_files[0].name == "n20_k5.npy"
 
 
 def test_null_dist_cached_hit():
@@ -227,6 +230,23 @@ def test_null_dist_cached_hit():
         first = compute.null_dist_cached(**kwargs)
         second = compute.null_dist_cached(**kwargs)
         assert np.array_equal(first, second)
+
+
+def test_null_dist_cached_corrupt():
+    """Test that a corrupted cache file is regenerated, not propagated."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cache_dir = Path(tmpdir)
+        path = cache_dir / "n20_k5.npy"
+
+        # Write garbage to simulate corruption
+        path.write_bytes(b"not a valid npy file")
+
+        null_dist = compute.null_dist_cached(
+            num_pos=5, total=20, seed=42, null_size=100, cache_dir=cache_dir
+        )
+        assert len(null_dist) == 100
+        assert np.all(null_dist >= 0)
+        assert np.all(null_dist <= 1)
 
 
 def _parallel_worker(args):

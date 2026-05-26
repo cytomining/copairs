@@ -1,13 +1,13 @@
 """Functions to compute distances and ranks using numpy operations."""
 
 import os
+import tempfile
 import itertools
 from typing import Tuple, Union, Callable, Optional
 from pathlib import Path
 from multiprocessing.pool import ThreadPool
 
 import numpy as np
-import diskcache
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
 
@@ -460,14 +460,42 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     return null_dist
 
 
+def _cache_read(path: Path) -> Optional[np.ndarray]:
+    """Read a cached .npy file, returning None on any corruption or absence."""
+    try:
+        return np.load(path)
+    except (FileNotFoundError, ValueError, EOFError, OSError):
+        return None
+
+
+def _cache_write(path: Path, arr: np.ndarray) -> None:
+    """Write a .npy file atomically via temp file + os.replace.
+
+    os.replace is atomic on POSIX (same filesystem), so concurrent readers
+    see either the old complete file or the new complete file, never a
+    partial write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".npy")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            np.save(f, arr)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def null_dist_cached(
     num_pos: int, total: int, seed: int, null_size: int, cache_dir: Path
 ) -> np.ndarray:
     """Generate or retrieve a cached null distribution for a given configuration.
 
-    This function calculates a null distribution for a specified number of positive
-    pairs (`num_pos`) and total pairs (`total`). It uses diskcache (SQLite-backed)
-    for process-safe concurrent caching.
+    Each (num_pos, total) pair is cached as an individual .npy file. Reads
+    are lock-free (just np.load), and writes use atomic rename to prevent
+    corruption from concurrent workers.
 
     Parameters
     ----------
@@ -490,12 +518,11 @@ def null_dist_cached(
     if seed is None:
         return random_ap(null_size, num_pos, total, seed)
 
-    key = f"n{total}_k{num_pos}"
-    with diskcache.Cache(str(cache_dir)) as cache:
-        null_dist = cache.get(key)
-        if null_dist is None:
-            null_dist = random_ap(null_size, num_pos, total, seed)
-            cache.set(key, null_dist)
+    path = cache_dir / f"n{total}_k{num_pos}.npy"
+    null_dist = _cache_read(path)
+    if null_dist is None:
+        null_dist = random_ap(null_size, num_pos, total, seed)
+        _cache_write(path, null_dist)
     return null_dist
 
 
@@ -526,32 +553,26 @@ def get_null_dists(
         A 2D array where each row corresponds to a null distribution for a specific
         configuration.
     """
-    # Define the directory for caching null distributions
     cache_dir = Path.home() / ".copairs" if cache_dir is None else Path(cache_dir)
     cache_dir = cache_dir / f"seed{seed}" / f"ns{null_size}"
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # Number of configurations and random seeds for each configuration
     num_confs = len(confs)
     rng = np.random.default_rng(seed)
     seeds = rng.integers(8096, size=num_confs)
 
-    # Initialize an array to store null distributions
     null_dists = np.empty([len(confs), null_size], dtype=np.float32)
 
-    # Open one shared cache for all threads
-    with diskcache.Cache(str(cache_dir)) as cache:
+    def par_func(i):
+        num_pos, total = confs[i]
+        path = cache_dir / f"n{total}_k{num_pos}.npy"
+        null_dist = _cache_read(path)
+        if null_dist is None:
+            null_dist = random_ap(null_size, num_pos, total, seeds[i])
+            _cache_write(path, null_dist)
+        null_dists[i] = null_dist
 
-        def par_func(i):
-            num_pos, total = confs[i]
-            key = f"n{total}_k{num_pos}"
-            null_dist = cache.get(key)
-            if null_dist is None:
-                null_dist = random_ap(null_size, num_pos, total, seeds[i])
-                cache.set(key, null_dist)
-            null_dists[i] = null_dist
-
-        # Parallelize the generation of null distributions
-        parallel_map(par_func, np.arange(num_confs), progress_bar)
+    parallel_map(par_func, np.arange(num_confs), progress_bar)
 
     return null_dists
 
