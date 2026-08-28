@@ -83,9 +83,9 @@ def normalize_ap(
     ap : float or np.ndarray
         The Average Precision score(s) to normalize.
     M : int or np.ndarray
-        Number of positive items for each AP score.
+        Number of positive items for each AP row. Arrays must be one-dimensional.
     N : int or np.ndarray
-        Number of negative items for each AP score.
+        Number of negative items for each AP row. Arrays must be one-dimensional.
     eps : float
         Small epsilon to avoid division by zero when μ₀ ≈ 1.
 
@@ -107,6 +107,9 @@ def normalize_ap(
     M = np.atleast_1d(M)
     N = np.atleast_1d(N)
 
+    if M.ndim != 1 or N.ndim != 1:
+        raise ValueError("M and N must be scalars or one-dimensional arrays")
+
     # Validate that all arrays have compatible lengths
     lengths = [
         len(ap),
@@ -118,12 +121,46 @@ def normalize_ap(
             f"Array lengths must match: ap={len(ap)}, M={len(M)}, N={len(N)}"
         )
 
-    # Compute expected AP for each configuration
-    mu0 = np.zeros_like(ap, dtype=float)
-    for i in range(len(ap)):
-        M_i = M[i] if len(M) > 1 else M[0]
-        N_i = N[i] if len(N) > 1 else N[0]
-        mu0[i] = expected_ap(int(M_i), int(N_i))
+    # Pair-count configurations commonly repeat across many profiles. Compute
+    # each expectation once, then restore the original row ordering.
+    m_values = M if len(M) > 1 else np.repeat(M, len(ap))
+    n_values = N if len(N) > 1 else np.repeat(N, len(ap))
+    configurations = np.column_stack((m_values, n_values)).astype(int)
+
+    totals = configurations[:, 0] + configurations[:, 1]
+    invalid = (totals < 1) | (configurations[:, 0] < 0) | (configurations[:, 1] < 0)
+    if np.any(invalid):
+        invalid_index = np.flatnonzero(invalid)[0]
+        invalid_m, invalid_n = configurations[invalid_index]
+        raise ValueError(f"Invalid inputs: M={invalid_m}, N={invalid_n}")
+
+    unique_configurations, inverse = np.unique(
+        configurations, axis=0, return_inverse=True
+    )
+    unique_m = unique_configurations[:, 0]
+    unique_totals = unique_m + unique_configurations[:, 1]
+    unique_mu0 = np.zeros(len(unique_configurations), dtype=float)
+
+    single_item = unique_totals == 1
+    unique_mu0[single_item] = unique_m[single_item] == 1
+    all_positive = unique_m == unique_totals
+    unique_mu0[all_positive] = 1.0
+
+    general = ~(single_item | (unique_m == 0) | all_positive)
+    general_totals = unique_totals[general]
+    harmonic_totals, harmonic_inverse = np.unique(general_totals, return_inverse=True)
+    harmonic_values = np.asarray(
+        [harmonic_number(int(total)) for total in harmonic_totals], dtype=float
+    )
+    harmonic = harmonic_values[harmonic_inverse]
+    general_m = unique_m[general]
+    unique_mu0[general] = (1.0 / general_totals) * (
+        ((general_m - 1.0) / (general_totals - 1.0)) * (general_totals - harmonic)
+        + harmonic
+    )
+    mu0 = unique_mu0[inverse]
+    # Each count configuration applies to one AP row and all trailing values.
+    mu0 = mu0.reshape((len(ap),) + (1,) * (ap.ndim - 1))
 
     # Normalize: (AP - μ₀) / (1 - μ₀)
     # Use eps to avoid division by zero when μ₀ ≈ 1
