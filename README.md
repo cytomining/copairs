@@ -5,7 +5,9 @@
 ## Getting started
 
 ### System requirements
-copairs supports Python 3.9 and newer (tested through Python 3.14) and should work with all modern operating systems (tested with MacOS 13.5, Ubuntu 18.04, Windows 10).
+copairs supports Python 3.10 and newer (tested through Python 3.14) and should work with all modern operating systems (tested with MacOS 13.5, Ubuntu 18.04, Windows 10).
+
+For Python 3.9, use the last compatible release: `pip install "copairs==0.5.5"`.
 
 ### Dependencies
 copairs depends on widely used Python packages:

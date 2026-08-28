@@ -17,7 +17,7 @@ cd copairs
 
 ### Without Nix
 
-Nix is optional. With Python 3.9 or newer and [uv](https://docs.astral.sh/uv/) installed, create the development environment and install [Prek](https://prek.j178.dev/), the portable hook runner:
+Nix is optional. With Python 3.10 or newer and [uv](https://docs.astral.sh/uv/) installed, create the development environment and install [Prek](https://prek.j178.dev/), the portable hook runner:
 
 ```bash
 uv sync --frozen --all-extras --dev
