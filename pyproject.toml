@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+numba = ["numba>=0.60"]
 dev = [
     "jupyter>=1.1.1",
     "pytest>=8.3.4",

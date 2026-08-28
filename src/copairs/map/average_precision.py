@@ -1,7 +1,7 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Literal
 
 import numpy as np
 import pandas as pd
@@ -92,6 +92,7 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
     progress_bar: bool = True,
+    backend: Literal["numpy", "numba"] = "numpy",
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -143,6 +144,15 @@ def average_precision(
     distance : str
         The distance function used for computing similarities. Default is "cosine".
 
+    progress_bar : bool
+        Whether to show progress bars for similarity computation.
+
+    backend : {"numpy", "numba"}
+        Backend for the exact built-in cosine distance. The default ``"numpy"``
+        has no optional dependencies. Install ``copairs[numba]`` to select
+        ``"numba"``. The Numba backend does not support other distances or
+        custom distance callables.
+
     Returns
     -------
     pd.DataFrame
@@ -167,6 +177,13 @@ def average_precision(
         * Negative pairs are defined by `neg_diffby` (profiles differ in these metadata values)
           and optionally constrained by `neg_sameby` (profiles share these metadata values if specified).
     """
+    if backend == "numba" and not (isinstance(distance, str) and distance == "cosine"):
+        raise ValueError(
+            "backend='numba' currently supports only distance='cosine'. "
+            "Use backend='numpy' for other distances or custom callables."
+        )
+    cosine_pairs_fn = compute._get_cosine_pairs_fn(backend)
+
     # Combine all metadata columns needed for pair definitions
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
 
@@ -203,7 +220,7 @@ def average_precision(
         normalized_feats = compute.prepare_cosine(feats, profile_ix)
 
         logger.info("Computing positive similarities...")
-        pos_sims = compute.cosine_pairs(
+        pos_sims = cosine_pairs_fn(
             normalized_feats,
             pos_pairs,
             batch_size,
@@ -211,7 +228,7 @@ def average_precision(
         )
 
         logger.info("Computing negative similarities...")
-        neg_sims = compute.cosine_pairs(
+        neg_sims = cosine_pairs_fn(
             normalized_feats,
             neg_pairs,
             batch_size,
