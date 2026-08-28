@@ -27,6 +27,15 @@ To also install dependencies for running examples, run:
 pip install copairs[demo]
 ```
 
+### Configuration
+
+For pandas DataFrame inputs, `matching.find_pairs` uses up to 8 DuckDB threads
+by default, respecting the process CPU affinity where supported. Set
+`COPAIRS_DUCKDB_THREADS` to a positive integer to override this worker count.
+DuckDB relation inputs run on the relation's own connection and retain that
+connection's thread configuration. The primary `find_pairs_multilabel` query uses
+its own connection and is outside this setting.
+
 ### Testing
 
 To run tests, run:

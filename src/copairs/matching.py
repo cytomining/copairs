@@ -1,5 +1,6 @@
 """Sample pairs with given column restrictions."""
 
+import os
 import re
 import logging
 import warnings
@@ -16,6 +17,31 @@ import pandas as pd
 logger = logging.getLogger("copairs")
 ColumnList = Union[Sequence[str], pd.Index]
 ColumnDict = Dict[str, ColumnList]
+
+
+def _duckdb_threads() -> int:
+    """Return the DuckDB worker count for pandas-backed pair queries."""
+    configured = os.environ.get("COPAIRS_DUCKDB_THREADS")
+    if configured is not None:
+        try:
+            threads = int(configured)
+        except ValueError as error:
+            raise ValueError(
+                "COPAIRS_DUCKDB_THREADS must be a positive integer"
+            ) from error
+        if threads < 1:
+            raise ValueError("COPAIRS_DUCKDB_THREADS must be a positive integer")
+        return threads
+
+    get_affinity = getattr(os, "sched_getaffinity", None)
+    if get_affinity is not None:
+        try:
+            available_cpus = len(get_affinity(0))
+        except OSError:
+            available_cpus = os.cpu_count() or 1
+    else:
+        available_cpus = os.cpu_count() or 1
+    return min(8, available_cpus or 1)
 
 
 def assign_reference_index(
@@ -489,7 +515,10 @@ def find_pairs(
 ) -> np.ndarray:
     """Find the indices pairs sharing values in `sameby` columns but not on `diffby` columns.
 
-    If `rev`  is True sameby and diffby are swapped.
+    Pandas inputs use a dedicated DuckDB connection with at most eight threads by
+    default. ``COPAIRS_DUCKDB_THREADS`` can override that limit. DuckDB relation
+    inputs instead execute on the relation's own connection and retain its thread
+    configuration. If `rev` is True sameby and diffby are swapped.
     """
     sameby, diffby = _validate(sameby, diffby)
 
@@ -499,23 +528,29 @@ def find_pairs(
     df = dframe
     if isinstance(df, pd.DataFrame):
         df = dframe.reset_index()
-    with duckdb.connect(":memory:"):
-        # If rev is True, diffby and sameby are swapped
-        group_1, group_2 = [
-            [f"{('', 'NOT')[i - rev]} A.{x} = B.{x}" for x in y]
-            for i, y in enumerate((sameby, diffby))
-        ]
-        string = (
-            f"SELECT A.index,B.index"
-            " FROM df A"
-            " JOIN df B"
-            " ON A.index < B.index"  #  Ensures only one of (a,b)/(b,a) and no (a,a)
-            f" AND {' AND '.join((*group_1, *group_2))}"
-        )
-        index_d = duckdb.sql(string).fetchnumpy()
 
-        result = np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
-        return result
+    # If rev is True, diffby and sameby are swapped
+    group_1, group_2 = [
+        [f"{('', 'NOT')[i - rev]} A.{x} = B.{x}" for x in y]
+        for i, y in enumerate((sameby, diffby))
+    ]
+    string = (
+        f"SELECT A.index,B.index"
+        " FROM df A"
+        " JOIN df B"
+        " ON A.index < B.index"  #  Ensures only one of (a,b)/(b,a) and no (a,a)
+        f" AND {' AND '.join((*group_1, *group_2))}"
+    )
+
+    if isinstance(df, duckdb.DuckDBPyRelation):
+        index_d = df.query("df", string).fetchnumpy()
+    else:
+        with duckdb.connect(
+            ":memory:", config={"threads": str(_duckdb_threads())}
+        ) as connection:
+            index_d = connection.sql(string).fetchnumpy()
+
+    return np.array((index_d["index"], index_d["index_1"]), dtype=np.uint32).T
 
 
 def _validate(sameby, diffby):
