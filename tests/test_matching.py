@@ -80,8 +80,9 @@ def _sorted_pairs(pairs):
 def test_find_pairs_pandas_relation_pair_set_parity(dframe, expected):
     """Pandas and DuckDB relation inputs retain identical pair sets."""
     pandas_result = find_pairs(dframe, ["same"], ["different"])
-    relation = duckdb.from_df(dframe.reset_index())
-    relation_result = find_pairs(relation, ["same"], ["different"])
+    with duckdb.connect(":memory:") as connection:
+        relation = connection.from_df(dframe.reset_index())
+        relation_result = find_pairs(relation, ["same"], ["different"])
 
     np.testing.assert_array_equal(_sorted_pairs(pandas_result), expected)
     np.testing.assert_array_equal(_sorted_pairs(relation_result), expected)
