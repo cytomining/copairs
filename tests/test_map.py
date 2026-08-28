@@ -291,9 +291,7 @@ def test_cosine_fast_path_exact_multilabel_parity_with_ties(dtype, layout):
         "batch_size": 2,
     }
 
-    generic = multilabel_average_precision(
-        distance=compute.pairwise_cosine, **kwargs
-    )
+    generic = multilabel_average_precision(distance=compute.pairwise_cosine, **kwargs)
     optimized = multilabel_average_precision(distance="cosine", **kwargs)
 
     pd.testing.assert_frame_equal(optimized, generic, check_exact=True)

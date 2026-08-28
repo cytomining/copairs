@@ -185,9 +185,9 @@ def prepare_cosine(feats: np.ndarray, profile_ix: np.ndarray) -> np.ndarray:
     # Advanced indexing gathers a C-order matrix, matching the generic batched
     # cosine path regardless of the source matrix's memory layout.
     referenced_feats = feats[profile_ix]
-    normalized_rows = referenced_feats / np.linalg.norm(
-        referenced_feats, axis=1
-    )[:, np.newaxis]
+    normalized_rows = (
+        referenced_feats / np.linalg.norm(referenced_feats, axis=1)[:, np.newaxis]
+    )
     normalized_feats = np.empty(feats.shape, dtype=normalized_rows.dtype)
     normalized_feats[profile_ix] = normalized_rows
     return normalized_feats

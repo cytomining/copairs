@@ -132,9 +132,7 @@ def test_cosine_pairs_exactly_match_generic_batches(dtype, layout):
         feats, pairs, batch_size=3
     )
     normalized = compute.prepare_cosine(feats, np.unique(pairs))
-    actual = compute.cosine_pairs(
-        normalized, pairs, batch_size=3, progress_bar=False
-    )
+    actual = compute.cosine_pairs(normalized, pairs, batch_size=3, progress_bar=False)
 
     assert actual.dtype == np.float32
     np.testing.assert_array_equal(actual, generic)
@@ -142,9 +140,7 @@ def test_cosine_pairs_exactly_match_generic_batches(dtype, layout):
 
 def test_prepare_cosine_skips_unreferenced_nonfinite_rows_under_strict_errstate():
     """Only pair-referenced profiles participate in normalization."""
-    feats = np.asarray(
-        [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0], [np.inf, 1.0]]
-    )
+    feats = np.asarray([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0], [np.inf, 1.0]])
     pairs = np.asarray([[0, 1], [1, 2], [2, 0]], dtype=np.uint32)
 
     with np.errstate(all="raise"):
@@ -170,9 +166,7 @@ def test_prepare_cosine_preserves_referenced_nonfinite_errstate(bad_row):
 
 def test_cosine_pairs_preserve_zero_norm_and_nonfinite_results():
     """Pre-normalization retains generic cosine behavior for zero-norm rows."""
-    feats = np.asarray(
-        [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=np.float64
-    )
+    feats = np.asarray([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=np.float64)
     pairs = np.asarray([[0, 1], [1, 2], [1, 1]], dtype=np.uint32)
 
     with np.errstate(invalid="ignore"):
