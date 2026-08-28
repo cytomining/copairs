@@ -1,7 +1,7 @@
 """Functions to compute mAP with multilabel support."""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -79,10 +79,13 @@ def average_precision(
     batch_size=20000,
     distance="cosine",
     progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     Compute average precision with multilabel support.
 
+    ``max_workers`` limits worker threads used for similarity calculations.
     Returns normalized_average_precision in addition to average_precision.
 
     See Also
@@ -92,7 +95,9 @@ def average_precision(
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
-    distance_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    distance_fn = compute.get_similarity_fn(
+        distance, progress_bar=progress_bar, max_workers=max_workers
+    )
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 

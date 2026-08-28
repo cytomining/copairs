@@ -43,6 +43,14 @@ We provide examples demonstrating how to use copairs for:
 - [calculating mAP to assess phenotypic consistency of perturbations](https://github.com/cytomining/copairs/blob/main/docs/examples/phenotypic_consistency.ipynb)
 - [estimating null size for mAP p-value calculation](https://github.com/cytomining/copairs/blob/main/docs/examples/null_size.ipynb)
 
+### Worker configuration
+
+Batched similarity, null-distribution, and mAP aggregation calculations use at
+most 8 worker threads by default, further limited by the CPUs available to the
+process and the number of tasks. Pass `max_workers` to the AP APIs for per-call
+control, or set the `COPAIRS_MAX_WORKERS` environment variable to a positive
+integer to change the default across these worker pools.
+
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):
 
