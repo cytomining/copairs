@@ -267,9 +267,7 @@ def test_quoted_identifiers_and_relation_match_pandas(multilabel_sameby):
     check_naive(dframe, sameby, diffby, multilabel_col)
     pandas_result = find_pairs_multilabel(dframe, sameby, diffby, multilabel_col)
     relation = duckdb.from_df(dframe.reset_index())
-    relation_result = find_pairs_multilabel(
-        relation, sameby, diffby, multilabel_col
-    )
+    relation_result = find_pairs_multilabel(relation, sameby, diffby, multilabel_col)
 
     assert_matching_results_equal(relation_result, pandas_result)
 

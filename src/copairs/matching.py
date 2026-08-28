@@ -603,8 +603,7 @@ def find_pairs_multilabel(
         f", {_quote_sql_identifier(column)}" for column in projected_columns
     )
     conditions = "".join(
-        f" AND A.{_quote_sql_identifier(column)} ="
-        f" B.{_quote_sql_identifier(column)}"
+        f" AND A.{_quote_sql_identifier(column)} = B.{_quote_sql_identifier(column)}"
         for column in sameby
     ) + "".join(
         f" AND NOT A.{_quote_sql_identifier(column)} ="
