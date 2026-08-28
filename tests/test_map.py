@@ -6,7 +6,8 @@ import pytest
 from sklearn.metrics import average_precision_score
 
 from copairs import compute
-from copairs.map import average_precision
+from copairs.map import map as map_module
+from copairs.map import average_precision, mean_average_precision
 from tests.helpers import simulate_random_dframe
 from copairs.matching import UnpairedException
 from copairs.map.multilabel import average_precision as multilabel_average_precision
@@ -244,6 +245,137 @@ def test_progress_bar_consistency():
         for progress_bar in (True, False)
     ]
     assert with_pb.equals(no_pb), "The progress_bar argument changed results"
+
+
+def test_average_precision_output_parity_across_worker_budgets():
+    """AP output is unchanged by the similarity worker budget."""
+    length = 20
+    vocab_size = {"p": 5, "w": 3, "l": 4}
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(length, vocab_size, ["l"], ["p"], rng)
+    feats = rng.uniform(size=(len(meta), 8))
+    kwargs = {
+        "meta": meta,
+        "feats": feats,
+        "pos_sameby": ["l"],
+        "pos_diffby": ["p"],
+        "neg_sameby": [],
+        "neg_diffby": ["l"],
+        "batch_size": 3,
+        "progress_bar": False,
+    }
+
+    serial = average_precision(**kwargs, max_workers=1)
+    parallel = average_precision(**kwargs, max_workers=4)
+
+    pd.testing.assert_frame_equal(serial, parallel, check_exact=True)
+
+
+def test_multilabel_worker_budget_output_parity():
+    """Multilabel AP output is unchanged by the similarity worker budget."""
+    rng = np.random.default_rng(SEED)
+    meta = simulate_random_dframe(20, {"p": 3, "w": 5, "l": 4}, ["l"], [], rng)
+    meta = meta.groupby(["p", "w"])["l"].unique().reset_index()
+    feats = rng.uniform(size=(len(meta), 8))
+    kwargs = {
+        "meta": meta,
+        "feats": feats,
+        "pos_sameby": ["l"],
+        "pos_diffby": [],
+        "neg_sameby": [],
+        "neg_diffby": ["l"],
+        "multilabel_col": "l",
+        "batch_size": 3,
+        "progress_bar": False,
+    }
+
+    serial = multilabel_average_precision(**kwargs, max_workers=1)
+    parallel = multilabel_average_precision(**kwargs, max_workers=4)
+
+    pd.testing.assert_frame_equal(serial, parallel, check_exact=True)
+
+
+def test_mean_average_precision_propagates_worker_budget(monkeypatch, tmp_path):
+    """The public mAP pipeline applies its budget to native null generation."""
+    ap_scores = pd.DataFrame(
+        {
+            "treatment": ["a", "a", "b", "b"],
+            "average_precision": [0.8, 0.7, 0.6, 0.5],
+            "normalized_average_precision": [0.7, 0.6, 0.5, 0.4],
+            "n_pos_pairs": [1, 1, 2, 2],
+            "n_total_pairs": [5, 5, 7, 7],
+        }
+    )
+    observed_budgets = []
+    aggregation_budgets = []
+    get_null_dists = compute.get_null_dists
+    silent_thread_map = map_module.silent_thread_map
+
+    def recording_get_null_dists(*args, **kwargs):
+        observed_budgets.append(kwargs.get("max_workers"))
+        return get_null_dists(*args, **kwargs)
+
+    def recording_silent_thread_map(*args, **kwargs):
+        aggregation_budgets.append(kwargs.get("max_workers"))
+        return silent_thread_map(*args, **kwargs)
+
+    monkeypatch.setattr(compute, "get_null_dists", recording_get_null_dists)
+    monkeypatch.setattr(map_module, "silent_thread_map", recording_silent_thread_map)
+    mean_average_precision(
+        ap_scores,
+        sameby=["treatment"],
+        null_size=20,
+        threshold=0.05,
+        seed=42,
+        progress_bar=False,
+        max_workers=1,
+        cache_dir=tmp_path,
+    )
+
+    assert observed_budgets == [1]
+    assert aggregation_budgets == [1]
+
+
+def test_map_worker_environment_constrains_both_pools(monkeypatch, tmp_path):
+    """The environment budget constrains null generation and mAP aggregation."""
+    ap_scores = pd.DataFrame(
+        {
+            "treatment": ["a", "a", "b", "b"],
+            "average_precision": [0.8, 0.7, 0.6, 0.5],
+            "normalized_average_precision": [0.7, 0.6, 0.5, 0.4],
+            "n_pos_pairs": [1, 1, 2, 2],
+            "n_total_pairs": [5, 5, 7, 7],
+        }
+    )
+    resolved_budgets = []
+    aggregation_budgets = []
+    resolve_max_workers = compute._resolve_max_workers
+    silent_thread_map = map_module.silent_thread_map
+
+    def recording_resolve_max_workers(num_items, max_workers):
+        resolved = resolve_max_workers(num_items, max_workers)
+        resolved_budgets.append((num_items, max_workers, resolved))
+        return resolved
+
+    def recording_silent_thread_map(*args, **kwargs):
+        aggregation_budgets.append(kwargs.get("max_workers"))
+        return silent_thread_map(*args, **kwargs)
+
+    monkeypatch.setenv("COPAIRS_MAX_WORKERS", "1")
+    monkeypatch.setattr(compute, "_resolve_max_workers", recording_resolve_max_workers)
+    monkeypatch.setattr(map_module, "silent_thread_map", recording_silent_thread_map)
+    mean_average_precision(
+        ap_scores,
+        sameby=["treatment"],
+        null_size=20,
+        threshold=0.05,
+        seed=42,
+        progress_bar=False,
+        cache_dir=tmp_path,
+    )
+
+    assert resolved_budgets == [(2, None, 1), (2, None, 1)]
+    assert aggregation_budgets == [1]
 
 
 def test_multilabel_has_normalized_ap():

@@ -1,7 +1,6 @@
 """Functions to compute mean average precision."""
 
 import logging
-from os import cpu_count
 from typing import List, Union, Optional
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -46,8 +45,9 @@ def get_map_pvalue(
         Random seed for reproducibility.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
-    max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+    max_workers : int, optional
+        Maximum workers used for null generation and mAP aggregation. The
+        default uses ``COPAIRS_MAX_WORKERS`` or at most 8 available CPUs.
     cache_dir : str or Path
         Location to save the cache.
 
@@ -73,7 +73,12 @@ def get_map_pvalue(
 
     # Generate null distributions for each unique configuration
     null_dists = compute.get_null_dists(
-        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
+        null_confs,
+        null_size,
+        seed=seed,
+        cache_dir=cache_dir,
+        progress_bar=progress_bar,
+        max_workers=max_workers,
     )
     ap_scores["null_ix"] = rev_ix
 
@@ -100,18 +105,28 @@ def get_map_pvalue(
         "mean_normalized_average_precision",
     ]
 
-    # Compute p-values for each group using the null distributions
+    # Compute p-values for each group using the null distributions. Resolve this
+    # pool separately so the same explicit/environment budget constrains both
+    # native null generation and mAP aggregation.
     params = map_scores[["mean_average_precision", "indices"]]
+    aggregation_workers = compute._resolve_max_workers(len(params), max_workers)
 
-    if progress_bar:
+    if aggregation_workers == 0:
+        p_values = []
+    elif progress_bar:
         from tqdm.contrib.concurrent import thread_map
 
         p_values = thread_map(
-            get_p_value, params.values, leave=False, max_workers=max_workers
+            get_p_value,
+            params.values,
+            leave=False,
+            max_workers=aggregation_workers,
         )
     else:
         p_values = silent_thread_map(
-            get_p_value, params.values, max_workers=max_workers
+            get_p_value,
+            params.values,
+            max_workers=aggregation_workers,
         )
     map_scores["p_value"] = p_values
 
@@ -150,8 +165,9 @@ def mean_average_precision(
         Random seed for reproducibility.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
-    max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+    max_workers : int, optional
+        Maximum workers used for null generation and mAP aggregation. The
+        default uses ``COPAIRS_MAX_WORKERS`` or at most 8 available CPUs.
     cache_dir : str or Path
         Location to save the cache.
 
@@ -238,8 +254,9 @@ def mean_average_precision_hierarchical(
         grouped structure.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
-    max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+    max_workers : int, optional
+        Maximum workers used for null generation and mAP aggregation. The
+        default uses ``COPAIRS_MAX_WORKERS`` or at most 8 available CPUs.
     cache_dir : str or Path
         Location to save the cache.
 
@@ -297,7 +314,7 @@ def silent_thread_map(fn, *iterables, **kwargs):
     **kwargs : dict
         Additional keyword arguments. Accepts:
         - max_workers : int, optional
-            Maximum number of workers [default: min(32, cpu_count() + 4)].
+            Maximum number of workers [default: at most 8 available CPUs].
         - chunksize : int, optional
             Size of chunks for each worker [default: 1].
     """
@@ -305,7 +322,7 @@ def silent_thread_map(fn, *iterables, **kwargs):
     # (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
 
     kwargs = kwargs.copy()
-    max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
+    max_workers = kwargs.pop("max_workers", min(8, compute._available_cpu_count()))
     chunksize = kwargs.pop("chunksize", 1)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))

@@ -11,11 +11,49 @@ import numpy as np
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
 
+_DEFAULT_MAX_WORKERS = 8
+
+
+def _available_cpu_count() -> int:
+    """Return CPUs available to this process, with a portable fallback."""
+    try:
+        return len(os.sched_getaffinity(0)) or 1
+    except (AttributeError, NotImplementedError, OSError):
+        return os.cpu_count() or 1
+
+
+def _resolve_max_workers(num_items: int, max_workers: Optional[int]) -> int:
+    """Resolve the worker budget, bounded by the number of tasks."""
+    if max_workers is None:
+        configured = os.environ.get("COPAIRS_MAX_WORKERS")
+        if configured is not None:
+            try:
+                max_workers = int(configured)
+            except ValueError as error:
+                raise ValueError(
+                    "COPAIRS_MAX_WORKERS must be a positive integer"
+                ) from error
+        else:
+            # Pair batches allocate gathered feature arrays and run native NumPy
+            # kernels. A bounded budget limits simultaneous memory pressure and
+            # avoids scaling Python threads to every CPU on large hosts.
+            max_workers = min(_DEFAULT_MAX_WORKERS, _available_cpu_count())
+
+    if isinstance(max_workers, bool) or not isinstance(max_workers, int):
+        raise TypeError("max_workers must be a positive integer")
+    if max_workers < 1:
+        raise ValueError("max_workers must be a positive integer")
+    if num_items < 1:
+        return 0
+    return min(num_items, max_workers)
+
 
 def parallel_map(
     par_func: Callable[[int], None],
     items: np.ndarray,
     progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ) -> None:
     """Execute a function in parallel over a list of items.
 
@@ -30,33 +68,41 @@ def parallel_map(
         (an item index or value).
     items : np.ndarray
         An array or list of items to process.
+    progress_bar : bool
+        Whether to display task completion with tqdm.
+    max_workers : int, optional
+        Maximum number of worker threads. By default, the worker count is the
+        smaller of the task count, available CPUs, and 8. The
+        ``COPAIRS_MAX_WORKERS`` environment variable can override the default.
     """
-    # Total number of items to process
     num_items = len(items)
+    pool_size = _resolve_max_workers(num_items, max_workers)
+    if pool_size == 0:
+        return
 
-    # Determine the number of threads to use, limited by CPU count
-    pool_size = min(num_items, os.cpu_count())
-
-    # Calculate chunk size for dividing work among threads
-    chunksize = num_items // pool_size
-
-    # Use a thread pool to execute the function in parallel
-    with ThreadPool(pool_size) as pool:
-        # Map the function to items with unordered execution for better efficiency
-        tasks = pool.imap_unordered(par_func, items, chunksize=chunksize)
-
+    def consume(tasks) -> None:
         if progress_bar:
-            # Display progress using tqdm
             from tqdm.autonotebook import tqdm
 
-            tasks = tqdm(tasks, total=len(items), leave=False)
+            tasks = tqdm(tasks, total=num_items, leave=False)
         for _ in tasks:
             pass
+
+    if pool_size == 1:
+        consume(map(par_func, items))
+        return
+
+    chunksize = max(1, num_items // pool_size)
+    with ThreadPool(pool_size) as pool:
+        tasks = pool.imap_unordered(par_func, items, chunksize=chunksize)
+        consume(tasks)
 
 
 def batch_processing(
     pairwise_op: Callable[[np.ndarray, np.ndarray], np.ndarray],
     progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ):
     """
     Add batch processing support to pairwise operations.
@@ -72,6 +118,8 @@ def batch_processing(
         between two arrays of features.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    max_workers : int, optional
+        Maximum number of worker threads used by the wrapped operation.
 
     Returns
     -------
@@ -79,8 +127,17 @@ def batch_processing(
         A wrapped function that processes pairwise operations in batches.
 
     """
+    configured_max_workers = max_workers
 
-    def batched_fn(feats: np.ndarray, pair_ix: np.ndarray, batch_size: int):
+    def batched_fn(
+        feats: np.ndarray,
+        pair_ix: np.ndarray,
+        batch_size: int,
+        *,
+        max_workers: Optional[int] = None,
+    ):
+        worker_budget = configured_max_workers if max_workers is None else max_workers
+
         # Total number of pairs to process
         num_pairs = len(pair_ix)
 
@@ -97,7 +154,10 @@ def batch_processing(
 
         # Use multithreading to process the batches in parallel
         parallel_map(
-            par_func, np.arange(0, num_pairs, batch_size), progress_bar=progress_bar
+            par_func,
+            np.arange(0, num_pairs, batch_size),
+            progress_bar=progress_bar,
+            max_workers=worker_budget,
         )
 
         return result
@@ -269,7 +329,10 @@ def _cdist_diag_sim(
 
 
 def get_similarity_fn(
-    distance: Union[str, Callable], progress_bar: bool = True
+    distance: Union[str, Callable],
+    progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ) -> Callable:
     """Retrieve a similarity function based on a distance string identifier or custom callable.
 
@@ -296,6 +359,8 @@ def get_similarity_fn(
         callable function.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    max_workers : int, optional
+        Maximum number of worker threads used for batched similarities.
 
     Returns
     -------
@@ -342,7 +407,9 @@ def get_similarity_fn(
         raise ValueError("Distance must be either a string or a callable object.")
 
     # Wrap the distance function for efficient batch processing
-    return batch_processing(similarity_fn, progress_bar=progress_bar)
+    return batch_processing(
+        similarity_fn, progress_bar=progress_bar, max_workers=max_workers
+    )
 
 
 def random_binary_matrix(n, m, k, rng):
@@ -532,6 +599,8 @@ def get_null_dists(
     seed: int,
     cache_dir: Optional[Union[str, Path]] = None,
     progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
 
@@ -546,6 +615,8 @@ def get_null_dists(
         Random seed for reproducibility.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    max_workers : int, optional
+        Maximum number of worker threads used to generate null distributions.
 
     Returns
     -------
@@ -572,7 +643,12 @@ def get_null_dists(
             _cache_write(path, null_dist)
         null_dists[i] = null_dist
 
-    parallel_map(par_func, np.arange(num_confs), progress_bar)
+    parallel_map(
+        par_func,
+        np.arange(num_confs),
+        progress_bar,
+        max_workers=max_workers,
+    )
 
     return null_dists
 
@@ -583,6 +659,8 @@ def p_values(
     null_size: int,
     seed: int,
     progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ):
     """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
@@ -600,6 +678,8 @@ def p_values(
         distribution.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    max_workers : int, optional
+        Maximum number of worker threads used to generate null distributions.
 
     Returns
     -------
@@ -610,7 +690,13 @@ def p_values(
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
 
     # Generate null distributions for each unique configuration
-    null_dists = get_null_dists(confs, null_size, seed, progress_bar=progress_bar)
+    null_dists = get_null_dists(
+        confs,
+        null_size,
+        seed,
+        progress_bar=progress_bar,
+        max_workers=max_workers,
+    )
 
     # Sort null distributions for efficient p-value computation
     null_dists.sort(axis=1)
