@@ -3,7 +3,26 @@
 import numpy as np
 import pytest
 
+import copairs.map.normalization as normalization_module
 from copairs.map.normalization import expected_ap, normalize_ap
+
+
+def _scalar_normalize_ap_reference(ap, M, N, eps=1e-10):
+    """Reproduce the pre-vectorization implementation for differential tests."""
+    is_scalar = np.isscalar(ap)
+    ap = np.atleast_1d(ap)
+    M = np.atleast_1d(M)
+    N = np.atleast_1d(N)
+
+    mu0 = np.zeros_like(ap, dtype=float)
+    for i in range(len(ap)):
+        m = M[i] if len(M) > 1 else M[0]
+        n = N[i] if len(N) > 1 else N[0]
+        mu0[i] = expected_ap(int(m), int(n))
+
+    denominator = np.maximum(1 - mu0, eps)
+    normalized = np.clip((ap - mu0) / denominator, -1.0, 1.0)
+    return float(normalized[0]) if is_scalar else normalized
 
 
 def test_expected_ap_basic_properties():
@@ -81,6 +100,126 @@ def test_normalize_ap_properties():
         "Similar effect sizes should have similar normalized scores"
     )
     assert abs(norm1 - 0.5) < 0.01, "50% improvement should normalize to ~0.5"
+
+
+@pytest.mark.parametrize(
+    ("ap", "positives", "negatives"),
+    [
+        pytest.param(
+            np.array([0.2, 0.4, 0.7, 0.9]),
+            np.array([2, 2, 5, 2]),
+            np.array([8, 8, 5, 8]),
+            id="repeated-configurations",
+        ),
+        pytest.param(
+            np.array([0.1, 0.3, 0.6, 0.95]),
+            np.array([2, 3, 7, 11]),
+            np.array([3, 17, 93, 989]),
+            id="unique-configurations",
+        ),
+        pytest.param(
+            np.array([np.nan, 0.0, 1.0, 0.5, 0.8]),
+            np.array([0, 0, 1, 1, 400]),
+            np.array([25, 1, 0, 99_999, 99_600]),
+            id="zero-one-positive-large-total-and-nan",
+        ),
+        pytest.param(
+            np.array([0.2, 0.4, 0.6]),
+            2,
+            np.array([3, 8, 18]),
+            id="broadcast-positive-count",
+        ),
+        pytest.param(
+            np.array([[0.2, 0.4, 0.6], [0.3, 0.5, 0.7]]),
+            np.array([2, 4]),
+            np.array([8, 6]),
+            id="multidimensional-ap-row-broadcasting",
+        ),
+    ],
+)
+def test_normalize_ap_matches_scalar_reference(ap, positives, negatives):
+    """Vectorized expectations retain the scalar implementation's results."""
+    expected = _scalar_normalize_ap_reference(ap, positives, negatives)
+    actual = normalize_ap(ap, positives, negatives)
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_allclose(actual, expected, rtol=1e-15, atol=0, equal_nan=True)
+
+
+def test_normalize_ap_scalar_matches_scalar_reference_with_custom_epsilon():
+    """Scalar output and a non-default denominator epsilon remain unchanged."""
+    expected = _scalar_normalize_ap_reference(0.5, 3, 0, eps=0.25)
+    actual = normalize_ap(0.5, 3, 0, eps=0.25)
+
+    assert isinstance(actual, float)
+    assert actual == expected
+
+
+def test_normalize_ap_empty_input_matches_scalar_reference():
+    """Empty array inputs remain supported and retain their output dtype."""
+    ap = np.array([], dtype=np.float32)
+    counts = np.array([], dtype=int)
+
+    expected = _scalar_normalize_ap_reference(ap, counts, counts)
+    actual = normalize_ap(ap, counts, counts)
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_normalize_ap_empty_multidimensional_input_matches_scalar_reference():
+    """Empty AP matrices preserve their trailing dimensions."""
+    ap = np.empty((0, 3), dtype=np.float32)
+    counts = np.array([], dtype=int)
+
+    expected = _scalar_normalize_ap_reference(ap, counts, counts)
+    actual = normalize_ap(ap, counts, counts)
+
+    assert actual.shape == (0, 3)
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("positives", "negatives"),
+    [
+        pytest.param(
+            np.array([[2], [3]]),
+            np.array([8, 7]),
+            id="multidimensional-positive-counts",
+        ),
+        pytest.param(
+            np.array([2, 3]),
+            np.array([[8], [7]]),
+            id="multidimensional-negative-counts",
+        ),
+    ],
+)
+def test_normalize_ap_rejects_multidimensional_counts(positives, negatives):
+    """Count arrays must unambiguously map one value to each AP row."""
+    with pytest.raises(
+        ValueError, match="M and N must be scalars or one-dimensional arrays"
+    ):
+        normalize_ap(np.array([[0.2, 0.4], [0.3, 0.5]]), positives, negatives)
+
+
+def test_normalize_ap_deduplicates_harmonic_numbers(monkeypatch):
+    """Repeated totals require only one harmonic-number calculation each."""
+    calls = []
+    original_harmonic_number = normalization_module.harmonic_number
+
+    def record_harmonic_number(total):
+        calls.append(total)
+        return original_harmonic_number(total)
+
+    monkeypatch.setattr(normalization_module, "harmonic_number", record_harmonic_number)
+    normalize_ap(
+        np.array([0.2, 0.3, 0.4, 0.5]),
+        np.array([2, 3, 2, 4]),
+        np.array([8, 7, 8, 16]),
+    )
+
+    assert calls == [10, 20]
 
 
 def test_normalize_ap_vectorized():
