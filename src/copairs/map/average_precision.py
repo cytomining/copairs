@@ -20,6 +20,7 @@ def build_rank_lists(
     neg_pairs: np.ndarray,
     pos_sims: np.ndarray,
     neg_sims: np.ndarray,
+    backend: Literal["numpy", "numba"] = "numpy",
 ):
     """Build rank lists for calculating average precision.
 
@@ -40,6 +41,14 @@ def build_rank_lists(
     neg_sims : np.ndarray
         Array of similarity scores for negative pairs.
 
+    backend : {"numpy", "numba"}
+        Rank-list construction backend. The default ``"numpy"`` has no optional
+        dependencies and retains NumPy's permissive input behavior. The optional
+        ``"numba"`` rank kernel requires native integer pair arrays shaped ``(n, 2)``
+        and native float32 or float64 one-dimensional similarity arrays with one
+        score per pair. Mixed float32/float64 scores are promoted to float64.
+        Install ``copairs[numba]`` to select ``"numba"``.
+
     Returns
     -------
     paired_ix : np.ndarray
@@ -52,6 +61,13 @@ def build_rank_lists(
     counts : np.ndarray
         Array of counts indicating how many times each profile index appears in the rank lists.
     """
+    if backend == "numba":
+        return compute._get_numba_rank_lists_fn()(
+            pos_pairs, neg_pairs, pos_sims, neg_sims
+        )
+    if backend != "numpy":
+        raise ValueError("backend must be either 'numpy' or 'numba'.")
+
     # Combine relevance labels: 1 for positive pairs, 0 for negative pairs
     labels = np.concatenate(
         [
@@ -244,7 +260,7 @@ def average_precision(
     # Build rank lists for calculating average precision
     logger.info("Building rank lists...")
     paired_ix, rel_k_list, counts = build_rank_lists(
-        pos_pairs, neg_pairs, pos_sims, neg_sims
+        pos_pairs, neg_pairs, pos_sims, neg_sims, backend=backend
     )
 
     # Compute average precision scores and associated configurations

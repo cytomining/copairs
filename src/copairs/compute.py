@@ -238,15 +238,10 @@ def cosine_pairs(
     return result
 
 
-def _get_cosine_pairs_fn(backend: str) -> Callable:
-    """Return the requested cosine pair backend without eager optional imports."""
-    if backend == "numpy":
-        return cosine_pairs
-    if backend != "numba":
-        raise ValueError("backend must be either 'numpy' or 'numba'.")
-
+def _import_numba_backend():
+    """Import the optional backend while preserving transitive import failures."""
     try:
-        from copairs._numba import cosine_pairs as numba_cosine_pairs
+        from copairs import _numba
     except ModuleNotFoundError as exc:
         if exc.name != "numba":
             raise
@@ -254,7 +249,21 @@ def _get_cosine_pairs_fn(backend: str) -> Callable:
             "backend='numba' requires the optional Numba dependency. "
             "Install it with `pip install 'copairs[numba]'`."
         ) from exc
-    return numba_cosine_pairs
+    return _numba
+
+
+def _get_cosine_pairs_fn(backend: str) -> Callable:
+    """Return the requested cosine pair backend without eager optional imports."""
+    if backend == "numpy":
+        return cosine_pairs
+    if backend != "numba":
+        raise ValueError("backend must be either 'numpy' or 'numba'.")
+    return _import_numba_backend().cosine_pairs
+
+
+def _get_numba_rank_lists_fn() -> Callable:
+    """Return optional regular rank-list construction without eager imports."""
+    return _import_numba_backend().build_rank_lists
 
 
 def pairwise_abs_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:

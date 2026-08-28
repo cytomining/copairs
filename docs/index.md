@@ -21,8 +21,10 @@ from copairs import map
 ap = map.average_precision(..., distance="cosine", backend="numba")
 ```
 
-Numba is imported only when ``backend="numba"`` is requested, and currently
-supports only the exact built-in ``distance="cosine"`` path.
+Numba is imported only when ``backend="numba"`` is requested. For regular
+average precision it accelerates both the exact built-in ``distance="cosine"``
+path and rank-list construction. Multilabel rank-list construction is unchanged.
+Other distances and custom callables require ``backend="numpy"``.
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):

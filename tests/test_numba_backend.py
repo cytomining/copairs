@@ -12,6 +12,7 @@ import pytest
 from copairs import compute
 from copairs.map import average_precision
 from copairs.map.multilabel import average_precision as multilabel_average_precision
+from copairs.map.average_precision import build_rank_lists
 
 PROJECT_ROOT = Path(__file__).parents[1]
 
@@ -188,6 +189,266 @@ def test_numba_multilabel_exact_ap_parity_with_ties(dtype, layout):
 
     pd.testing.assert_frame_equal(numba_result, numpy_result, check_exact=True)
     np.testing.assert_array_equal(numba_result["average_precision"], 1.0)
+
+
+def _assert_exact_rank_lists(
+    pos_pairs: np.ndarray,
+    neg_pairs: np.ndarray,
+    pos_sims: np.ndarray,
+    neg_sims: np.ndarray,
+) -> None:
+    """Assert exact rank-list, AP, configuration, and p-value parity."""
+    numpy_ranks = build_rank_lists(pos_pairs, neg_pairs, pos_sims, neg_sims)
+    numba_ranks = build_rank_lists(
+        pos_pairs, neg_pairs, pos_sims, neg_sims, backend="numba"
+    )
+
+    for numba_value, numpy_value in zip(numba_ranks, numpy_ranks):
+        assert numba_value.dtype == numpy_value.dtype
+        assert numba_value.shape == numpy_value.shape
+        assert numba_value.tobytes() == numpy_value.tobytes()
+
+    paired_ix, rel_k_list, counts = numba_ranks
+    assert paired_ix.dtype == np.result_type(pos_pairs.dtype, neg_pairs.dtype)
+    assert rel_k_list.dtype == np.uint32
+    assert counts.dtype == np.uint32
+
+    if not len(counts):
+        return
+
+    with np.errstate(all="ignore"):
+        numpy_ap, numpy_confs = compute.ap_contiguous(numpy_ranks[1], numpy_ranks[2])
+        numba_ap, numba_confs = compute.ap_contiguous(rel_k_list, counts)
+    assert numba_ap.dtype == numpy_ap.dtype
+    assert numba_ap.tobytes() == numpy_ap.tobytes()
+    assert numba_confs.dtype == numpy_confs.dtype
+    assert numba_confs.tobytes() == numpy_confs.tobytes()
+
+    # Downstream null configurations and scores are identical, so the existing
+    # p-value implementation receives exactly the same seeded inputs.
+    if np.all(numpy_confs[:, 0] > 0):
+        numpy_p = compute.p_values(numpy_ap, numpy_confs, 19, 123, False)
+        numba_p = compute.p_values(numba_ap, numba_confs, 19, 123, False)
+        np.testing.assert_array_equal(numba_p, numpy_p)
+
+
+def test_numba_rank_lists_randomized_exact_reference():
+    """Random directed multigraphs exactly match NumPy rank construction."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    rng = np.random.default_rng(90421)
+    sparse_ids = np.asarray([2, 11, 10_003, 2**20 + 7], dtype=np.int64)
+
+    for _ in range(50):
+        n_pos = int(rng.integers(1, 35))
+        n_neg = int(rng.integers(0, 35))
+        pos_pairs = rng.choice(sparse_ids, size=(n_pos, 2), replace=True)
+        neg_pairs = rng.choice(sparse_ids, size=(n_neg, 2), replace=True)
+
+        # A small score pool creates many intra- and inter-class ties while the
+        # random values cover ordinary float32 ordering.
+        score_pool = np.concatenate(
+            [
+                rng.standard_normal(12).astype(np.float32),
+                np.asarray([-np.inf, -1.0, -0.0, 0.0, 1.0, np.inf, np.nan]),
+            ]
+        ).astype(np.float32)
+        pos_sims = rng.choice(score_pool, size=n_pos, replace=True)
+        neg_sims = rng.choice(score_pool, size=n_neg, replace=True)
+        _assert_exact_rank_lists(pos_pairs, neg_pairs, pos_sims, neg_sims)
+
+
+@pytest.mark.parametrize(
+    ("pos_dtype", "neg_dtype", "pos_score", "neg_score"),
+    [
+        (np.float32, np.float64, 1.0, 1.0 + 2**-30),
+        (np.float64, np.float32, 1.0 - 2**-30, 1.0),
+    ],
+)
+def test_numba_rank_lists_mixed_float_scores_exact_reference(
+    pos_dtype, neg_dtype, pos_score, neg_score
+):
+    """Mixed float32/float64 scores promote without losing rank distinctions."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    pos_pairs = np.asarray([[0, 1]], dtype=np.int64)
+    neg_pairs = np.asarray([[0, 2]], dtype=np.int64)
+    pos_sims = np.asarray([pos_score], dtype=pos_dtype)
+    neg_sims = np.asarray([neg_score], dtype=neg_dtype)
+
+    _assert_exact_rank_lists(pos_pairs, neg_pairs, pos_sims, neg_sims)
+    _, relevance, _ = build_rank_lists(
+        pos_pairs, neg_pairs, pos_sims, neg_sims, backend="numba"
+    )
+    assert relevance[0] == 0
+
+
+@pytest.mark.parametrize("score_name", ["pos_sims", "neg_sims"])
+@pytest.mark.parametrize(
+    "bad_scores",
+    [
+        np.asarray([2**53, 2**53 + 1], dtype=np.int64),
+        np.asarray([np.iinfo(np.int64).min, np.iinfo(np.int64).max], dtype=np.int64),
+        np.asarray([0.5, 1.0], dtype=np.float16),
+        np.asarray([0.5, 1.0], dtype=np.complex128),
+        np.asarray([0.5, 1.0], dtype=object),
+        np.asarray([0.5, 1.0], dtype=np.dtype(np.float32).newbyteorder("S")),
+        np.asarray([0.5, 1.0], dtype=np.dtype(np.float64).newbyteorder("S")),
+    ],
+    ids=[
+        "int64-around-2**53",
+        "int64-limits",
+        "float16",
+        "complex128",
+        "object",
+        "non-native-float32",
+        "non-native-float64",
+    ],
+)
+def test_numba_rank_lists_reject_unsupported_score_dtypes(score_name, bad_scores):
+    """Unsupported scores fail before JIT rather than silently changing ranks."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    inputs = {
+        "pos_pairs": np.asarray([[0, 1], [0, 2]], dtype=np.int64),
+        "neg_pairs": np.asarray([[0, 3], [0, 4]], dtype=np.int64),
+        "pos_sims": np.asarray([0.5, 1.0], dtype=np.float32),
+        "neg_sims": np.asarray([0.5, 1.0], dtype=np.float32),
+    }
+    inputs[score_name] = bad_scores
+
+    with pytest.raises(TypeError, match=rf"{score_name}.*native float32 or float64"):
+        build_rank_lists(**inputs, backend="numba")
+
+
+def test_numpy_rank_lists_remains_permissive_for_integer_scores():
+    """The default backend retains its existing permissive score behavior."""
+    pairs = np.asarray([[0, 1], [0, 2]], dtype=np.int64)
+    scores = np.asarray([2**53, 2**53 + 1], dtype=np.int64)
+
+    paired_ix, relevance, counts = build_rank_lists(pairs, pairs, scores, scores)
+
+    assert paired_ix.dtype == np.int64
+    assert relevance.dtype == np.uint32
+    assert counts.dtype == np.uint32
+
+
+@pytest.mark.parametrize(
+    ("input_name", "invalid_value", "message"),
+    [
+        ("pos_pairs", np.asarray([0, 1], dtype=np.int64), "2-D array"),
+        ("neg_pairs", np.empty((2, 3), dtype=np.int64), "exactly two columns"),
+        ("pos_sims", np.ones((2, 1), dtype=np.float32), "1-D array"),
+        ("neg_sims", np.ones((1, 2), dtype=np.float32), "1-D array"),
+        ("pos_sims", np.ones(1, dtype=np.float32), "length must equal"),
+        ("neg_sims", np.ones(3, dtype=np.float32), "length must equal"),
+    ],
+)
+def test_numba_rank_lists_validates_shapes_and_lengths(
+    input_name, invalid_value, message
+):
+    """Malformed rank inputs raise ValueError before compiled array reads."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    inputs = {
+        "pos_pairs": np.asarray([[0, 1], [0, 2]], dtype=np.int64),
+        "neg_pairs": np.asarray([[0, 3], [0, 4]], dtype=np.int64),
+        "pos_sims": np.asarray([0.5, 1.0], dtype=np.float32),
+        "neg_sims": np.asarray([0.5, 1.0], dtype=np.float32),
+    }
+    inputs[input_name] = invalid_value
+
+    with pytest.raises(ValueError, match=message):
+        build_rank_lists(**inputs, backend="numba")
+
+
+@pytest.mark.parametrize(
+    "bad_pairs",
+    [
+        np.asarray([[0.0, 1.0]], dtype=np.float64),
+        np.asarray([[0, 1]], dtype=object),
+        np.asarray([[0, 1]], dtype=np.dtype(np.int64).newbyteorder("S")),
+    ],
+    ids=["float64", "object", "non-native-int64"],
+)
+def test_numba_rank_lists_rejects_unsupported_pair_dtypes(bad_pairs):
+    """Pair indices use native integer arrays supported by the compiled kernel."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    empty_pairs = np.empty((0, 2), dtype=np.int64)
+    empty_sims = np.empty(0, dtype=np.float32)
+
+    with pytest.raises(TypeError, match="native signed or unsigned integer dtype"):
+        build_rank_lists(
+            bad_pairs,
+            empty_pairs,
+            np.asarray([0.5], dtype=np.float32),
+            empty_sims,
+            backend="numba",
+        )
+
+
+def _rank_list_case(case: str):
+    """Return an adversarial rank-list input named for its reference behavior."""
+    empty_pairs = np.empty((0, 2), dtype=np.int32)
+    empty_sims = np.empty(0, dtype=np.float32)
+    if case == "ties":
+        return (
+            np.asarray([[7, 11], [7, 13]], dtype=np.int32),
+            np.asarray([[7, 17], [7, 19]], dtype=np.int32),
+            np.asarray([0.5, -0.0], dtype=np.float32),
+            np.asarray([0.5, 0.0], dtype=np.float32),
+        )
+    if case == "nan-inf":
+        return (
+            np.asarray([[1, 2], [1, 3]], dtype=np.int32),
+            np.asarray([[1, 4], [1, 5]], dtype=np.int32),
+            np.asarray([np.nan, np.inf], dtype=np.float32),
+            np.asarray([np.nan, -np.inf], dtype=np.float32),
+        )
+    if case == "duplicates-overlap-sparse-ids":
+        sparse = np.asarray([7, 1_000_003, 2**30 + 9], dtype=np.int64)
+        return (
+            np.asarray(
+                [
+                    [sparse[0], sparse[1]],
+                    [sparse[0], sparse[1]],
+                    [sparse[1], sparse[0]],
+                    [sparse[2], sparse[2]],
+                ],
+                dtype=np.int64,
+            ),
+            np.asarray(
+                [
+                    [sparse[0], sparse[1]],
+                    [sparse[2], sparse[0]],
+                    [99_999_991, 99_999_991],
+                    [sparse[1], sparse[2]],
+                ],
+                dtype=np.int64,
+            ),
+            np.asarray([1.0, np.nan, -np.inf, np.inf], dtype=np.float32),
+            np.asarray([1.0, np.nan, -np.inf, np.inf], dtype=np.float32),
+        )
+    nonempty_pairs = np.asarray([[5, 9], [5, 5]], dtype=np.int32)
+    nonempty_sims = np.asarray([np.nan, -np.inf], dtype=np.float32)
+    if case == "negative-only":
+        return empty_pairs, nonempty_pairs, empty_sims, nonempty_sims
+    if case == "positive-only":
+        return nonempty_pairs, empty_pairs, nonempty_sims, empty_sims
+    return empty_pairs, empty_pairs, empty_sims, empty_sims
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "ties",
+        "nan-inf",
+        "duplicates-overlap-sparse-ids",
+        "negative-only",
+        "positive-only",
+        "both-classes-empty",
+    ],
+)
+def test_numba_rank_lists_adversarial_exact_bytes(case):
+    """Adversarial rank lists have byte-exact NumPy results and dtypes."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    _assert_exact_rank_lists(*_rank_list_case(case))
 
 
 def _assert_exact_cosine_pairs(feats: np.ndarray, pairs: np.ndarray) -> None:
