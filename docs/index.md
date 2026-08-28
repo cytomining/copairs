@@ -8,6 +8,22 @@
 pip install copairs
 ```
 
+The default average-precision backend uses NumPy. For the optional Numba cosine
+backend, install the extra and select it explicitly:
+
+```bash
+pip install 'copairs[numba]'
+```
+
+```python
+from copairs import map
+
+ap = map.average_precision(..., distance="cosine", backend="numba")
+```
+
+Numba is imported only when ``backend="numba"`` is requested, and currently
+supports only the exact built-in ``distance="cosine"`` path.
+
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):
 
