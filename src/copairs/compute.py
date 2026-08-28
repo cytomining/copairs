@@ -165,6 +165,79 @@ def pairwise_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     return c_sim
 
 
+def prepare_cosine(feats: np.ndarray, profile_ix: np.ndarray) -> np.ndarray:
+    """Normalize referenced feature rows for repeated cosine pair evaluation.
+
+    Parameters
+    ----------
+    feats : np.ndarray
+        A 2D feature matrix with profiles in rows.
+    profile_ix : np.ndarray
+        Row indices that will be referenced by subsequent pair evaluation.
+
+    Returns
+    -------
+    np.ndarray
+        A feature-sized matrix whose referenced rows are row-normalized.
+    """
+    feats = np.asarray(feats)
+    profile_ix = np.asarray(profile_ix)
+    # Advanced indexing gathers a C-order matrix, matching the generic batched
+    # cosine path regardless of the source matrix's memory layout.
+    referenced_feats = feats[profile_ix]
+    normalized_rows = referenced_feats / np.linalg.norm(
+        referenced_feats, axis=1
+    )[:, np.newaxis]
+    normalized_feats = np.empty(feats.shape, dtype=normalized_rows.dtype)
+    normalized_feats[profile_ix] = normalized_rows
+    return normalized_feats
+
+
+def cosine_pairs(
+    normalized_feats: np.ndarray,
+    pair_ix: np.ndarray,
+    batch_size: int,
+    progress_bar: bool = True,
+) -> np.ndarray:
+    """Compute indexed dot products from row-normalized features in batches.
+
+    Parameters
+    ----------
+    normalized_feats : np.ndarray
+        A feature matrix normalized with :func:`prepare_cosine`.
+    pair_ix : np.ndarray
+        A two-column array containing row-index pairs.
+    batch_size : int
+        Number of pairs to process per batch.
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
+
+    Returns
+    -------
+    np.ndarray
+        A float32 array of cosine similarities for the indexed pairs.
+    """
+    num_pairs = len(pair_ix)
+    result = np.empty(num_pairs, dtype=np.float32)
+    if num_pairs == 0:
+        return result
+
+    def par_func(i: int) -> None:
+        pairs = pair_ix[i : i + batch_size]
+        x_sample = normalized_feats[pairs[:, 0]]
+        y_sample = normalized_feats[pairs[:, 1]]
+        # Match pairwise_cosine's multiply-then-sum arithmetic so exact ties and
+        # floating-point ranking behavior do not change.
+        result[i : i + len(pairs)] = np.sum(x_sample * y_sample, axis=1)
+
+    parallel_map(
+        par_func,
+        np.arange(0, num_pairs, batch_size),
+        progress_bar=progress_bar,
+    )
+    return result
+
+
 def pairwise_abs_cosine(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray:
     """Compute the absolute cosine similarity for paired rows of two matrices.
 

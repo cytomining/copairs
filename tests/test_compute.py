@@ -112,6 +112,102 @@ def test_cosine():
     assert np.allclose(cosine_gt, cosine)
 
 
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("layout", ["c", "fortran", "strided"])
+def test_cosine_pairs_exactly_match_generic_batches(dtype, layout):
+    """Prepared pair dots match gathered cosine across dtypes and layouts."""
+    local_rng = np.random.default_rng(SEED)
+    feats = local_rng.normal(size=(17, 11)).astype(dtype)
+    if layout == "fortran":
+        feats = np.asfortranarray(feats)
+    elif layout == "strided":
+        backing = np.empty((len(feats), feats.shape[1] * 2), dtype=dtype)
+        backing[:, ::2] = feats
+        feats = backing[:, ::2]
+    pairs = np.asarray(
+        [(i, (i * 7 + 3) % len(feats)) for i in range(len(feats))],
+        dtype=np.uint32,
+    )
+    generic = compute.get_similarity_fn("cosine", progress_bar=False)(
+        feats, pairs, batch_size=3
+    )
+    normalized = compute.prepare_cosine(feats, np.unique(pairs))
+    actual = compute.cosine_pairs(
+        normalized, pairs, batch_size=3, progress_bar=False
+    )
+
+    assert actual.dtype == np.float32
+    np.testing.assert_array_equal(actual, generic)
+
+
+def test_prepare_cosine_skips_unreferenced_nonfinite_rows_under_strict_errstate():
+    """Only pair-referenced profiles participate in normalization."""
+    feats = np.asarray(
+        [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0], [np.inf, 1.0]]
+    )
+    pairs = np.asarray([[0, 1], [1, 2], [2, 0]], dtype=np.uint32)
+
+    with np.errstate(all="raise"):
+        normalized = compute.prepare_cosine(feats, np.unique(pairs))
+        actual = compute.cosine_pairs(
+            normalized, pairs, batch_size=2, progress_bar=False
+        )
+        expected = compute.pairwise_cosine(
+            feats[pairs[:, 0]], feats[pairs[:, 1]]
+        ).astype(np.float32)
+
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("bad_row", [[0.0, 0.0], [np.inf, 1.0]])
+def test_prepare_cosine_preserves_referenced_nonfinite_errstate(bad_row):
+    """Referenced zero and infinite rows retain strict NumPy error behavior."""
+    feats = np.asarray([[1.0, 0.0], bad_row])
+
+    with np.errstate(all="raise"), pytest.raises(FloatingPointError):
+        compute.prepare_cosine(feats, np.asarray([1]))
+
+
+def test_cosine_pairs_preserve_zero_norm_and_nonfinite_results():
+    """Pre-normalization retains generic cosine behavior for zero-norm rows."""
+    feats = np.asarray(
+        [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=np.float64
+    )
+    pairs = np.asarray([[0, 1], [1, 2], [1, 1]], dtype=np.uint32)
+
+    with np.errstate(invalid="ignore"):
+        generic = compute.get_similarity_fn("cosine", progress_bar=False)(
+            feats, pairs, batch_size=1
+        )
+        actual = compute.cosine_pairs(
+            compute.prepare_cosine(feats, np.unique(pairs)),
+            pairs,
+            batch_size=2,
+            progress_bar=False,
+        )
+
+    np.testing.assert_array_equal(actual, generic)
+    assert np.isnan(actual[0])
+
+
+def test_cosine_pairs_returns_typed_empty_result(monkeypatch):
+    """An empty pair array returns without starting parallel workers."""
+
+    def fail_parallel_map(*args, **kwargs):
+        raise AssertionError("parallel_map must not run for empty pairs")
+
+    monkeypatch.setattr(compute, "parallel_map", fail_parallel_map)
+    actual = compute.cosine_pairs(
+        np.empty((3, 2)),
+        np.empty((0, 2), dtype=np.uint32),
+        batch_size=2,
+        progress_bar=False,
+    )
+
+    assert actual.shape == (0,)
+    assert actual.dtype == np.float32
+
+
 def test_euclidean():
     """Test euclidean similarity computation."""
     n_samples = 10

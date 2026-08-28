@@ -115,11 +115,31 @@ def average_precision(
     logger.info("Dropping dups in negative pairs...")
     neg_pairs = np.unique(neg_pairs, axis=0)
 
-    logger.info("Computing positive similarities...")
-    pos_sims = distance_fn(feats, pos_pairs, batch_size)
+    if isinstance(distance, str) and distance == "cosine":
+        profile_ix = np.unique(np.concatenate((pos_pairs, neg_pairs)))
+        normalized_feats = compute.prepare_cosine(feats, profile_ix)
 
-    logger.info("Computing negative similarities...")
-    neg_sims = distance_fn(feats, neg_pairs, batch_size)
+        logger.info("Computing positive similarities...")
+        pos_sims = compute.cosine_pairs(
+            normalized_feats,
+            pos_pairs,
+            batch_size,
+            progress_bar=progress_bar,
+        )
+
+        logger.info("Computing negative similarities...")
+        neg_sims = compute.cosine_pairs(
+            normalized_feats,
+            neg_pairs,
+            batch_size,
+            progress_bar=progress_bar,
+        )
+    else:
+        logger.info("Computing positive similarities...")
+        pos_sims = distance_fn(feats, pos_pairs, batch_size)
+
+        logger.info("Computing negative similarities...")
+        neg_sims = distance_fn(feats, neg_pairs, batch_size)
 
     logger.info("Computing AP per label...")
     negs_for = _create_neg_query_solver(neg_pairs, neg_sims)
