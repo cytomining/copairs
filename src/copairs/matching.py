@@ -4,7 +4,6 @@ import re
 import logging
 import warnings
 import itertools
-from copy import copy
 from math import comb
 from typing import Set, Dict, Tuple, Union, Sequence
 from collections import namedtuple
@@ -540,6 +539,11 @@ def _validate(sameby, diffby):
     return sameby, diffby
 
 
+def _quote_sql_identifier(identifier: str) -> str:
+    """Quote a DuckDB identifier, escaping embedded double quotes."""
+    return '"' + identifier.replace('"', '""') + '"'
+
+
 def find_pairs_multilabel(
     dframe: Union[pd.DataFrame, duckdb.DuckDBPyRelation],
     sameby: Union[str, ColumnList],
@@ -579,71 +583,84 @@ def find_pairs_multilabel(
         f"Missing {multilabel_col} in sameby and diffby"
     )
 
-    df = dframe.reset_index()
+    if set(sameby).intersection(diffby):
+        raise ValueError("sameby and diffby must be disjoint lists")
 
-    if multilabel_col in sameby:
-        sameby = copy(sameby)
+    df = dframe
+    if isinstance(df, pd.DataFrame):
+        df = dframe.reset_index()
+
+    multilabel_sameby = multilabel_col in sameby
+    if multilabel_sameby:
         sameby.remove(multilabel_col)
-        shared_item = ""
     else:
-        diffby = copy(diffby)
         diffby.remove(multilabel_col)
-        shared_item = "NOT"
+
+    index_identifier = _quote_sql_identifier("index")
+    multilabel_identifier = _quote_sql_identifier(multilabel_col)
+    projected_columns = list(dict.fromkeys((*sameby, *diffby)))
+    projection = "".join(
+        f", {_quote_sql_identifier(column)}" for column in projected_columns
+    )
+    conditions = "".join(
+        f" AND A.{_quote_sql_identifier(column)} ="
+        f" B.{_quote_sql_identifier(column)}"
+        for column in sameby
+    ) + "".join(
+        f" AND NOT A.{_quote_sql_identifier(column)} ="
+        f" B.{_quote_sql_identifier(column)}"
+        for column in diffby
+    )
 
     with duckdb.connect(":memory:"):
-        result = duckdb.sql(
-            "SELECT * "
-            " FROM (SELECT *,"
-            f"list_intersect(A.{multilabel_col},B.{multilabel_col}) AS shared_items"
-            " FROM df A JOIN df B ON A.index < B.index)"
-            f" WHERE {shared_item} len(shared_items) > 0"
-        )
-        if len(sameby) or len(diffby):
-            monolabel_result = find_pairs(df, sameby, diffby).T
-            result = duckdb.sql(
-                f"SELECT *"
-                " FROM result A JOIN monolabel_result B"
-                " ON A.index = B.column0"
-                " AND A.index_1 = B.column1"
+        if multilabel_sameby:
+            # Invert the labels first so DuckDB can use an equijoin instead of
+            # calculating a list intersection for every candidate row pair.
+            pair_labels = duckdb.sql(
+                "WITH inverted_labels AS ("
+                f" SELECT DISTINCT {index_identifier}{projection},"
+                f" UNNEST({multilabel_identifier}) AS matched_item FROM df)"
+                f" SELECT A.{index_identifier}, B.{index_identifier} AS index_1,"
+                " A.matched_item"
+                " FROM inverted_labels A JOIN inverted_labels B"
+                " ON A.matched_item = B.matched_item"
+                f" AND A.{index_identifier} < B.{index_identifier}"
+                f"{conditions}"
+                f" ORDER BY A.matched_item, B.{index_identifier},"
+                f" A.{index_identifier}"
+            ).fetchnumpy()
+            matched_items = pair_labels["matched_item"]
+            group_starts = np.empty(len(matched_items), dtype=bool)
+            if len(matched_items):
+                group_starts[0] = True
+                group_starts[1:] = matched_items[1:] != matched_items[:-1]
+            keys = matched_items[group_starts]
+            counts = np.diff(
+                np.append(np.flatnonzero(group_starts), len(matched_items))
             )
-
-        if shared_item == "":  # If multilabel_col is in sameby
-            counts_col = "_c"
-
-            # We assign a pair if any of the other items in the list is a pair too
-            unnested = duckdb.sql(
-                "SELECT *,UNNEST(shared_items) AS matched_item FROM result"
-            )
-            string = (
-                "SELECT * FROM unnested A"
-                " NATURAL JOIN (SELECT matched_item,COUNT(matched_item)"
-                f" AS {counts_col} FROM unnested GROUP BY matched_item) B"
-            )
-            results = duckdb.sql(string)
-
-            # Sort them to match the original implementation
-            results = duckdb.sql("SELECT * FROM results ORDER BY matched_item")
-
-            # Sorted pairs of indices (we select to reduce memory footprint)
-            pairs = duckdb.sql("SELECT index,index_1 FROM results")
-            pairs_np = pairs.fetchnumpy()
-
-            # Keys are the items inside multilabel col
-            # Counts are the number of occurrences of each one
-            # It is important to sort again!
-            keys_counts = duckdb.sql(
-                f"SELECT distinct matched_item,{counts_col} FROM results ORDER BY matched_item"
-            )
-            keys_counts_np = keys_counts.fetchnumpy()
-
             result = (
                 np.array(
-                    [pairs_np[f"index{k}"] for k in ("", "_1")], dtype=np.uint32
+                    [pair_labels[k] for k in ("index", "index_1")],
+                    dtype=np.uint32,
                 ).T,
-                *[keys_counts_np[k] for k in ("matched_item", counts_col)],
+                keys,
+                counts,
             )
-        else:  # if multilabel_col is in diffby return only the index
-            index_d = result.fetchnumpy()
+        else:
+            # Only carry columns needed by the negative test and pair filters.
+            # Pair generation and list disjointness remain quadratic.
+            index_d = duckdb.sql(
+                "WITH projected AS ("
+                f" SELECT {index_identifier}, {multilabel_identifier}"
+                f"{projection} FROM df)"
+                f" SELECT A.{index_identifier}, B.{index_identifier} AS index_1"
+                " FROM projected A JOIN projected B"
+                f" ON A.{index_identifier} < B.{index_identifier}"
+                f"{conditions}"
+                " WHERE NOT len(list_intersect("
+                f"A.{multilabel_identifier}, B.{multilabel_identifier})) > 0"
+                f" ORDER BY B.{index_identifier}, A.{index_identifier}"
+            ).fetchnumpy()
             result = np.array(
                 [index_d[k] for k in ("index", "index_1")], dtype=np.uint32
             ).T
