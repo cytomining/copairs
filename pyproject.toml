@@ -3,7 +3,7 @@ name = "copairs"
 version = "0.5.5.dev0"
 description = "Find pairs and compute metrics between them"
 readme = "README.md"
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.9"
 license = {file = "LICENSE.txt"}
 keywords = ["pairwise", "replication"]
 authors = [
@@ -12,7 +12,7 @@ authors = [
   { name = "Alan F. Munoz", email = "amunozgo@broadinstitute.org" }
 ]
 dependencies = [
-  "pandas",
+  "pandas<3",
   "tqdm",
   "statsmodels",
   "duckdb>=1.4.0",
