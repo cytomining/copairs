@@ -1,10 +1,10 @@
 [project]
 name = "copairs"
-version = "0.5.5.dev0"
+version = "0.5.5"
 description = "Find pairs and compute metrics between them"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {file = "LICENSE.txt"}
+license = {file = "LICENSE"}
 keywords = ["pairwise", "replication"]
 authors = [
   { name = "John Arevalo", email = "johnarevalo@gmail.com" },
