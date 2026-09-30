@@ -12,10 +12,10 @@ authors = [
   { name = "Alan F. Munoz", email = "amunozgo@broadinstitute.org" }
 ]
 dependencies = [
-  "pandas<3",
+  "pandas",
   "tqdm",
   "statsmodels",
-  "duckdb>=1.4.0",
+  "duckdb>=1.4.4",
 ]
 
 [project.optional-dependencies]

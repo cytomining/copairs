@@ -1,0 +1,30 @@
+name: pandas compatibility
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  pandas:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Exercise the oldest pandas 3 interpreter and the newest supported one.
+        python-version: ["3.11", "3.14"]
+        pandas-spec: ["pandas>=2,<3", "pandas>=3,<4"]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the compatibility environment
+        run: |
+          uv venv
+          # Test the DuckDB minimum and both Python/Arrow string backends.
+          uv pip install -e '.[test]' '${{ matrix.pandas-spec }}' 'duckdb==1.4.4' pyarrow
+      - name: Run tests without restoring the locked pandas version
+        run: uv run --no-sync pytest -q
