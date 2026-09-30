@@ -580,10 +580,6 @@ def find_pairs_multilabel(
     )
 
     df = dframe.reset_index()
-    # DuckDB needs a native LIST column; normalize each cell to a Python list
-    # so it is inferred as VARCHAR[] rather than a scalar (e.g. pandas>=3 groupby
-    # .unique() yields StringArray cells that DuckDB otherwise reads as VARCHAR).
-    df[multilabel_col] = df[multilabel_col].apply(list)
 
     if multilabel_col in sameby:
         sameby = copy(sameby)
