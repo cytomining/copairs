@@ -59,4 +59,3 @@ nav:
       - compute: api/compute.md
       - map: api/map.md
       - replicating: api/replicating.md
-      - plot: api/plot.md
