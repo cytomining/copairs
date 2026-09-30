@@ -1,3 +1,0 @@
-# copairs.plot
-
-::: copairs.plot

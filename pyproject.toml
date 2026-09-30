@@ -29,7 +29,6 @@ test = [
     "pytest>=8.3.4",
     "scikit-learn>=1.3.2",
 ]
-plot = ["plotly"]
 demo = ["notebook", "matplotlib"]
 docs = [
     "mkdocs",
@@ -71,7 +70,6 @@ test = [
     "pytest>=8.3.4",
     "scikit-learn>=1.3.2",
 ]
-plot = ["plotly"]
 demo = ["notebook", "matplotlib"]
 docs = [
     "mkdocs",

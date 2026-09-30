@@ -13,7 +13,6 @@ copairs depends on widely used Python packages:
 * pandas
 * tqdm
 * statsmodels
-* [optional] plotly
 
 ### Installation
 
