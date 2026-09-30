@@ -580,6 +580,16 @@ def find_pairs_multilabel(
     )
 
     df = dframe.reset_index()
+    # pandas groupby().unique() can produce ExtensionArray cells, which DuckDB
+    # otherwise infers as VARCHAR instead of LIST. Keep NumPy arrays and missing
+    # cells intact; list(ndarray) would leave unsupported NumPy scalar elements.
+    df[multilabel_col] = df[multilabel_col].map(
+        lambda labels: (
+            labels.tolist()
+            if isinstance(labels, pd.api.extensions.ExtensionArray)
+            else labels
+        )
+    )
 
     if multilabel_col in sameby:
         sameby = copy(sameby)
