@@ -699,7 +699,7 @@ wheels = [
 
 [[package]]
 name = "copairs"
-version = "0.5.5.dev0"
+version = "0.5.5"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
