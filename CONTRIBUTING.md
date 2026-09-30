@@ -32,7 +32,7 @@ source .venv/bin/activate
 python -m pip install -e ".[test]" prek
 ```
 
-On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` instead. The pip command installs the package in editable mode with test dependencies; add the `demo` or `docs` extras when working on examples or documentation.
+The pip command installs the package in editable mode with test dependencies; add the `demo` or `docs` extras when working on examples or documentation.
 
 ### With Nix
 
