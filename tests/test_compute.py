@@ -12,6 +12,107 @@ SEED = 0
 rng = np.random.default_rng(SEED)
 
 
+def test_resolve_max_workers(monkeypatch):
+    """Worker resolution is bounded, configurable, and task-aware."""
+    monkeypatch.delenv("COPAIRS_MAX_WORKERS", raising=False)
+    monkeypatch.setattr(compute.os, "cpu_count", lambda: 384)
+    monkeypatch.setattr(
+        compute.os, "sched_getaffinity", lambda _: set(range(64)), raising=False
+    )
+    assert compute._resolve_max_workers(1000, None) == 8
+    assert compute._resolve_max_workers(3, None) == 3
+    assert compute._resolve_max_workers(1000, 7) == 7
+
+    monkeypatch.setenv("COPAIRS_MAX_WORKERS", "5")
+    assert compute._resolve_max_workers(1000, None) == 5
+    assert compute._resolve_max_workers(2, None) == 2
+    assert compute._resolve_max_workers(0, None) == 0
+    assert compute._resolve_max_workers(1000, 4) == 4
+
+
+def test_resolve_max_workers_uses_affinity_with_fallback(monkeypatch):
+    """Defaults respect process affinity and portably fall back to CPU count."""
+    monkeypatch.delenv("COPAIRS_MAX_WORKERS", raising=False)
+    monkeypatch.setattr(
+        compute.os, "sched_getaffinity", lambda _: set(range(4)), raising=False
+    )
+    monkeypatch.setattr(compute.os, "cpu_count", lambda: 384)
+    assert compute._resolve_max_workers(100, None) == 4
+
+    def unavailable(_):
+        raise OSError("affinity unavailable")
+
+    monkeypatch.setattr(compute.os, "sched_getaffinity", unavailable)
+    monkeypatch.setattr(compute.os, "cpu_count", lambda: 6)
+    assert compute._resolve_max_workers(100, None) == 6
+
+
+@pytest.mark.parametrize("num_items", [0, 2])
+@pytest.mark.parametrize("value", ["0", "-1", "invalid"])
+def test_resolve_max_workers_rejects_invalid_environment(monkeypatch, num_items, value):
+    """The process-wide worker override is validated even without tasks."""
+    monkeypatch.setenv("COPAIRS_MAX_WORKERS", value)
+    with pytest.raises(ValueError, match="positive integer"):
+        compute._resolve_max_workers(num_items, None)
+
+
+@pytest.mark.parametrize("num_items", [0, 2])
+@pytest.mark.parametrize("value", [0, -1, 1.5, True])
+def test_resolve_max_workers_rejects_invalid_argument(num_items, value):
+    """Explicit worker budgets are validated even without tasks."""
+    error = TypeError if isinstance(value, (float, bool)) else ValueError
+    with pytest.raises(error, match="positive integer"):
+        compute._resolve_max_workers(num_items, value)
+
+
+def test_parallel_map_empty_validates_worker_budget(monkeypatch):
+    """Empty task collections do not bypass worker-budget validation."""
+    with pytest.raises(ValueError, match="positive integer"):
+        compute.parallel_map(lambda _: None, [], progress_bar=False, max_workers=0)
+
+    monkeypatch.setenv("COPAIRS_MAX_WORKERS", "invalid")
+    with pytest.raises(ValueError, match="positive integer"):
+        compute.parallel_map(lambda _: None, [], progress_bar=False)
+
+
+def test_parallel_map_serial_honors_progress_bar(monkeypatch):
+    """Serial execution still reports task progress."""
+    progress_calls = []
+
+    def fake_tqdm(tasks, **kwargs):
+        progress_calls.append(kwargs)
+        return tasks
+
+    monkeypatch.setattr("tqdm.autonotebook.tqdm", fake_tqdm)
+    monkeypatch.setattr(
+        compute,
+        "ThreadPool",
+        lambda *_: pytest.fail("serial execution created a thread pool"),
+    )
+    visited = []
+    compute.parallel_map(
+        visited.append,
+        np.arange(3),
+        progress_bar=True,
+        max_workers=1,
+    )
+
+    assert visited == [0, 1, 2]
+    assert progress_calls == [{"total": 3, "leave": False}]
+
+
+def test_batched_similarity_output_parity_across_worker_budgets():
+    """Worker count does not affect batched similarity output."""
+    feats = rng.normal(size=(12, 7))
+    pairs = rng.integers(0, len(feats), size=(31, 2))
+    similarity_fn = compute.get_similarity_fn("cosine", progress_bar=False)
+
+    serial = similarity_fn(feats, pairs, 4, max_workers=1)
+    parallel = similarity_fn(feats, pairs, 4, max_workers=4)
+
+    np.testing.assert_array_equal(serial, parallel)
+
+
 def corrcoef_naive(feats, pairs):
     """Compute correlation coefficient between pairs of features."""
     corr = np.empty((len(pairs),))
@@ -200,6 +301,26 @@ def test_hamming():
     hamming_fn = compute.get_similarity_fn("hamming")
     hamming = hamming_fn(feats, pairs, batch_size)
     assert np.allclose(hamming_gt, hamming)
+
+
+def test_null_distribution_output_parity_across_worker_budgets(tmp_path):
+    """Native null-distribution output is unchanged by the worker budget."""
+    confs = np.asarray([[1, 5], [2, 7], [3, 9]])
+    kwargs = {
+        "confs": confs,
+        "null_size": 100,
+        "seed": 42,
+        "progress_bar": False,
+    }
+
+    serial = compute.get_null_dists(
+        **kwargs, cache_dir=tmp_path / "serial", max_workers=1
+    )
+    parallel = compute.get_null_dists(
+        **kwargs, cache_dir=tmp_path / "parallel", max_workers=3
+    )
+
+    np.testing.assert_array_equal(serial, parallel)
 
 
 def test_null_dist_cached():

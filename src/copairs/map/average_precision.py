@@ -1,7 +1,7 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -92,6 +92,8 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
     progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -142,6 +144,10 @@ def average_precision(
 
     distance : str
         The distance function used for computing similarities. Default is "cosine".
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
+    max_workers : int, optional
+        Maximum number of worker threads used for similarity calculations.
 
     Returns
     -------
@@ -175,7 +181,9 @@ def average_precision(
     validate_pipeline_input(meta, feats, columns)
 
     # Get the distance function for similarity calculations (e.g., cosine)
-    similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    similarity_fn = compute.get_similarity_fn(
+        distance, progress_bar=progress_bar, max_workers=max_workers
+    )
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
@@ -235,7 +243,12 @@ def average_precision(
 
 
 def p_values(
-    dframe: pd.DataFrame, null_size: int, seed: int, progress_bar: bool = True
+    dframe: pd.DataFrame,
+    null_size: int,
+    seed: int,
+    progress_bar: bool = True,
+    *,
+    max_workers: Optional[int] = None,
 ) -> np.ndarray:
     """Compute p-values for average precision scores based on a null distribution.
 
@@ -257,6 +270,8 @@ def p_values(
         Random seed for reproducibility of the null distribution.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    max_workers : int, optional
+        Maximum number of worker threads used to generate null distributions.
 
     Returns
     -------
@@ -275,7 +290,14 @@ def p_values(
     null_confs = dframe.loc[mask, ["n_pos_pairs", "n_total_pairs"]].values
 
     # Compute p-values for profiles with valid configurations using the null distribution
-    pvals[mask] = compute.p_values(scores, null_confs, null_size, seed, progress_bar)
+    pvals[mask] = compute.p_values(
+        scores,
+        null_confs,
+        null_size,
+        seed,
+        progress_bar,
+        max_workers=max_workers,
+    )
 
     # Return the array of p-values, including NaN for invalid profiles
     return pvals
