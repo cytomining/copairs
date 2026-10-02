@@ -8,8 +8,13 @@ from pathlib import Path
 from multiprocessing.pool import ThreadPool
 
 import numpy as np
+from scipy import __version__ as SCIPY_VERSION
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
+
+_SCIPY_JACCARD_BOOL_INPUT = tuple(
+    int(part) for part in SCIPY_VERSION.split(".")[:2]
+) >= (1, 15)
 
 
 def parallel_map(
@@ -243,9 +248,13 @@ def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
 
 
 def _cdist_diag_sim(
-    x_sample: np.ndarray, y_sample: np.ndarray, metric: str
+    x_sample: np.ndarray, y_sample: np.ndarray, metric: Union[str, Callable]
 ) -> np.ndarray:
-    """Compute similarity based on the diagonal of the ScipY's cdist result (row-wise distance).
+    """Compute distance-based similarity between corresponding rows.
+
+    Common elementwise metrics are evaluated directly to avoid allocating the full
+    pairwise distance matrix. Other SciPy metrics and callable metrics retain the
+    ``cdist`` diagonal fallback.
 
     Parameters
     ----------
@@ -253,17 +262,54 @@ def _cdist_diag_sim(
         A 2D array where each row represents a profile.
     y_sample : np.ndarray
         A 2D array of the same shape as `x_sample`.
-    metric : str
-        The name of the distance metric to use.
+    metric : str or callable
+        The distance metric to use.
 
     Returns
     -------
     np.ndarray
-        A 1D array of distance scores for each row pair in `x_sample` and `y_sample (diagonal).
+        A 1D array of similarity scores for corresponding row pairs.
     """
-    bounded_0_1 = ["jaccard", "hamming"]
-    distance = np.diag(cdist(x_sample, y_sample, metric=metric))
-    if metric in bounded_0_1:
+    bounded_0_1 = isinstance(metric, str) and metric in {"jaccard", "hamming"}
+    if isinstance(metric, str) and metric == "hamming":
+        distance = np.mean(x_sample != y_sample, axis=1)
+    elif isinstance(metric, str) and metric == "jaccard":
+        x_nonzero = x_sample != 0
+        y_nonzero = y_sample != 0
+        nonzero = x_nonzero | y_nonzero
+        union = np.count_nonzero(nonzero, axis=1)
+        if _SCIPY_JACCARD_BOOL_INPUT:
+            unequal = np.count_nonzero(x_nonzero ^ y_nonzero, axis=1)
+        else:
+            # SciPy < 1.15 compared nonzero numeric values directly.
+            unequal = np.count_nonzero((x_sample != y_sample) & nonzero, axis=1)
+        distance = np.divide(
+            unequal,
+            union,
+            out=np.zeros(union.shape, dtype=np.float64),
+            where=union != 0,
+        )
+    elif isinstance(metric, str) and metric in {
+        "euclidean",
+        "sqeuclidean",
+        "cityblock",
+        "manhattan",
+    }:
+        # cdist converts numeric inputs to double precision before evaluating these
+        # metrics. Subtracting with that dtype also avoids boolean/unsigned overflow.
+        with np.errstate(invalid="ignore", over="ignore"):
+            difference = np.subtract(x_sample, y_sample, dtype=np.float64)
+            if metric in {"cityblock", "manhattan"}:
+                np.abs(difference, out=difference)
+            else:
+                np.square(difference, out=difference)
+            distance = np.sum(difference, axis=1)
+            if metric == "euclidean":
+                distance = np.sqrt(distance)
+    else:
+        distance = np.diag(cdist(x_sample, y_sample, metric=metric))
+
+    if bounded_0_1:
         return 1 - distance
     return 1 / (1 + distance)
 
