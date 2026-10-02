@@ -5,9 +5,11 @@ import tempfile
 import itertools
 from typing import Tuple, Union, Callable, Optional
 from pathlib import Path
+from functools import lru_cache
 from multiprocessing.pool import ThreadPool
 
 import numpy as np
+from scipy.stats import norm
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
 
@@ -424,6 +426,53 @@ def ap_contiguous(
     return ap_scores, null_confs
 
 
+def auc_contiguous(rel_k_list: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    """Compute AUC-ROC (auc) scores from relevance labels.
+
+    This function calculates Average Precision (AP) scores for each profile based on
+    relevance labels and their associated counts. It also returns configurations
+    indicating the number of positive and total pairs for each profile.
+
+    Parameters
+    ----------
+    rel_k_list : np.ndarray
+        Array of relevance labels (1 for positive pairs, 0 for negative pairs), sorted
+        by descending similarity within profiles.
+    counts : np.ndarray
+        Array indicating how many times each profile appears in the rank list.
+
+    Returns
+    -------
+    ap_scores : np.ndarray
+        Array of Average Precision scores for each profile.
+    null_confs : np.ndarray
+        Array of configurations, where each row corresponds to:
+        - Number of positive pairs (`num_pos`).
+        - Total number of pairs (`counts`).
+    """
+    # segment starts
+    cutoffs = to_cutoffs(counts)
+
+    # positives/negatives per segment
+    num_pos = np.add.reduceat(rel_k_list, cutoffs, dtype=np.uint32)
+    num_total = counts.astype(np.uint32, copy=False)
+    num_neg = num_total - num_pos
+
+    # 1-based ranks within each segment
+    k = np.arange(1, rel_k_list.size + 1, dtype=np.uint32) - np.repeat(cutoffs, counts)
+
+    # sum of ranks of positive items per segment
+    sum_pos_ranks = np.add.reduceat(k * rel_k_list, cutoffs)
+
+    # Mann–Whitney U and AUC
+    U = sum_pos_ranks - (num_pos * (num_pos + 1) // 2)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        auc = 1 - U / (num_pos * num_neg)
+
+    null_confs = np.stack([num_pos, counts], axis=1)
+    return auc, null_confs
+
+
 def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     """Generate random Average Precision (AP) scores to create a null distribution.
 
@@ -691,3 +740,146 @@ def to_cutoffs(counts: np.ndarray) -> np.ndarray:
     cutoffs[1:] = counts.cumsum()[:-1]
 
     return cutoffs
+
+
+_MW_DIST_CACHE = {}
+
+
+@lru_cache(maxsize=None)
+def _get_mw_dist_dp(n1: int, n2: int) -> np.ndarray:
+    """
+    Compute Mann-Whitney U distribution using iterative DP with float64 probabilities.
+
+    Returns
+    -------
+    np.ndarray
+        P(U=u | n1, n2) for u in 0...n1*n2.
+    """
+    if n1 > n2:
+        n1, n2 = n2, n1
+
+    if (n1, n2) in _MW_DIST_CACHE:
+        return _MW_DIST_CACHE[(n1, n2)]
+
+    if n1 == 0:
+        return np.array([1.0], dtype=np.float64)
+
+    # Iteratively compute up to (n1, n2)
+    for i in range(1, n1 + 1):
+        for j in range(i, n2 + 1):  # ensure i <= j for symmetry
+            if (i, j) in _MW_DIST_CACHE:
+                continue
+
+            def get_cached(a, b):
+                if a > b:
+                    a, b = b, a
+                if a == 0:
+                    return np.array([1.0], dtype=np.float64)
+                return _MW_DIST_CACHE[(a, b)]
+
+            p_prev_j = get_cached(i, j - 1)
+            p_prev_i = get_cached(i - 1, j)
+
+            w_j = j / (i + j)
+            w_i = i / (i + j)
+
+            dist = np.zeros(i * j + 1, dtype=np.float64)
+            dist[: len(p_prev_j)] += w_j * p_prev_j
+            dist[j : j + len(p_prev_i)] += w_i * p_prev_i
+
+            _MW_DIST_CACHE[(i, j)] = dist
+
+    return _MW_DIST_CACHE[(n1, n2)]
+
+
+def compute_auc_pvalues(
+    u_scores: np.ndarray, n_pos: np.ndarray, n_total: np.ndarray
+) -> np.ndarray:
+    """
+    Compute analytical p-values for ROC AUC scores (equivalent to the Mann-Whitney U test).
+
+    This function uses a hybrid approach:
+    - Exact Dynamic Programming (DP) for small samples (n1, n2 <= 50).
+    - Asymptotic Normal Approximation for large samples.
+
+    Parameters
+    ----------
+    u_scores : np.ndarray
+        1D array of Mann-Whitney U-statistics (count of pairs (x, y) with x > y).
+    n_pos : np.ndarray
+        1D array of positive sample counts (n1).
+    n_total : np.ndarray
+        1D array of total sample counts (n_pos + n_neg).
+
+    Returns
+    -------
+    np.ndarray
+        1D array of p-values for the upper tail: P(U >= u_obs).
+    """
+    u_scores = np.asarray(u_scores, dtype=np.float64)
+    n_pos = np.asarray(n_pos, dtype=np.int32)
+    n_total = np.asarray(n_total, dtype=np.int32)
+    n_neg = n_total - n_pos
+
+    p_values = np.empty(len(u_scores), dtype=np.float64)
+
+    # 1. Thresholding Logic
+    # Small regime if n1*n2 <= 10000 AND both n1, n2 <= 50.
+    mask_small = (n_pos * n_neg <= 10000) & (np.maximum(n_pos, n_neg) <= 50)
+    mask_large = ~mask_small
+
+    # 2. Large Regime (Asymptotic Approximation)
+    if np.any(mask_large):
+        u_l = u_scores[mask_large]
+        n1_l = n_pos[mask_large]
+        n2_l = n_neg[mask_large]
+
+        # Mean and Variance of U
+        mu = n1_l.astype(np.float64) * n2_l.astype(np.float64) / 2.0
+        # Standard variance (no ties assumed)
+        # Use float64 to avoid overflow for large n
+        var = (
+            n1_l.astype(np.float64)
+            * n2_l.astype(np.float64)
+            * (n1_l.astype(np.float64) + n2_l.astype(np.float64) + 1.0)
+            / 12.0
+        )
+        std = np.sqrt(var)
+
+        # Upper tail: P(U >= u_obs)
+        # Continuity correction: u_obs -> u_obs - 0.5
+        z = (u_l - 0.5 - mu) / std
+        p_values[mask_large] = norm.sf(z)
+
+    # 3. Small Regime (Exact Dynamic Programming)
+    if np.any(mask_small):
+        u_s = u_scores[mask_small]
+        n1_s = n_pos[mask_small]
+        n2_s = n_neg[mask_small]
+
+        # Group by configuration to minimize DP calls
+        confs = np.stack([n1_s, n2_s], axis=1)
+        unique_confs, inverse = np.unique(confs, axis=0, return_inverse=True)
+
+        for i, (n1, n2) in enumerate(unique_confs):
+            dist = _get_mw_dist_dp(n1, n2)
+            cdf = np.cumsum(dist)
+
+            idx = np.where(inverse == i)[0]
+            vals = u_s[idx]
+
+            # Exact upper tail: P(U >= u)
+            u_ceil = np.ceil(vals).astype(np.int32)
+
+            res = np.zeros_like(vals)
+            # If u_ceil <= 0, P(U >= u) = 1.0
+            res[u_ceil <= 0] = 1.0
+
+            # If 0 < u_ceil <= max_u, P(U >= u) = 1 - cdf[u_ceil - 1]
+            mask_mid = (u_ceil > 0) & (u_ceil <= n1 * n2)
+            res[mask_mid] = 1.0 - cdf[u_ceil[mask_mid] - 1]
+
+            # If u_ceil > max_u, P(U >= u) = 0.0
+            p_values[np.where(mask_small)[0][idx]] = res
+
+    return p_values

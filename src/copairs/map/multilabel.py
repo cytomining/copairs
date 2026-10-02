@@ -39,7 +39,7 @@ def _create_neg_query_solver(neg_pairs, neg_sims):
 
 
 def _build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
-    ap_scores_list, null_confs_list, ix_list = [], [], []
+    ap_scores_list, auc_scores_list, null_confs_list, ix_list = [], [], [], []
 
     start = 0
     for end in pos_counts.cumsum():
@@ -63,14 +63,16 @@ def _build_rank_lists_multi(pos_pairs, pos_sims, pos_counts, negs_for):
         _, counts = np.unique(ix, return_counts=True)
         ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
         ap_scores_list.append(ap_scores)
+        auc_scores, _ = compute.auc_contiguous(rel_k_list, counts)
+        auc_scores_list.append(auc_scores)
         null_confs_list.append(null_confs)
         ix_list.append(query)
-    return ap_scores_list, null_confs_list, ix_list
+    return ap_scores_list, auc_scores_list, null_confs_list, ix_list
 
 
 def average_precision(
     meta: pd.DataFrame,
-    feats: pd.DataFrame,
+    feats: np.ndarray,
     pos_sameby: List[str],
     pos_diffby: List[str],
     neg_sameby: List[str],
@@ -123,7 +125,7 @@ def average_precision(
 
     logger.info("Computing AP per label...")
     negs_for = _create_neg_query_solver(neg_pairs, neg_sims)
-    ap_scores_list, null_confs_list, ix_list = _build_rank_lists_multi(
+    ap_scores_list, auc_scores_list, null_confs_list, ix_list = _build_rank_lists_multi(
         pos_pairs, pos_sims, pos_counts, negs_for
     )
 
@@ -142,6 +144,7 @@ def average_precision(
             {
                 "average_precision": ap_scores_list[i],
                 "normalized_average_precision": normalized_scores,
+                "roc_auc": auc_scores_list[i],
                 "n_pos_pairs": null_confs_list[i][:, 0],
                 "n_total_pairs": null_confs_list[i][:, 1],
                 "ix": ix_list[i],
