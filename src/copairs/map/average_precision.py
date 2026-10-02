@@ -194,13 +194,35 @@ def average_precision(
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find negative pairs.")
 
-    # Compute similarities for positive pairs
-    logger.info("Computing positive similarities...")
-    pos_sims = similarity_fn(feats, pos_pairs, batch_size)
+    # Cosine retrieval reuses profile rows across many pairs. For the exact
+    # built-in cosine string, normalize each referenced row once and evaluate
+    # indexed pair dot products. Other strings and callables retain the generic
+    # batched similarity path.
+    if isinstance(distance, str) and distance == "cosine":
+        profile_ix = np.unique(np.concatenate((pos_pairs, neg_pairs)))
+        normalized_feats = compute.prepare_cosine(feats, profile_ix)
 
-    # Compute similarities for negative pairs
-    logger.info("Computing negative similarities...")
-    neg_sims = similarity_fn(feats, neg_pairs, batch_size)
+        logger.info("Computing positive similarities...")
+        pos_sims = compute.cosine_pairs(
+            normalized_feats,
+            pos_pairs,
+            batch_size,
+            progress_bar=progress_bar,
+        )
+
+        logger.info("Computing negative similarities...")
+        neg_sims = compute.cosine_pairs(
+            normalized_feats,
+            neg_pairs,
+            batch_size,
+            progress_bar=progress_bar,
+        )
+    else:
+        logger.info("Computing positive similarities...")
+        pos_sims = similarity_fn(feats, pos_pairs, batch_size)
+
+        logger.info("Computing negative similarities...")
+        neg_sims = similarity_fn(feats, neg_pairs, batch_size)
 
     # Build rank lists for calculating average precision
     logger.info("Building rank lists...")

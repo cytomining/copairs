@@ -14,6 +14,17 @@ from copairs.map.multilabel import average_precision as multilabel_average_preci
 SEED = 0
 
 
+def _with_layout(feats: np.ndarray, layout: str) -> np.ndarray:
+    """Return feature values with the requested memory layout."""
+    if layout == "fortran":
+        return np.asfortranarray(feats)
+    if layout == "strided":
+        backing = np.empty((len(feats), feats.shape[1] * 2), dtype=feats.dtype)
+        backing[:, ::2] = feats
+        return backing[:, ::2]
+    return feats
+
+
 def binary2indices(arr: np.ndarray) -> np.ndarray:
     """Convert a binary matrix to a list of indices."""
     return np.nonzero(arr)[1].reshape(arr.shape[0], -1)
@@ -216,6 +227,208 @@ def test_raise_nan_error():
         average_precision(
             meta_nan, feats, pos_sameby, pos_diffby, neg_sameby, neg_diffby
         )
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("layout", ["fortran", "strided"])
+def test_cosine_fast_path_exact_regular_parity_with_ties(dtype, layout):
+    """The cosine fast path preserves positive-first ranking for exact ties."""
+    meta = pd.DataFrame(
+        {
+            "compound": ["a", "a", "b", "b", "c", "c"],
+            "plate": ["p1", "p2", "p1", "p2", "p1", "p2"],
+        }
+    )
+    # Every pair has exactly the same cosine similarity, so the expected AP of
+    # one verifies that positive pairs still precede tied negative pairs.
+    feats = np.tile(
+        np.asarray([0.125, -1.5, 2.25, 0.75, -0.0625], dtype=dtype),
+        (len(meta), 1),
+    )
+    feats = _with_layout(feats, layout)
+    kwargs = {
+        "meta": meta,
+        "feats": feats,
+        "pos_sameby": ["compound"],
+        "pos_diffby": [],
+        "neg_sameby": [],
+        "neg_diffby": ["compound"],
+        "progress_bar": False,
+        "batch_size": 2,
+    }
+
+    generic = average_precision(distance=compute.pairwise_cosine, **kwargs)
+    optimized = average_precision(distance="cosine", **kwargs)
+
+    pd.testing.assert_frame_equal(optimized, generic, check_exact=True)
+    np.testing.assert_array_equal(optimized["average_precision"], 1.0)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("layout", ["fortran", "strided"])
+def test_cosine_fast_path_exact_multilabel_parity_with_ties(dtype, layout):
+    """Multilabel cosine retrieval preserves exact grouped tie semantics."""
+    meta = pd.DataFrame(
+        {
+            "compound": ["a", "b", "c", "d"],
+            "target": [["x"], ["x", "y"], ["y"], ["z"]],
+        }
+    )
+    feats = np.tile(
+        np.asarray([0.125, -1.5, 2.25, 0.75, -0.0625], dtype=dtype),
+        (len(meta), 1),
+    )
+    feats = _with_layout(feats, layout)
+    kwargs = {
+        "meta": meta,
+        "feats": feats,
+        "pos_sameby": ["target"],
+        "pos_diffby": [],
+        "neg_sameby": [],
+        "neg_diffby": ["target"],
+        "multilabel_col": "target",
+        "progress_bar": False,
+        "batch_size": 2,
+    }
+
+    generic = multilabel_average_precision(distance=compute.pairwise_cosine, **kwargs)
+    optimized = multilabel_average_precision(distance="cosine", **kwargs)
+
+    pd.testing.assert_frame_equal(optimized, generic, check_exact=True)
+    np.testing.assert_array_equal(optimized["average_precision"], 1.0)
+
+
+def test_cosine_fast_path_regular_skips_unpaired_nonfinite_rows():
+    """Regular cosine preparation only normalizes profiles found in pairs."""
+    meta = pd.DataFrame(
+        {
+            "compound": ["a", "a", "b", "b", "zero", "inf"],
+            "cohort": ["main", "main", "main", "main", "zero", "inf"],
+        }
+    )
+    feats = np.asarray(
+        [
+            [1.0, 0.5],
+            [0.75, 1.0],
+            [-0.5, 1.0],
+            [1.0, -0.25],
+            [0.0, 0.0],
+            [np.inf, 1.0],
+        ]
+    )
+    kwargs = {
+        "meta": meta,
+        "feats": feats,
+        "pos_sameby": ["compound"],
+        "pos_diffby": [],
+        "neg_sameby": ["cohort"],
+        "neg_diffby": ["compound"],
+        "progress_bar": False,
+        "batch_size": 2,
+    }
+
+    with np.errstate(all="raise"):
+        generic = average_precision(distance=compute.pairwise_cosine, **kwargs)
+        optimized = average_precision(distance="cosine", **kwargs)
+
+    pd.testing.assert_frame_equal(optimized, generic, check_exact=True)
+
+
+def test_cosine_fast_path_multilabel_skips_unpaired_nonfinite_rows():
+    """Multilabel preparation only normalizes profiles found in pairs."""
+    meta = pd.DataFrame(
+        {
+            "target": [["x"], ["x"], ["y"], ["y"], ["zero"], ["inf"]],
+            "cohort": ["main", "main", "main", "main", "zero", "inf"],
+        }
+    )
+    feats = np.asarray(
+        [
+            [1.0, 0.5],
+            [0.75, 1.0],
+            [-0.5, 1.0],
+            [1.0, -0.25],
+            [0.0, 0.0],
+            [np.inf, 1.0],
+        ]
+    )
+    kwargs = {
+        "meta": meta,
+        "feats": feats,
+        "pos_sameby": ["target"],
+        "pos_diffby": [],
+        "neg_sameby": ["cohort"],
+        "neg_diffby": ["target"],
+        "multilabel_col": "target",
+        "progress_bar": False,
+        "batch_size": 2,
+    }
+
+    with np.errstate(all="raise"):
+        generic = multilabel_average_precision(
+            distance=compute.pairwise_cosine, **kwargs
+        )
+        optimized = multilabel_average_precision(distance="cosine", **kwargs)
+
+    pd.testing.assert_frame_equal(optimized, generic, check_exact=True)
+
+
+def test_generic_string_and_callable_similarity_fallback(monkeypatch):
+    """Non-cosine strings and custom callables retain generic batch processing."""
+    meta = pd.DataFrame(
+        {"compound": ["a", "a", "b", "b"], "plate": ["p1", "p2", "p1", "p2"]}
+    )
+    feats = np.eye(len(meta))
+    kwargs = {
+        "meta": meta,
+        "feats": feats,
+        "pos_sameby": ["compound"],
+        "pos_diffby": [],
+        "neg_sameby": [],
+        "neg_diffby": ["compound"],
+        "progress_bar": False,
+    }
+
+    def fail_fast_path(*args, **kwargs):
+        raise AssertionError("cosine fast path must not handle fallback metrics")
+
+    monkeypatch.setattr(compute, "cosine_pairs", fail_fast_path)
+    string_result = average_precision(distance="euclidean", **kwargs)
+
+    calls = []
+
+    def custom_distance(x_sample, y_sample):
+        calls.append(len(x_sample))
+        return compute.pairwise_euclidean(x_sample, y_sample)
+
+    callable_result = average_precision(distance=custom_distance, **kwargs)
+
+    pd.testing.assert_frame_equal(string_result, callable_result, check_exact=True)
+    assert calls
+
+
+def test_cosine_fast_path_forwards_progress_setting(monkeypatch):
+    """Each cosine pair set retains the requested progress-bar setting."""
+    progress_settings = []
+
+    def sequential_map(par_func, items, progress_bar=True):
+        progress_settings.append(progress_bar)
+        for item in items:
+            par_func(item)
+
+    monkeypatch.setattr(compute, "parallel_map", sequential_map)
+    meta = pd.DataFrame({"compound": ["a", "a", "b", "b"]})
+    average_precision(
+        meta,
+        np.eye(len(meta)),
+        pos_sameby=["compound"],
+        pos_diffby=[],
+        neg_sameby=[],
+        neg_diffby=["compound"],
+        progress_bar=False,
+    )
+
+    assert progress_settings == [False, False]
 
 
 def test_progress_bar_consistency():
