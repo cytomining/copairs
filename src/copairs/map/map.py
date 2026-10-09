@@ -221,6 +221,9 @@ def mean_average_precision(
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
         Location to save the cache.
+    pos_pairs : np.ndarray, optional
+        Positive pairs used to compute the AP scores; see `get_map_pvalue`.
+        Needed when a group's positives are not its other members.
 
     Returns
     -------
@@ -270,6 +273,7 @@ def mean_average_precision_hierarchical(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    pos_pairs: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -310,6 +314,9 @@ def mean_average_precision_hierarchical(
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
         Location to save the cache.
+    pos_pairs : np.ndarray, optional
+        Positive pairs used to compute the AP scores; see `get_map_pvalue`.
+        Needed when a group's positives are not its other members.
 
     Returns
     -------
@@ -339,6 +346,7 @@ def mean_average_precision_hierarchical(
         progress_bar=progress_bar,
         max_workers=max_workers,
         cache_dir=cache_dir,
+        pos_pairs=pos_pairs,
     )
 
     # Step 2: Apply hierarchical multiple testing correction
