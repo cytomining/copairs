@@ -274,3 +274,73 @@ def test_null_dist_cached_parallel():
         # All workers should return identical results
         for r in results:
             assert np.array_equal(results[0], r)
+
+
+def explicit_map_null(members, edges, null_size, seed):
+    """Draw every similarity explicitly and sort each full list, as a reference for `random_map`."""
+    rng = np.random.default_rng(seed)
+    shared = rng.random((null_size, len(edges)))
+    total = np.zeros(null_size)
+    for i, (num_pos, num_neg) in enumerate(members):
+        mine = [e for e, pair in enumerate(edges) if i in pair]
+        private = rng.random((null_size, num_pos - len(mine) + num_neg))
+        vals = np.concatenate([shared[:, mine], private], axis=1)
+        labels = np.r_[np.ones(num_pos), np.zeros(num_neg)]
+        rel = labels[np.argsort(-vals, axis=1)]
+        precision = np.cumsum(rel, axis=1) / np.arange(1, num_pos + num_neg + 1)
+        total += (precision * rel).sum(axis=1) / num_pos
+    return total / len(members)
+
+
+def test_random_map_singleton_is_the_ap_null():
+    """A group of one member follows the same law as `random_ap`."""
+    from scipy.stats import ks_2samp
+
+    joint = compute.random_map([(3, 100)], [], 50_000, seed=1)
+    single = compute.random_ap(50_000, 3, 103, seed=2).astype(np.float64)
+    assert ks_2samp(joint, single).pvalue > 0.001
+
+
+@pytest.mark.parametrize(
+    "members, edges",
+    [
+        # four replicates: every pair inside the group is a positive
+        ([(3, 100)] * 4, [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]),
+        # a cycle of four, each member with one more positive outside the group
+        ([(3, 50), (3, 60), (3, 50), (3, 60)], [(0, 1), (1, 2), (2, 3), (3, 0)]),
+        # a path of four with no positives outside the group
+        ([(1, 30), (2, 40), (2, 40), (1, 30)], [(0, 1), (1, 2), (2, 3)]),
+    ],
+)
+def test_random_map_matches_explicit_simulation(members, edges):
+    """Placing negatives by gaps reproduces drawing every similarity explicitly."""
+    from scipy.stats import ks_2samp
+
+    fast = compute.random_map(members, edges, 50_000, seed=3)
+    slow = explicit_map_null(members, edges, 50_000, seed=4)
+    assert ks_2samp(fast, slow).pvalue > 0.001
+
+
+def test_random_map_narrows_with_replicates():
+    """The mAP null of four replicates is tighter than one AP, wider than four independent."""
+    members = [(3, 100)] * 4
+    edges = [(i, j) for i in range(4) for j in range(i + 1, 4)]
+    null = compute.random_map(members, edges, 100_000, seed=5)
+    sd_ap = compute.random_ap(100_000, 3, 103, seed=5).std()
+    assert sd_ap / 2 < null.std() < sd_ap
+    # Closed forms for 3 positives among 103 (shntnu/expected_ap, ap_moments.py):
+    # E[AP] = 0.069263 and, with the pair (i, j) shared by both lists, sd(mAP) = 0.049071.
+    assert abs(null.mean() - 0.069263) < 0.0007
+    assert abs(null.std() - 0.049071) < 0.0007
+
+
+def test_random_map_is_reproducible_and_validates():
+    """Same inputs give the same stream; inconsistent inputs are rejected."""
+    members, edges = [(2, 10), (2, 10), (2, 10)], [(0, 1), (1, 2), (0, 2)]
+    a = compute.random_map(members, edges, 1000, seed=7)
+    assert np.array_equal(a, compute.random_map(members, edges, 1000, seed=7))
+    assert not np.array_equal(a, compute.random_map(members, edges, 1000, seed=8))
+    with pytest.raises(ValueError):
+        compute.random_map([(1, 10), (1, 10), (1, 10)], edges, 10, seed=7)
+    with pytest.raises(ValueError):
+        compute.random_map(members, [(0, 0)], 10, seed=7)
