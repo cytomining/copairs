@@ -1,9 +1,10 @@
 """Functions to compute distances and ranks using numpy operations."""
 
 import os
+import hashlib
 import tempfile
 import itertools
-from typing import Tuple, Union, Callable, Optional
+from typing import Tuple, Union, Callable, Optional, Sequence
 from pathlib import Path
 from multiprocessing.pool import ThreadPool
 
@@ -460,6 +461,90 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     # Compute Average Precision (AP) scores for each row of the binary matrix
     null_dist = average_precision(rel_k)
     return null_dist
+
+
+def random_map(
+    members: Sequence[Tuple[int, int]],
+    edges: Sequence[Tuple[int, int]],
+    null_size: int,
+    seed: int,
+    chunk: int = 200_000,
+) -> np.ndarray:
+    """Null distribution of a group's mAP, sampled jointly over its members.
+
+    Under the null every pair's similarity is an independent random number. A
+    positive pair between two members of the group (an edge) is ONE number that
+    sits in both members' rank lists, so their APs move together exactly as much
+    as the retrieval bookkeeping dictates. Everything else a member ranks is
+    private to it. Each member's marginal is the uniform placement of its
+    positives that `random_ap` samples, so per-profile AP p-values are unchanged;
+    only the null of the average changes.
+
+    Per member and sample, its shared values and private positives are drawn
+    explicitly and sorted; its negatives are then dropped into the gaps between
+    them with one multinomial draw, so the cost does not depend on how many
+    negatives it ranks.
+
+    Parameters
+    ----------
+    members : sequence of (num_pos, num_neg)
+        Positive and negative pair counts of each member of the group.
+    edges : sequence of (i, j)
+        Positive pairs between members i and j (local indices into `members`).
+    null_size : int
+        Number of mAP samples.
+    seed : int
+        Master seed; the stream is a pure function of (seed, members, edges).
+
+    Returns
+    -------
+    np.ndarray
+        `null_size` samples of the group's mAP under the null.
+    """
+    n = len(members)
+    members = [(int(num_pos), int(num_neg)) for num_pos, num_neg in members]
+    edges = sorted({(min(int(i), int(j)), max(int(i), int(j))) for i, j in edges})
+    key = repr((int(seed), tuple(sorted(members)), tuple(edges)))
+    digest = hashlib.blake2b(key.encode(), digest_size=8).digest()
+    rng = np.random.default_rng(int.from_bytes(digest, "little"))
+
+    incident = [[] for _ in range(n)]
+    for e, (i, j) in enumerate(edges):
+        if i == j or not (0 <= i < n and 0 <= j < n):
+            raise ValueError(f"edge {(i, j)} does not join two distinct members")
+        incident[i].append(e)
+        incident[j].append(e)
+    plan = []
+    for i, (num_pos, num_neg) in enumerate(members):
+        shared = len(incident[i])
+        if num_pos < 1 or shared > num_pos or num_neg < 0:
+            raise ValueError(
+                f"member {i} has {num_pos} positives, {num_neg} negatives and "
+                f"{shared} positive pairs inside the group"
+            )
+        plan.append(
+            (np.array(incident[i], dtype=np.int64), num_pos - shared, num_pos, num_neg)
+        )
+
+    out = np.empty(null_size, dtype=np.float64)
+    done = 0
+    while done < null_size:
+        b = min(chunk, null_size - done)
+        shared_vals = rng.random((b, len(edges)))
+        total = np.zeros(b)
+        for edge_ix, private_pos, num_pos, num_neg in plan:
+            vals = np.concatenate(
+                [shared_vals[:, edge_ix], rng.random((b, private_pos))], axis=1
+            )
+            vals = -np.sort(-vals, axis=1)  # the member's positives, best first
+            bounds = np.concatenate([np.ones((b, 1)), vals, np.zeros((b, 1))], axis=1)
+            gaps = -np.diff(bounds, axis=1)  # room for negatives around each positive
+            above = np.cumsum(rng.multinomial(num_neg, gaps), axis=1)[:, :-1]
+            t = np.arange(1, num_pos + 1)
+            total += (t / (t + above)).sum(axis=1) / num_pos
+        out[done : done + b] = total / n
+        done += b
+    return out
 
 
 def _cache_read(path: Path) -> Optional[np.ndarray]:
