@@ -11,6 +11,7 @@ updates:
   # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuring-dependabot-version-updates
   - package-ecosystem: "github-actions"
     directory: "/"
+    open-pull-requests-limit: 0
     schedule:
       # Check for updates to GitHub Actions every month
       interval: "monthly"
