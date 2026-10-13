@@ -14,7 +14,7 @@ from scipy.spatial.distance import cdist
 
 from copairs import nulls
 from copairs.methods import check_method
-from copairs.nulls.pvalues import resolve_seed
+from copairs.nulls.pvalues import resolve_seed, _check_null_size
 
 
 def parallel_map(
@@ -662,9 +662,24 @@ def get_null_dists(
     if method == "legacy":
         return _get_null_dists_legacy(confs, null_size, seed, cache_dir, progress_bar)
     confs = np.asarray(confs)
-    if len(confs) == 0:
-        return np.empty((0, null_size), dtype=np.float32)
-    return nulls.ap_nulls(confs, null_size, resolve_seed(seed), backend=backend)
+    null_size = _check_null_size(null_size)
+    out = np.full((len(confs), null_size), np.nan, dtype=np.float32)
+    ranked = ~_without_positives(confs)
+    if ranked.any():
+        out[ranked] = nulls.ap_nulls(
+            confs[ranked], null_size, resolve_seed(seed), backend=backend
+        )
+    return out
+
+
+def _without_positives(confs: np.ndarray) -> np.ndarray:
+    """Mask of configurations with no positives, whose AP is undefined.
+
+    copairs 0.5.5 gives them NaN nulls and p-values of 1; sample ``j`` of any
+    other configuration does not depend on them.
+    """
+    confs = np.asarray(confs).reshape(-1, 2)
+    return (confs[:, 0] == 0) & (confs[:, 1] >= 0)
 
 
 def _get_null_dists_legacy(
@@ -743,16 +758,24 @@ def p_values(
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
 
     if method == "fast":
-        pvals = nulls.ap_pvalues(
-            ap_scores,
-            rev_ix.ravel(),
-            confs,
-            null_size,
-            seed,
-            backend=backend,
-            progress_bar=progress_bar,
-        )
-        return pvals.astype(np.float32)
+        rev_ix = rev_ix.ravel()
+        ranked = ~_without_positives(confs)
+        pvals = np.ones(len(rev_ix), dtype=np.float32)
+        rows = ranked[rev_ix]
+        if rows.any():
+            index = np.cumsum(ranked) - 1  # configuration -> row of confs[ranked]
+            pvals[rows] = nulls.ap_pvalues(
+                np.asarray(ap_scores)[rows],
+                index[rev_ix[rows]],
+                confs[ranked],
+                null_size,
+                seed,
+                backend=backend,
+                progress_bar=progress_bar,
+            )
+        else:
+            _check_null_size(null_size)
+        return pvals
 
     # Generate null distributions for each unique configuration
     null_dists = _get_null_dists_legacy(

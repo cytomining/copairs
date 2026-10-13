@@ -346,3 +346,32 @@ def test_random_map_is_reproducible_and_validates():
         compute.random_map(members, [(0, 0)], 10, seed=7)
     with pytest.raises(ValueError, match="chunk"):
         compute.random_map(members, edges, 10, seed=7, chunk=0)
+
+
+def test_configurations_without_positives(tmp_path):
+    """Configurations with no positives get NaN nulls and p = 1, as in copairs 0.5.5.
+
+    Callers such as the paper's simulations pass every ranked profile's
+    configuration, controls (0 positives) included.
+    """
+    confs = np.array([[0, 10], [2, 10], [0, 0], [3, 3]])
+    kwargs = dict(seed=0, progress_bar=False)
+    legacy = compute.get_null_dists(
+        confs, 50, method="legacy", cache_dir=tmp_path, **kwargs
+    )
+    fast = compute.get_null_dists(confs, 50, **kwargs)
+    assert fast.dtype == np.float32
+    np.testing.assert_array_equal(np.isnan(fast), np.isnan(legacy))
+    assert np.isnan(fast[[0, 2]]).all()
+    np.testing.assert_array_equal(
+        fast[[1, 3]], compute.get_null_dists(confs[[1, 3]], 50, **kwargs)
+    )
+    scores = np.array([np.nan, 0.5, np.nan, 1.0])
+    p = compute.p_values(scores, confs, 100, **kwargs)
+    legacy_p = compute.p_values(scores, confs, 100, method="legacy", **kwargs)
+    assert p[0] == p[2] == legacy_p[0] == legacy_p[2] == 1.0
+    assert p[1] == compute.p_values(scores[[1]], confs[[1]], 100, **kwargs)[0]
+    with pytest.raises(ValueError, match="num_pos"):
+        compute.get_null_dists(np.array([[0, -1]]), 50, **kwargs)
+    with pytest.raises(ValueError, match="null_size"):
+        compute.get_null_dists(np.array([[0, 10]]), -1, **kwargs)
