@@ -160,3 +160,15 @@ def test_rejects_unsupported_layouts():
             meta_ap, ["moa", "half"], 100, 0.05, 0, progress_bar=False,
             null="permutation", pairs=pairs,
         )  # fmt: skip
+
+
+def test_rank_table_matches_binary_search(monkeypatch):
+    """Pools above RANK_POOL search sorted rows; both paths give the same draws."""
+    meta = layout_meta(2, 2, 4)
+    feats = np.random.default_rng(3).standard_normal((len(meta), 5))
+    spec = dict(SPEC, neg_sameby=["plate"])
+    ranked = draws_of(meta, feats, spec, 5000)
+    monkeypatch.setattr(permutation, "RANK_POOL", 0)
+    searched = draws_of(meta, feats, spec, 5000)
+    assert ranked[1:3] == searched[1:3]
+    np.testing.assert_array_equal(ranked[3], searched[3])
