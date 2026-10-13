@@ -348,12 +348,15 @@ def test_random_map_is_reproducible_and_validates():
         compute.random_map(members, edges, 10, seed=7, chunk=0)
 
 
-def test_configurations_without_positives(tmp_path):
+def test_configurations_without_positives(tmp_path, monkeypatch):
     """Configurations with no positives get NaN nulls and p = 1, as in copairs 0.5.5.
 
     Callers such as the paper's simulations pass every ranked profile's
     configuration, controls (0 positives) included.
     """
+    # Legacy p_values caches under ~/.copairs by configuration while seeding by
+    # position, so writing there would change other tests' legacy nulls.
+    monkeypatch.setenv("HOME", str(tmp_path))
     confs = np.array([[0, 10], [2, 10], [0, 0], [3, 3]])
     kwargs = dict(seed=0, progress_bar=False)
     legacy = compute.get_null_dists(
