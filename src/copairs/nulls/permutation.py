@@ -29,8 +29,11 @@ _uniform = numba.njit(inline="always")(uniform53)
 
 # Draws per parallel task; each task allocates its scratch once.
 _TASK = 128
-# Reference profiles per group pool; the pool's key matrix is MAX_POOL**2 floats.
+# Reference profiles per group pool; a pool keeps its key matrix and each
+# reference's sorted keys, about 2 * MAX_POOL**2 float32 (2 GiB).
 MAX_POOL = 2**14
+# Pairs per similarity call (and per sorted chunk) while building a pool.
+_PAIR_CHUNK = 2**20
 # Pools up to this size also store each reference's rank of every pool
 # profile (RANK_POOL**2 int32), replacing a binary search per positive.
 RANK_POOL = 2**12
@@ -282,22 +285,37 @@ class _Pool:
         size = np.cumsum([0] + [len(b) for b in blocks])
         self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         r = len(self.refs)
-        ia, ib = np.triu_indices(r, k=1)
         krr = np.zeros((r, r), dtype=np.float32)
-        if len(ia):
-            krr[ia, ib] = _keys(similarity, self.refs[ia], self.refs[ib])
-            krr[ib, ia] = krr[ia, ib]
+        lo = 0
+        while lo < r:  # rows lo:hi against columns lo:, mirrored below the diagonal
+            hi = min(r, lo + max(1, _PAIR_CHUNK // (r - lo)))
+            keys = _keys(
+                similarity,
+                np.repeat(self.refs[lo:hi], r - lo),
+                np.tile(self.refs[lo:], hi - lo),
+            ).reshape(hi - lo, r - lo)
+            krr[lo:hi, lo:] = keys
+            krr[lo:, lo:hi] = keys.T
+            lo = hi
+        np.fill_diagonal(krr, 0)
         self.krr = krr
         # Each reference's keys to the other references of its block, sorted.
-        ptr, vals = [0], []
+        # Its own key becomes NaN, which sorts last, and is cut off.
+        width = self.cr_hi - self.cr_lo
+        self.srr_ptr = np.concatenate(
+            [[0], np.cumsum(np.repeat(np.maximum(width - 1, 0), width))]
+        ).astype(np.int64)
+        self.srr = np.empty(self.srr_ptr[-1], dtype=np.float32)
         for lo, hi in zip(self.cr_lo, self.cr_hi):
-            block = krr[lo:hi, lo:hi]
-            off = ~np.eye(hi - lo, dtype=bool)
-            rows = np.sort(block[off].reshape(hi - lo, max(hi - lo - 1, 0)), axis=1)
-            vals.append(rows.ravel())
-            ptr.extend(ptr[-1] + (hi - lo - 1) * np.arange(1, hi - lo + 1))
-        self.srr_ptr = np.asarray(ptr, dtype=np.int64)
-        self.srr = np.concatenate(vals) if vals else np.zeros(0, dtype=np.float32)
+            step = max(1, _PAIR_CHUNK // max(hi - lo, 1))
+            for a in range(lo, hi, step):
+                b = min(hi, a + step)
+                rows = krr[a:b, lo:hi].copy()
+                rows[np.arange(b - a), np.arange(a - lo, b - lo)] = np.nan
+                rows.sort(axis=1)
+                self.srr[self.srr_ptr[a] : self.srr_ptr[b]] = rows[
+                    :, : hi - lo - 1
+                ].ravel()
         self.ranked = r <= RANK_POOL
         self.rrr = np.zeros((r, r) if self.ranked else (0, 0), dtype=np.int32)
         if self.ranked:
