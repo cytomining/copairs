@@ -344,3 +344,5 @@ def test_random_map_is_reproducible_and_validates():
         compute.random_map([(1, 10), (1, 10), (1, 10)], edges, 10, seed=7)
     with pytest.raises(ValueError):
         compute.random_map(members, [(0, 0)], 10, seed=7)
+    with pytest.raises(ValueError, match="chunk"):
+        compute.random_map(members, edges, 10, seed=7, chunk=0)
