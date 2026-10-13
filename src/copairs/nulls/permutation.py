@@ -29,6 +29,8 @@ _uniform = numba.njit(inline="always")(uniform53)
 
 # Draws per parallel task; each task allocates its scratch once.
 _TASK = 128
+# A slot sorts up to this many drawn profiles by insertion, more by quicksort.
+_INSERTION = 128
 # Reference profiles per group pool; a pool keeps its key matrix and each
 # reference's sorted keys, about 2 * MAX_POOL**2 float32 (2 GiB).
 MAX_POOL = 2**14
@@ -39,18 +41,16 @@ _PAIR_CHUNK = 2**20
 RANK_POOL = 2**12
 
 
-@numba.njit(inline="always")
-def _less(a, key):
-    """Return whether ``a`` ranks before ``key`` (NaN sorts last, as in NumPy)."""
-    return not np.isnan(a) and (np.isnan(key) or a < key)
+# Rank code of a NaN key: after every number.
+_NAN = np.uint32(0xFFFFFFFF)
 
 
 @numba.njit(inline="always")
 def _count_less(row, lo, hi, key):
-    """Return ``lo`` plus the entries of sorted ``row[lo:hi]`` ranking before ``key``."""
+    """Return ``lo`` plus the entries of sorted ``row[lo:hi]`` below ``key``."""
     while lo < hi:
         mid = (lo + hi) >> 1
-        if _less(row[mid], key):
+        if row[mid] < key:
             lo = mid + 1
         else:
             hi = mid
@@ -59,7 +59,7 @@ def _count_less(row, lo, hi, key):
 
 @numba.njit(inline="always")
 def _key(x, y, n, kmu, krr):
-    """Rank key between pool codes ``x`` and ``y`` (members ``< n``, references after)."""
+    """Rank code between pool codes ``x`` and ``y`` (members ``< n``, references after)."""
     if x < n:
         return kmu[x, y]
     if y < n:
@@ -79,7 +79,7 @@ def _rank(x, y, n, rmu, rcm, rrr):
 
 @numba.njit(parallel=True, cache=True)
 def _row_ranks(row_ptr, rows, keys, out):
-    """``out[i, j]``: entries of sorted ``rows[row_ptr[i]:row_ptr[i + 1]]`` before ``keys[i, j]``."""
+    """``out[i, j]``: entries of sorted ``rows[row_ptr[i]:row_ptr[i + 1]]`` below ``keys[i, j]``."""
     for i in numba.prange(keys.shape[0]):
         lo, hi = row_ptr[i], row_ptr[i + 1]
         for j in range(keys.shape[1]):
@@ -87,83 +87,108 @@ def _row_ranks(row_ptr, rows, keys, out):
 
 
 @numba.njit(inline="always")
-def _sort_with(keys, vals, size):
-    """Sort ``keys[:size]`` in place (NaN last), carrying ``vals`` along."""
+def _sort_entries(ent, size):
+    """Sort ``ent[:size]`` in place."""
+    if size > _INSERTION:
+        ent[:size].sort()
+        return
     for i in range(1, size):
-        k, v = keys[i], vals[i]
+        v = ent[i]
         z = i - 1
-        while z >= 0 and _less(k, keys[z]):
-            keys[z + 1] = keys[z]
-            vals[z + 1] = vals[z]
+        while z >= 0 and ent[z] > v:
+            ent[z + 1] = ent[z]
             z -= 1
-        keys[z + 1] = k
-        vals[z + 1] = v
-
-
-@numba.njit(inline="always")
-def _sort_keys(keys, size):
-    for i in range(1, size):
-        k = keys[i]
-        z = i - 1
-        while z >= 0 and _less(k, keys[z]):
-            keys[z + 1] = keys[z]
-            z -= 1
-        keys[z + 1] = k
+        ent[z + 1] = v
 
 
 @numba.njit(cache=True)
 def _group_map(
-    pm, in_pm, n, slot_block, adj_ptr, adj, bm_ptr, bm_slot, kmu, krr,
-    srr_ptr, srr, smr_ptr, smr, rmu, rcm, rrr, ranked, pk, pr, plus, minus,
+    pm, n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr, srr_ptr,
+    srr, rmu, rcm, rrr, ranked, members, refs, ent, rank, term,
 ):  # fmt: skip
     """Return the mAP of the group whose slot ``s`` holds pool code ``pm[s]``.
 
-    A slot's rank list is its adjacent slots (positives) and its block's pool
-    minus the block's pseudo-members (negatives). Counting the negatives
-    ranked before each positive: the block's references (a stored rank when
-    ``ranked``, else a binary search in the code's sorted row), plus original
-    members not drawn, minus drawn references.
+    The profile ``x`` in slot ``s`` ranks its adjacent slots (positives)
+    against its block's pool minus the profiles drawn into the block
+    (negatives). Its codes to the drawn profiles and their reference ranks
+    are gathered first, splitting the slots into drawn members and drawn
+    references so that each loop reads one table. The drawn profiles that
+    count, one ``(code, slot)`` integer each, are then sorted and walked in
+    ``x``'s rank order: the negatives before a positive are the pool profiles
+    ranked before it (references: its rank; members: a merge with ``x``'s
+    sorted member codes) minus the drawn ones ranked before it. Precisions are
+    summed in rank order.
     """
+    n_mem = 0
+    n_ref = 0
+    for t in range(n):
+        if pm[t] < n:
+            members[n_mem] = t
+            n_mem += 1
+        else:
+            refs[n_ref] = t
+            n_ref += 1
     total = 0.0
     for s in range(n):
         x = pm[s]
         b = slot_block[s]
-        deg = adj_ptr[s + 1] - adj_ptr[s]
-        for d in range(deg):
-            y = pm[adj[adj_ptr[s] + d]]
-            pk[d] = _key(x, y, n, kmu, krr)
-            pr[d] = _rank(x, y, n, rmu, rcm, rrr) if ranked else 0
-        _sort_with(pk, pr, deg)
-        n_plus = 0
-        n_minus = 0
-        for e in range(bm_ptr[b], bm_ptr[b + 1]):
-            m = bm_slot[e]
-            if not in_pm[m]:
-                plus[n_plus] = _key(x, m, n, kmu, krr)
-                n_plus += 1
-            q = pm[m]
-            if q >= n and q != x:
-                minus[n_minus] = _key(x, q, n, kmu, krr)
-                n_minus += 1
-        _sort_keys(plus, n_plus)
-        _sort_keys(minus, n_minus)
+        if x < n:
+            for t in range(n):
+                y = pm[t]
+                ent[t] = (np.uint64(kmu[x, y]) << np.uint64(32)) | np.uint64(t)
+                if ranked:
+                    rank[t] = rmu[x, y]
+        else:
+            xr = x - n
+            for i in range(n_mem):
+                t = members[i]
+                y = pm[t]
+                ent[t] = (np.uint64(kmu[y, x]) << np.uint64(32)) | np.uint64(t)
+                if ranked:
+                    rank[t] = rcm[xr, y]
+            for i in range(n_ref):
+                t = refs[i]
+                y = pm[t] - n
+                ent[t] = (np.uint64(krr[xr, y]) << np.uint64(32)) | np.uint64(t)
+                if ranked:
+                    rank[t] = rrr[xr, y]
+        size = 0
+        for t in range(n):  # keep the slots that count, in place
+            ent[size] = ent[t]
+            size += t != s and (adjm[s, t] or slot_block[t] == b)
+        _sort_entries(ent, size)
         if x < n:
             row, lo, hi = smr, smr_ptr[x], smr_ptr[x + 1]
         else:
             row, lo, hi = srr, srr_ptr[x - n], srr_ptr[x - n + 1]
-        ip = 0
-        im = 0
+        g0, g1 = gptr[x], gptr[x + 1]
+        g = g0
+        d = 0
+        drawn = 0  # drawn block profiles ranked strictly before ``key``
+        tied = 0  # drawn block profiles tied with ``key`` so far
+        key = np.uint64(0)
+        for e in range(size):
+            k = ent[e] >> np.uint64(32)
+            t = np.int64(ent[e] & np.uint64(0xFFFFFFFF))
+            if e == 0 or k != key:
+                drawn += tied
+                tied = 0
+                key = k
+                while g < g1 and grow[g] < key:
+                    g += 1
+            if adjm[s, t]:
+                if ranked:
+                    before = np.int64(rank[t])
+                else:
+                    before = _count_less(row, lo, hi, key) - lo
+                before += g - g0 - drawn
+                term[d] = (d + 1) / (d + 1 + before)
+                d += 1
+            tied += slot_block[t] == b
         acc = 0.0
-        for d in range(deg):
-            key = pk[d]
-            while ip < n_plus and _less(plus[ip], key):
-                ip += 1
-            while im < n_minus and _less(minus[im], key):
-                im += 1
-            refs = pr[d] if ranked else _count_less(row, lo, hi, key) - lo
-            before = refs + ip - im
-            acc += (d + 1) / (d + 1 + before)
-        total += acc / deg
+        for d in range(deg[s]):
+            acc += term[d]
+        total += acc / deg[s]
     return total / n
 
 
@@ -177,7 +202,7 @@ def _next_uniform(c0, c1, blk, spare, k0, k1):
 
 
 @numba.njit(inline="always")
-def _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, in_pm, chosen):
+def _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen):
     """Fill ``pm`` with draw ``j``.
 
     In each block, the members' slots get a uniform random subset of the
@@ -187,7 +212,6 @@ def _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, in_pm, chose
     c1 = np.uint64(j) >> S32
     blk = 0
     spare = -1.0
-    in_pm[:] = False
     for b in range(n_block):
         k = bm_ptr[b + 1] - bm_ptr[b]
         p = k + cr_hi[b] - cr_lo[b]
@@ -209,7 +233,6 @@ def _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, in_pm, chose
             e = chosen[z]
             if e < k:
                 code = bm_slot[bm_ptr[b] + e]
-                in_pm[code] = True
             else:
                 code = n + cr_lo[b] + e - k
             pm[bm_slot[bm_ptr[b] + z]] = code
@@ -217,9 +240,9 @@ def _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, in_pm, chose
 
 @numba.njit(parallel=True, cache=True)
 def _permutation_count(
-    n, slot_block, adj_ptr, adj, bm_ptr, bm_slot, cr_lo, cr_hi, kmu, krr,
-    srr_ptr, srr, smr_ptr, smr, rmu, rcm, rrr, ranked, k0, k1, tol, null_size,
-    out,
+    n, slot_block, adjm, deg, bm_ptr, bm_slot, cr_lo, cr_hi, kmu, krr, gptr,
+    grow, smr_ptr, smr, srr_ptr, srr, rmu, rcm, rrr, ranked, k0, k1, tol,
+    null_size, out,
 ):  # fmt: skip
     """Count draws with mAP ``>= identity - tol`` (stored in ``out`` if it has room).
 
@@ -227,33 +250,29 @@ def _permutation_count(
     observed labels.
     """
     n_block = len(bm_ptr) - 1
-    max_deg = max(1, np.max(np.diff(adj_ptr)))
     max_k = max(1, np.max(np.diff(bm_ptr)))
     identity = _group_map(
-        np.arange(n), np.ones(n, dtype=np.bool_), n, slot_block, adj_ptr, adj,
-        bm_ptr, bm_slot, kmu, krr, srr_ptr, srr, smr_ptr, smr, rmu, rcm, rrr,
-        ranked, np.empty(max_deg, kmu.dtype), np.empty(max_deg, rmu.dtype),
-        np.empty(max_k, kmu.dtype), np.empty(max_k, kmu.dtype),
+        np.arange(n), n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr,
+        smr, srr_ptr, srr, rmu, rcm, rrr, ranked, np.empty(n, np.int64),
+        np.empty(n, np.int64), np.empty(n, np.uint64), np.empty(n, np.int32),
+        np.empty(n, np.float64),
     )  # fmt: skip
     thr = identity - tol
     n_tasks = (null_size + _TASK - 1) // _TASK
     hits = np.zeros(n_tasks, dtype=np.int64)
     for task in numba.prange(n_tasks):
         pm = np.empty(n, dtype=np.int64)
-        in_pm = np.empty(n, dtype=np.bool_)
         chosen = np.empty(max_k, dtype=np.int64)
-        pk = np.empty(max_deg, dtype=kmu.dtype)
-        pr = np.empty(max_deg, dtype=rmu.dtype)
-        plus = np.empty(max_k, dtype=kmu.dtype)
-        minus = np.empty(max_k, dtype=kmu.dtype)
+        members = np.empty(n, dtype=np.int64)
+        refs = np.empty(n, dtype=np.int64)
+        ent = np.empty(n, dtype=np.uint64)
+        rank = np.empty(n, dtype=np.int32)
+        term = np.empty(n, dtype=np.float64)
         for j in range(task * _TASK, min(null_size, (task + 1) * _TASK)):
-            _draw(
-                j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, in_pm, chosen
-            )
+            _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen)
             v = _group_map(
-                pm, in_pm, n, slot_block, adj_ptr, adj, bm_ptr, bm_slot, kmu, krr,
-                srr_ptr, srr, smr_ptr, smr, rmu, rcm, rrr, ranked, pk, pr, plus,
-                minus,
+                pm, n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr,
+                srr_ptr, srr, rmu, rcm, rrr, ranked, members, refs, ent, rank, term,
             )  # fmt: skip
             if j < len(out):
                 out[j] = v
@@ -263,11 +282,19 @@ def _permutation_count(
 
 
 def _keys(similarity, a, b):
-    """float32 rank keys of the pairs ``(a[i], b[i])``, oriented ``(min, max)``."""
+    """Rank codes of the pairs ``(a[i], b[i])``, oriented ``(min, max)``.
+
+    A pair's float32 rank key, as copairs ranks pairs (fastap.ranking.rank_keys;
+    not imported, since fastap imports this package), mapped to a uint32 with
+    the same order: NaN after every number, and -0 equal to 0.
+    """
     pairs = np.stack([np.minimum(a, b), np.maximum(a, b)], axis=1)
-    # As copairs ranks pairs (fastap.ranking.rank_keys; not imported, since
-    # fastap imports this package).
-    return np.float32(1) - np.asarray(similarity(pairs), dtype=np.float32)
+    keys = np.float32(1) - np.asarray(similarity(pairs), dtype=np.float32)
+    keys += np.float32(0)  # -0 -> +0
+    bits = keys.view(np.uint32)
+    codes = np.where(bits >= 0x80000000, ~bits, bits | np.uint32(0x80000000))
+    codes[np.isnan(keys)] = _NAN
+    return codes.astype(np.uint32)
 
 
 class _Pool:
@@ -285,7 +312,7 @@ class _Pool:
         size = np.cumsum([0] + [len(b) for b in blocks])
         self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         r = len(self.refs)
-        krr = np.zeros((r, r), dtype=np.float32)
+        krr = np.zeros((r, r), dtype=np.uint32)
         lo = 0
         while lo < r:  # rows lo:hi against columns lo:, mirrored below the diagonal
             hi = min(r, lo + max(1, _PAIR_CHUNK // (r - lo)))
@@ -299,19 +326,19 @@ class _Pool:
             lo = hi
         np.fill_diagonal(krr, 0)
         self.krr = krr
-        # Each reference's keys to the other references of its block, sorted.
-        # Its own key becomes NaN, which sorts last, and is cut off.
+        # Each reference's codes to the other references of its block, sorted.
+        # Its own code becomes NaN's, which sorts last, and is cut off.
         width = self.cr_hi - self.cr_lo
         self.srr_ptr = np.concatenate(
             [[0], np.cumsum(np.repeat(np.maximum(width - 1, 0), width))]
         ).astype(np.int64)
-        self.srr = np.empty(self.srr_ptr[-1], dtype=np.float32)
+        self.srr = np.empty(self.srr_ptr[-1], dtype=np.uint32)
         for lo, hi in zip(self.cr_lo, self.cr_hi):
             step = max(1, _PAIR_CHUNK // max(hi - lo, 1))
             for a in range(lo, hi, step):
                 b = min(hi, a + step)
                 rows = krr[a:b, lo:hi].copy()
-                rows[np.arange(b - a), np.arange(a - lo, b - lo)] = np.nan
+                rows[np.arange(b - a), np.arange(a - lo, b - lo)] = _NAN
                 rows.sort(axis=1)
                 self.srr[self.srr_ptr[a] : self.srr_ptr[b]] = rows[
                     :, : hi - lo - 1
@@ -483,30 +510,46 @@ def permutation_null(
     ``out`` receives the draws' mAPs if given.
     """
     members = np.asarray(members, dtype=np.int64)
+    block_of = np.asarray(block_of, dtype=np.int64)
     n = len(members)
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
-    order = np.argsort(block_of, kind="stable")
-    bm_slot = order.astype(np.int64)
-    bm_ptr = np.searchsorted(block_of[order], np.arange(len(blocks) + 1)).astype(
-        np.int64
-    )
-    adj_lists = [[] for _ in range(n)]
-    for i, j in edges:
-        adj_lists[i].append(j)
-        adj_lists[j].append(i)
-    adj_ptr = np.cumsum([0] + [len(a) for a in adj_lists]).astype(np.int64)
-    adj = np.asarray([j for a in adj_lists for j in a], dtype=np.int64)
+    bm_slot = np.argsort(block_of, kind="stable").astype(np.int64)
+    bm_ptr = np.searchsorted(block_of[bm_slot], np.arange(len(blocks) + 1))
+    bm_ptr = bm_ptr.astype(np.int64)
+    adjm = np.zeros((n, n), dtype=np.bool_)
+    edges = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+    adjm[edges[:, 0], edges[:, 1]] = True
+    adjm[edges[:, 1], edges[:, 0]] = True
+    deg = adjm.sum(axis=1).astype(np.int64)
     targets = np.concatenate([members, pool.refs])
     kmu = _keys(
         similarity, np.repeat(members, len(targets)), np.tile(targets, n)
     ).reshape(n, len(targets))
+    # Each member's codes to its block's references, sorted.
     smr_rows = [
         np.sort(kmu[i, n + pool.cr_lo[block_of[i]] : n + pool.cr_hi[block_of[i]]])
         for i in range(n)
     ]
     smr_ptr = np.cumsum([0] + [len(r) for r in smr_rows]).astype(np.int64)
     smr = np.concatenate(smr_rows)
+    # Each pool code's codes to its block's members, sorted, its own cut off.
+    widths = np.diff(bm_ptr)
+    code_block = np.concatenate(
+        [block_of, np.repeat(np.arange(len(blocks)), pool.cr_hi - pool.cr_lo)]
+    )
+    gptr = np.concatenate([[0], np.cumsum(widths[code_block])]).astype(np.int64)
+    grow = np.empty(gptr[-1], dtype=np.uint32)
+    for b in range(len(blocks)):
+        block_members = bm_slot[bm_ptr[b] : bm_ptr[b + 1]]
+        codes = np.concatenate(
+            [block_members, n + np.arange(pool.cr_lo[b], pool.cr_hi[b])]
+        )
+        rows = kmu[block_members][:, codes].T.copy()
+        own = np.arange(len(block_members))
+        rows[own, own] = _NAN
+        rows.sort(axis=1)
+        grow[gptr[codes][:, None] + np.arange(widths[b])] = rows
     if pool.ranked:
         rmu = np.empty(kmu.shape, dtype=np.int32)
         _row_ranks(smr_ptr, smr, kmu, rmu)
@@ -517,8 +560,8 @@ def permutation_null(
     k0, k1 = group_key(seed, members)
     out = np.zeros(0) if out is None else out
     count, identity = _permutation_count(
-        n, block_of.astype(np.int64), adj_ptr, adj, bm_ptr, bm_slot, pool.cr_lo,
-        pool.cr_hi, kmu, pool.krr, pool.srr_ptr, pool.srr, smr_ptr, smr, rmu, rcm,
+        n, block_of, adjm, deg, bm_ptr, bm_slot, pool.cr_lo, pool.cr_hi, kmu,
+        pool.krr, gptr, grow, smr_ptr, smr, pool.srr_ptr, pool.srr, rmu, rcm,
         pool.rrr, pool.ranked, k0, k1, TIE_TOL, int(null_size), out,
     )  # fmt: skip
     return int(count), float(identity), pool
