@@ -297,6 +297,25 @@ def _keys(similarity, a, b):
     return codes.astype(np.uint32)
 
 
+def _key_matrix(similarity, profiles):
+    """Rank codes between all ``profiles``, ``_PAIR_CHUNK`` pairs at a time."""
+    r = len(profiles)
+    out = np.zeros((r, r), dtype=np.uint32)
+    lo = 0
+    while lo < r:  # rows lo:hi against columns lo:, mirrored below the diagonal
+        hi = min(r, lo + max(1, _PAIR_CHUNK // (r - lo)))
+        keys = _keys(
+            similarity,
+            np.repeat(profiles[lo:hi], r - lo),
+            np.tile(profiles[lo:], hi - lo),
+        ).reshape(hi - lo, r - lo)
+        out[lo:hi, lo:] = keys
+        out[lo:, lo:hi] = keys.T
+        lo = hi
+    np.fill_diagonal(out, 0)
+    return out
+
+
 class _Pool:
     """Reference keys of one pool: its blocks' references, concatenated."""
 
@@ -312,20 +331,7 @@ class _Pool:
         size = np.cumsum([0] + [len(b) for b in blocks])
         self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         r = len(self.refs)
-        krr = np.zeros((r, r), dtype=np.uint32)
-        lo = 0
-        while lo < r:  # rows lo:hi against columns lo:, mirrored below the diagonal
-            hi = min(r, lo + max(1, _PAIR_CHUNK // (r - lo)))
-            keys = _keys(
-                similarity,
-                np.repeat(self.refs[lo:hi], r - lo),
-                np.tile(self.refs[lo:], hi - lo),
-            ).reshape(hi - lo, r - lo)
-            krr[lo:hi, lo:] = keys
-            krr[lo:, lo:hi] = keys.T
-            lo = hi
-        np.fill_diagonal(krr, 0)
-        self.krr = krr
+        self.krr = krr = _key_matrix(similarity, self.refs)
         # Each reference's codes to the other references of its block, sorted.
         # Its own code becomes NaN's, which sorts last, and is cut off.
         width = self.cr_hi - self.cr_lo
