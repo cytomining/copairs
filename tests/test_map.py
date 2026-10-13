@@ -283,15 +283,20 @@ def test_map_pvalue_replicates_use_the_joint_null():
     meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
     feats = rng.standard_normal((len(meta), 10))
     ap_scores = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
-    inferred = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, progress_bar=False)
+    kwargs = dict(progress_bar=False, null="joint")
+    bare = ap_scores.copy()
+    bare.attrs.clear()  # no attached pairs: positives are inferred
+    inferred = get_map_pvalue(bare, ["g"], 20_000, SEED, **kwargs)
+    attached = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, **kwargs)
     explicit = get_map_pvalue(
-        ap_scores,
+        bare,
         ["g"],
         20_000,
         SEED,
-        progress_bar=False,
         pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+        **kwargs,
     )
+    assert attached["p_value"].tolist() == explicit["p_value"].tolist()
     assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
     assert ((inferred["p_value"] > 0) & (inferred["p_value"] <= 1)).all()
 
@@ -303,7 +308,9 @@ def test_map_pvalue_narrows_with_group_size():
     rows = []
     for n in (2, 4, 8):
         rows += [(f"n{n}", 0.18, n - 1, n - 1 + 100)] * n
-    result = get_map_pvalue(_ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False)
+    result = get_map_pvalue(
+        _ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False, null="joint"
+    )
     p = result.set_index("g")["p_value"]
     assert p["n2"] > p["n4"] > p["n8"]
 
@@ -315,7 +322,13 @@ def test_map_pvalue_falls_back_with_warning(tmp_path):
     rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
     with pytest.warns(UserWarning, match="pos_pairs"):
         result = get_map_pvalue(
-            _ap_frame(rows), ["g"], 1000, SEED, progress_bar=False, cache_dir=tmp_path
+            _ap_frame(rows),
+            ["g"],
+            1000,
+            SEED,
+            progress_bar=False,
+            cache_dir=tmp_path,
+            null="joint",
         )
     p = result.set_index("g")["p_value"]
     assert 0 < p["odd"] <= 1 and 0 < p["rep"] <= 1
@@ -333,8 +346,11 @@ def test_map_pvalue_rejects_misaligned_pos_pairs():
     ap, pairs = average_precision(
         meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
     )
-    inferred = get_map_pvalue(ap, ["g"], 2000, SEED, progress_bar=False)
-    explicit = get_map_pvalue(ap, ["g"], 2000, SEED, progress_bar=False, pairs=pairs)
+    bare = ap.copy()
+    bare.attrs.clear()
+    kwargs = dict(progress_bar=False, null="joint")
+    inferred = get_map_pvalue(bare, ["g"], 2000, SEED, **kwargs)
+    explicit = get_map_pvalue(bare, ["g"], 2000, SEED, pairs=pairs, **kwargs)
     assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
     with pytest.raises(ValueError, match="pos_pairs must index"):
         get_map_pvalue(
@@ -344,4 +360,5 @@ def test_map_pvalue_rejects_misaligned_pos_pairs():
             SEED,
             progress_bar=False,
             pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+            null="joint",
         )

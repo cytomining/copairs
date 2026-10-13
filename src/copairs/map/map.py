@@ -17,7 +17,7 @@ from copairs.map.hierarchical_fdr import (
     check_hierarchical_by,
     apply_hierarchical_fdr_correction,
 )
-from copairs.map.average_precision import RankPairs, LabelPairs
+from copairs.map.average_precision import RankPairs, LabelPairs, attached_pairs
 
 logger = logging.getLogger("copairs")
 
@@ -111,20 +111,42 @@ def get_map_pvalue(
         - `indices`: List of indices in the original ap_scores for this group.
 
     """
+    check_method(method, backend)
+    null = check_null(method, null)
+    if pairs is None:
+        pairs = attached_pairs(ap_scores)
+    if null != "joint" and pos_pairs is not None:
+        raise ValueError("pos_pairs is used by the joint null only")
+    if null == "permutation" and pairs is None:
+        raise ValueError(
+            "null='permutation' (the fast method's default) needs the pairs the "
+            "APs were computed from. average_precision attaches them to the "
+            "frame it returns, and these AP scores have none: they were built, "
+            "loaded from disk, pickled or concatenated from several AP calls. "
+            "Recompute the APs, pass pairs=, or choose null='joint' or "
+            "null='copied'."
+        )
+    try:
+        return _map_pvalues(
+            ap_scores, sameby, null_size, seed, progress_bar, max_workers,
+            cache_dir, method, backend, pos_pairs, null, pairs,
+        )  # fmt: skip
+    finally:
+        release = getattr(getattr(pairs, "similarity", None), "release", None)
+        if release is not None:
+            release()
+
+
+def _map_pvalues(
+    ap_scores, sameby, null_size, seed, progress_bar, max_workers, cache_dir,
+    method, backend, pos_pairs, null, pairs,
+):  # fmt: skip
+    """:func:`get_map_pvalue` with its null and pairs resolved."""
     # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
     profile = ap_scores.index.to_numpy()
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
-    check_method(method, backend)
-    null = check_null(method, null)
-    if null != "joint" and pos_pairs is not None:
-        raise ValueError("pos_pairs is used by the joint null only")
-    if null == "permutation" and pairs is None:
-        raise ValueError(
-            "null='permutation' needs pairs: use the RankPairs from "
-            "average_precision(..., return_pairs=True)"
-        )
     if null == "joint" and pos_pairs is None and type(pairs) is RankPairs:
         pos_pairs = pairs.pos  # LabelPairs index profiles, not AP rows
     null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values

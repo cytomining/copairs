@@ -13,11 +13,10 @@ from copairs.matching import (
     sorted_unique_pairs,
     find_pairs_multilabel,
 )
-from copairs.fastap.ranking import _host
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
-from .average_precision import LabelPairs
+from .average_precision import LabelPairs, attach_pairs, _FeatureSimilarity
 
 logger = logging.getLogger("copairs")
 
@@ -96,10 +95,11 @@ def average_precision(
     Returns normalized_average_precision in addition to average_precision.
     ``method`` and ``backend`` are as in :func:`copairs.map.average_precision`;
     the fast method computes per-label APs on the CPU with Numba (``"cuda"``
-    accelerates similarities only). With ``return_pairs``, also returns the
-    :class:`~copairs.map.LabelPairs` the APs were computed from, which
-    ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
-    needs.
+    accelerates similarities only). The :class:`~copairs.map.LabelPairs` the
+    APs were computed from, which ``null="permutation"`` in
+    :func:`copairs.map.mean_average_precision` needs, are attached to the
+    returned frame as in :func:`copairs.map.average_precision`;
+    ``return_pairs`` also returns them.
 
     See Also
     --------
@@ -156,7 +156,7 @@ def average_precision(
         return LabelPairs(
             np.asarray(pos_pairs),
             np.asarray(neg_pairs),
-            lambda p: _host(similarity(p)),
+            _FeatureSimilarity(method, backend, feats, distance, batch_size),
             profile=np.asarray(profile, dtype=np.int64),
             label_col=multilabel_col,
             keys=np.asarray(keys),
@@ -188,7 +188,9 @@ def average_precision(
             }
         )
         results = _merge_results(meta, results, multilabel_col)
-        return (results, pairs_of(ix)) if return_pairs else results
+        pairs = pairs_of(ix)
+        attach_pairs(results, pairs)
+        return (results, pairs) if return_pairs else results
 
     logger.info("Computing AP per label...")
     negs_for = _create_neg_query_solver(neg_pairs, neg_sims)
@@ -220,7 +222,9 @@ def average_precision(
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
     merged = _merge_results(meta, results, multilabel_col)
-    return (merged, pairs_of(np.concatenate(ix_list))) if return_pairs else merged
+    pairs = pairs_of(np.concatenate(ix_list))
+    attach_pairs(merged, pairs)
+    return (merged, pairs) if return_pairs else merged
 
 
 def _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, method, keys):

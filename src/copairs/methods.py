@@ -20,11 +20,11 @@ def check_method(method: str, backend: str = "auto") -> None:
 def check_null(method: str, null: str | None) -> str:
     """Return the mAP null to use, ``null`` or the method's default.
 
-    The fast method defaults to the ``"joint"`` null; ``method="legacy"``
+    The fast method defaults to the ``"permutation"`` null; ``method="legacy"``
     reproduces copairs <= 0.5.5, whose null is ``"copied"``.
     """
     if null is None:
-        return "joint" if method == "fast" else "copied"
+        return "permutation" if method == "fast" else "copied"
     if null not in NULLS:
         raise ValueError(f"unknown null {null!r}; expected one of {NULLS}")
     if method == "legacy" and null != "copied":

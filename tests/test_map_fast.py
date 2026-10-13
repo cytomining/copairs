@@ -82,7 +82,7 @@ def test_float32_scores_count_ties(backend):
             "n_total_pairs": 3,
         }
     )
-    fast = mean_average_precision(scores, ["g"], threshold=0.05, **kwargs)
+    fast = mean_average_precision(scores, ["g"], threshold=0.05, null="joint", **kwargs)
     assert fast["p_value"].iloc[0] == 1.0
 
 

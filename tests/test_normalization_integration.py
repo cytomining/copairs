@@ -134,6 +134,7 @@ def test_mean_average_precision_with_normalization():
         null_size=100,
         threshold=0.05,
         seed=42,
+        null="copied",  # a mock AP table has no pairs to permute
     )
 
     assert "mean_average_precision" in result.columns
@@ -175,6 +176,7 @@ def test_mean_average_precision_no_progress_bar():
         threshold=0.05,
         seed=42,
         progress_bar=False,
+        null="copied",
     )
 
     assert len(result) == 2

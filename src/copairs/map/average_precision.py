@@ -17,12 +17,86 @@ from .normalization import normalize_ap
 logger = logging.getLogger("copairs")
 
 
+# Key of the pairs an AP function attaches to the frame it returns.
+PAIRS_ATTR = "copairs_pairs"
+
+
+class _AttachedPairs(dict):
+    """A frame's pairs, carried in ``DataFrame.attrs``.
+
+    pandas deep-copies ``attrs`` on every operation and writes them to parquet
+    as JSON. This handle is shared by copies, serializes as ``{}`` and pickles
+    to an empty handle, so frames stay cheap to copy and safe to save, and a
+    reloaded frame has no pairs. Handles are equal only to themselves, so
+    pandas drops them when concatenating frames of different AP calls.
+    """
+
+    __slots__ = ("pairs",)
+
+    def __init__(self, pairs=None):
+        super().__init__()
+        self.pairs = pairs
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __reduce__(self):
+        return (_AttachedPairs, ())
+
+    def __eq__(self, other):
+        return self is other
+
+    def __ne__(self, other):
+        return self is not other
+
+
+def attach_pairs(frame: pd.DataFrame, pairs) -> pd.DataFrame:
+    """Attach ``pairs`` to ``frame`` (in place) and return it."""
+    frame.attrs[PAIRS_ATTR] = _AttachedPairs(pairs)
+    return frame
+
+
+def attached_pairs(frame: pd.DataFrame):
+    """Return the pairs an AP function attached to ``frame``, or None."""
+    handle = frame.attrs.get(PAIRS_ATTR)
+    return handle.pairs if isinstance(handle, _AttachedPairs) else None
+
+
+class _FeatureSimilarity:
+    """``pairs -> similarities`` (NumPy) of an AP call's features.
+
+    Holds the features, not the kernel built from them (which may live on the
+    GPU): the kernel is built on first use with the AP call's method, backend
+    and distance, so similarities equal the AP stage's, and dropped by
+    :meth:`release`.
+    """
+
+    def __init__(self, method, backend, feats, distance, batch_size):
+        self._setup = (method, backend, feats, distance, batch_size)
+        self._fn = None
+
+    def __call__(self, pairs):
+        if self._fn is None:
+            method, backend, feats, distance, batch_size = self._setup
+            self._fn = fastap.setup(
+                method, backend, feats, distance, batch_size, False
+            )[1]
+        return _host(self._fn(pairs))
+
+    def release(self):
+        """Drop the kernel, and with it any copy of the features it holds."""
+        self._fn = None
+
+
 @dataclass(frozen=True)
 class RankPairs:
     """The pairs behind an AP table, for mAP nulls that re-rank profiles.
 
-    Returned by ``average_precision(..., return_pairs=True)``; indices are rows
-    of the frame returned with it.
+    Attached to the frame :func:`average_precision` returns (and returned with
+    it by ``return_pairs=True``); indices are rows of that frame.
 
     Attributes
     ----------
@@ -219,7 +293,11 @@ def average_precision(
     return_pairs : bool
         Also return the :class:`RankPairs` the APs were computed from, which
         ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
-        needs.
+        needs. They are attached to the returned frame either way, in
+        ``frame.attrs["copairs_pairs"]``, and follow it through filtering
+        and copies (not saving, pickling or concatenating with other AP
+        calls' frames). They hold a reference to ``feats``; drop them with
+        ``frame.attrs.pop("copairs_pairs")``.
 
     Returns
     -------
@@ -318,9 +396,13 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
-    if return_pairs:
-        return meta, RankPairs(pos_pairs, neg_pairs, lambda p: _host(similarity(p)))
-    return meta
+    pairs = RankPairs(
+        pos_pairs,
+        neg_pairs,
+        _FeatureSimilarity(method, backend, feats, distance, batch_size),
+    )
+    attach_pairs(meta, pairs)
+    return (meta, pairs) if return_pairs else meta
 
 
 def p_values(
