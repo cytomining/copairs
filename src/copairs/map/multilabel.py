@@ -13,9 +13,11 @@ from copairs.matching import (
     sorted_unique_pairs,
     find_pairs_multilabel,
 )
+from copairs.fastap.ranking import _host
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
+from .average_precision import LabelPairs
 
 logger = logging.getLogger("copairs")
 
@@ -86,6 +88,7 @@ def average_precision(
     progress_bar: bool = True,
     method: str = "fast",
     backend: str = "auto",
+    return_pairs: bool = False,
 ) -> pd.DataFrame:
     """
     Compute average precision with multilabel support.
@@ -93,7 +96,10 @@ def average_precision(
     Returns normalized_average_precision in addition to average_precision.
     ``method`` and ``backend`` are as in :func:`copairs.map.average_precision`;
     the fast method computes per-label APs on the CPU with Numba (``"cuda"``
-    accelerates similarities only).
+    accelerates similarities only). With ``return_pairs``, also returns the
+    :class:`~copairs.map.LabelPairs` the APs were computed from, which
+    ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
+    needs.
 
     See Also
     --------
@@ -141,6 +147,24 @@ def average_precision(
     logger.info("Computing negative similarities...")
     neg_sims = similarity(neg_pairs)
 
+    def pairs_of(profile):
+        lone = lone_key = None
+        if multilabel_col in neg_diffby and multilabel_col not in neg_sameby:
+            lone, lone_key = _lone_pairs(
+                meta, multilabel_col, neg_sameby, neg_diffby, method, keys
+            )
+        return LabelPairs(
+            np.asarray(pos_pairs),
+            np.asarray(neg_pairs),
+            lambda p: _host(similarity(p)),
+            profile=np.asarray(profile, dtype=np.int64),
+            label_col=multilabel_col,
+            keys=np.asarray(keys),
+            pos_key=np.repeat(np.arange(len(pos_counts)), pos_counts),
+            lone=lone,
+            lone_key=lone_key,
+        )
+
     if method == "fast":
         logger.info("Computing AP per label...")
         label, ix, ap, num_pos, total = fast_multilabel.multilabel_ap(
@@ -163,7 +187,8 @@ def average_precision(
                 multilabel_col: label_values,
             }
         )
-        return _merge_results(meta, results, multilabel_col)
+        results = _merge_results(meta, results, multilabel_col)
+        return (results, pairs_of(ix)) if return_pairs else results
 
     logger.info("Computing AP per label...")
     negs_for = _create_neg_query_solver(neg_pairs, neg_sims)
@@ -194,7 +219,38 @@ def average_precision(
         )
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
-    return _merge_results(meta, results, multilabel_col)
+    merged = _merge_results(meta, results, multilabel_col)
+    return (merged, pairs_of(np.concatenate(ix_list))) if return_pairs else merged
+
+
+def _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, method, keys):
+    """Pairs sharing exactly one label that the negative rules join without it.
+
+    Returns ``(pairs, key)``, ``key`` indexing ``keys``; labels without
+    positive pairs are dropped.
+    """
+    other = [c for c in neg_diffby if c != multilabel_col]
+    found = find_pairs_multilabel(
+        meta,
+        sameby=[multilabel_col, *neg_sameby],
+        diffby=other,
+        multilabel_col=multilabel_col,
+        method=method,
+    )
+    pairs, found_keys, counts = found
+    pairs = np.asarray(pairs, dtype=np.int64).reshape(-1, 2)
+    if not len(pairs):
+        return pairs, np.zeros(0, dtype=np.int64)
+    index = {k: i for i, k in enumerate(np.asarray(keys).tolist())}
+    key = np.repeat(
+        [index.get(k, -1) for k in np.asarray(found_keys).tolist()], counts
+    ).astype(np.int64)
+    a, b = pairs.min(axis=1), pairs.max(axis=1)
+    _, inverse, shared = np.unique(
+        a * len(meta) + b, return_inverse=True, return_counts=True
+    )
+    keep = (shared[inverse.ravel()] == 1) & (key >= 0)
+    return np.stack([a[keep], b[keep]], axis=1), key[keep]
 
 
 def _merge_results(meta, results, multilabel_col):

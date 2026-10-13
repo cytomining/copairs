@@ -16,7 +16,7 @@ from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     apply_hierarchical_fdr_correction,
 )
-from copairs.map.average_precision import RankPairs
+from copairs.map.average_precision import RankPairs, LabelPairs
 
 logger = logging.getLogger("copairs")
 
@@ -124,8 +124,8 @@ def get_map_pvalue(
             "null='permutation' needs pairs: use the RankPairs from "
             "average_precision(..., return_pairs=True)"
         )
-    if null == "joint" and pos_pairs is None and pairs is not None:
-        pos_pairs = pairs.pos
+    if null == "joint" and pos_pairs is None and type(pairs) is RankPairs:
+        pos_pairs = pairs.pos  # LabelPairs index profiles, not AP rows
     null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
     null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
     rev_ix = rev_ix.ravel()
@@ -142,6 +142,27 @@ def get_map_pvalue(
         "indices",
         "mean_normalized_average_precision",
     ]
+
+    if null == "permutation" and isinstance(pairs, LabelPairs):
+        if pairs.label_col not in ap_scores:
+            raise ValueError(
+                f"null='permutation' of multilabel APs needs their {pairs.label_col!r} "
+                "column"
+            )
+        logger.info("Computing p-values...")
+        map_scores["p_value"] = nulls.permutation.label_permutation_pvalues(
+            map_scores["indices"].tolist(),
+            profile,
+            ap_scores[pairs.label_col].to_numpy(),
+            ap_scores["n_pos_pairs"].to_numpy(),
+            ap_scores["n_total_pairs"].to_numpy(),
+            pairs,
+            null_size,
+            seed,
+            observed=map_scores["mean_average_precision"].to_numpy(),
+            progress_bar=progress_bar,
+        )
+        return map_scores
 
     if null == "permutation":
         logger.info("Computing p-values...")

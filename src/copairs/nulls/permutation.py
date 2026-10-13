@@ -495,9 +495,11 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     return layouts
 
 
-def group_key(seed: int, members) -> tuple[np.uint64, np.uint64]:
-    """Philox key of a group's draws: a pure function of ``(seed, members)``."""
+def group_key(seed: int, members, label=None) -> tuple[np.uint64, np.uint64]:
+    """Philox key of a group's draws: a pure function of ``(seed, members, label)``."""
     rep = repr((int(seed), tuple(sorted(int(m) for m in members))))
+    if label is not None:
+        rep += f"/{int(label)}"
     word = int.from_bytes(
         hashlib.blake2b(rep.encode(), digest_size=8).digest(), "little"
     )
@@ -624,6 +626,429 @@ def permutation_pvalues(
         count, identity, pool = permutation_null(
             *layouts[g], similarity, null_size, seed, pool
         )
+        if observed is not None and abs(identity - observed[g]) > 1e-6:
+            raise ValueError(
+                f"group {g}: mAP {identity} from the pairs differs from "
+                f"{observed[g]} in the AP table; the pairs or similarity do not "
+                "match the AP scores"
+            )
+        pvals[g] = (count + 1) / (null_size + 1)
+    return pvals
+
+
+# Multilabel groups: a draw moves one label to other profiles.
+
+
+@numba.njit(cache=True)
+def _components(n_prof, pairs):
+    """Component of each profile in the graph of ``pairs``: its smallest profile."""
+    parent = np.arange(n_prof)
+    for p in range(len(pairs)):
+        a, b = pairs[p, 0], pairs[p, 1]
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        while parent[b] != b:
+            parent[b] = parent[parent[b]]
+            b = parent[b]
+        if a < b:
+            parent[b] = a
+        elif b < a:
+            parent[a] = b
+    for i in range(n_prof):
+        r = i
+        while parent[r] != r:
+            r = parent[r]
+        parent[i] = r
+    return parent
+
+
+@numba.njit(cache=True)
+def _adjacency(n_prof, pairs):
+    """CSR ``(ptr, partners)`` of each profile's partners in ``pairs``."""
+    ptr = np.zeros(n_prof + 1, dtype=np.int64)
+    for p in range(len(pairs)):
+        ptr[pairs[p, 0] + 1] += 1
+        ptr[pairs[p, 1] + 1] += 1
+    ptr = np.cumsum(ptr)
+    fill = ptr[:-1].copy()
+    out = np.empty(ptr[-1], dtype=np.int64)
+    for p in range(len(pairs)):
+        a, b = pairs[p, 0], pairs[p, 1]
+        out[fill[a]] = b
+        fill[a] += 1
+        out[fill[b]] = a
+        fill[b] += 1
+    return ptr, out
+
+
+@numba.njit(parallel=True, cache=True)
+def _negative_rows(profiles, code, nbr_ptr, nbr, keys, ptr, rows, bits):
+    """Each pool profile's sorted codes to its negatives, and their bitset."""
+    for i in numba.prange(len(profiles)):
+        x = profiles[i]
+        o = ptr[i]
+        for e in range(nbr_ptr[x], nbr_ptr[x + 1]):
+            c = code[nbr[e]]
+            rows[o] = keys[i, c]
+            bits[i, c >> 6] |= np.uint64(1) << np.uint64(c & 63)
+            o += 1
+        rows[ptr[i] : ptr[i + 1]].sort()
+
+
+class _LabelPool:
+    """Rank codes among whole components of the negative graph.
+
+    Codes are the profiles' positions in the pool, members included. Keeps the
+    codes between all pool profiles, each profile's sorted codes to its
+    negatives (all inside its component) with their bitset, and, up to
+    :data:`RANK_POOL` profiles, each profile's rank of every other one among
+    its negatives.
+    """
+
+    def __init__(self, comps, comp_profiles, nbr_ptr, nbr, similarity):
+        self.comps = comps
+        parts = [comp_profiles[c] for c in comps]
+        self.profiles = np.concatenate(parts)
+        p = len(self.profiles)
+        if p > MAX_POOL:
+            raise ValueError(
+                f"a group pool has {p} profiles; the permutation null supports up "
+                f"to {MAX_POOL}. Split profiles into blocks (neg_sameby) or rank "
+                "fewer of them."
+            )
+        size = np.cumsum([0] + [len(c) for c in parts])
+        self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
+        self.code = np.full(len(nbr_ptr) - 1, -1, dtype=np.int64)
+        self.code[self.profiles] = np.arange(p)
+        self.keys = _key_matrix(similarity, self.profiles)
+        deg = nbr_ptr[self.profiles + 1] - nbr_ptr[self.profiles]
+        self.nptr = np.concatenate([[0], np.cumsum(deg)]).astype(np.int64)
+        self.nrow = np.empty(self.nptr[-1], dtype=np.uint32)
+        self.nbits = np.zeros((p, (p + 63) // 64), dtype=np.uint64)
+        _negative_rows(
+            self.profiles, self.code, nbr_ptr, nbr, self.keys, self.nptr,
+            self.nrow, self.nbits,
+        )  # fmt: skip
+        self.ranked = p <= RANK_POOL
+        self.rank = np.zeros((p, p) if self.ranked else (0, 0), dtype=np.int32)
+        if self.ranked:
+            _row_ranks(self.nptr, self.nrow, self.keys, self.rank)
+
+
+@numba.njit(cache=True)
+def _label_group_map(
+    pm, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits, loc, lone,
+    gptr, grow, ent, rank, inb, term,
+):  # fmt: skip
+    """Return the mAP of a multilabel group whose slot ``s`` holds profile ``pm[s]``.
+
+    As :func:`_group_map`, with the pool's profiles as codes: the negatives
+    of the profile ``x`` in slot ``s`` are its own negatives plus the
+    profiles sharing only the moved label with it (``lone``, among the
+    group's members), minus the drawn ones.
+    """
+    total = 0.0
+    for s in range(n):
+        x = pm[s]
+        lx = loc[x]
+        for t in range(n):
+            y = pm[t]
+            ent[t] = (np.uint64(keys[x, y]) << np.uint64(32)) | np.uint64(t)
+            if ranked:
+                rank[t] = rank_table[x, y]
+            ly = loc[y]
+            negative = (nbits[x, y >> 6] >> np.uint64(y & 63)) & np.uint64(1)
+            inb[t] = negative != 0 or (lx >= 0 and ly >= 0 and lone[lx, ly])
+        size = 0
+        for t in range(n):
+            ent[size] = ent[t]
+            size += t != s and (adjm[s, t] or inb[t])
+        _sort_entries(ent, size)
+        lo, hi = nptr[x], nptr[x + 1]
+        if lx >= 0:
+            g0, g1 = gptr[lx], gptr[lx + 1]
+        else:
+            g0, g1 = 0, 0
+        g = g0
+        d = 0
+        drawn = 0
+        tied = 0
+        key = np.uint64(0)
+        for e in range(size):
+            k = ent[e] >> np.uint64(32)
+            t = np.int64(ent[e] & np.uint64(0xFFFFFFFF))
+            if e == 0 or k != key:
+                drawn += tied
+                tied = 0
+                key = k
+                while g < g1 and grow[g] < key:
+                    g += 1
+            if adjm[s, t]:
+                if ranked:
+                    before = np.int64(rank[t])
+                else:
+                    before = _count_less(nrow, lo, hi, key) - lo
+                before += g - g0 - drawn
+                term[d] = (d + 1) / (d + 1 + before)
+                d += 1
+            tied += inb[t]
+        acc = 0.0
+        for d in range(deg[s]):
+            acc += term[d]
+        total += acc / deg[s]
+    return total / n
+
+
+@numba.njit(inline="always")
+def _draw_pool(j, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen):
+    """Fill ``pm`` with draw ``j``: per block, a uniform ordered subset of its pool."""
+    c0 = np.uint64(j) & M32
+    c1 = np.uint64(j) >> S32
+    blk = 0
+    spare = -1.0
+    for b in range(n_block):
+        k = bm_ptr[b + 1] - bm_ptr[b]
+        p = cr_hi[b] - cr_lo[b]
+        cnt = 0
+        for t in range(p - k, p):  # Floyd's algorithm: a uniform k-subset
+            u, blk, spare = _next_uniform(c0, c1, blk, spare, k0, k1)
+            r = min(int(u * (t + 1)), t)
+            for z in range(cnt):
+                if chosen[z] == r:
+                    r = t
+                    break
+            chosen[cnt] = r
+            cnt += 1
+        for z in range(k - 1, 0, -1):  # Fisher-Yates: a uniform order
+            u, blk, spare = _next_uniform(c0, c1, blk, spare, k0, k1)
+            r = min(int(u * (z + 1)), z)
+            chosen[z], chosen[r] = chosen[r], chosen[z]
+        for z in range(k):
+            pm[bm_slot[bm_ptr[b] + z]] = cr_lo[b] + chosen[z]
+
+
+@numba.njit(parallel=True, cache=True)
+def _label_permutation_count(
+    member_code, adjm, deg, bm_ptr, bm_slot, cr_lo, cr_hi, keys, rank_table,
+    ranked, nptr, nrow, nbits, loc, lone, gptr, grow, k0, k1, tol, null_size,
+    out,
+):  # fmt: skip
+    """Count draws with mAP ``>= identity - tol``, as :func:`_permutation_count`."""
+    n = len(member_code)
+    n_block = len(bm_ptr) - 1
+    max_k = max(1, np.max(np.diff(bm_ptr)))
+    identity = _label_group_map(
+        member_code, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits,
+        loc, lone, gptr, grow, np.empty(n, np.uint64), np.empty(n, np.int32),
+        np.empty(n, np.bool_), np.empty(n, np.float64),
+    )  # fmt: skip
+    thr = identity - tol
+    n_tasks = (null_size + _TASK - 1) // _TASK
+    hits = np.zeros(n_tasks, dtype=np.int64)
+    for task in numba.prange(n_tasks):
+        pm = np.empty(n, dtype=np.int64)
+        chosen = np.empty(max_k, dtype=np.int64)
+        ent = np.empty(n, dtype=np.uint64)
+        rank = np.empty(n, dtype=np.int32)
+        inb = np.empty(n, dtype=np.bool_)
+        term = np.empty(n, dtype=np.float64)
+        for j in range(task * _TASK, min(null_size, (task + 1) * _TASK)):
+            _draw_pool(j, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen)
+            v = _label_group_map(
+                pm, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits,
+                loc, lone, gptr, grow, ent, rank, inb, term,
+            )  # fmt: skip
+            if j < len(out):
+                out[j] = v
+            if v >= thr:
+                hits[task] += 1
+    return hits.sum(), identity
+
+
+def _segments(key, n_keys):
+    """``(order, ptr)``: pair indices sorted by key, and each key's slice."""
+    order = np.argsort(key, kind="stable")
+    return order, np.searchsorted(key[order], np.arange(n_keys + 1))
+
+
+def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
+    """Members, edges, lone pairs and components of each multilabel group.
+
+    Returns ``(layouts, comp_profiles, (nbr_ptr, nbr))``: one
+    ``(members, edges, lone, comps, block_of, key)`` per group (its profiles,
+    positive and lone pairs between local member indices, the components of
+    the negative graph holding its members, each member's component and its
+    label's index), the profiles of every component, and each profile's
+    negatives.
+    """
+    if pairs.lone is None:
+        raise ValueError(
+            f"the permutation null of multilabel APs needs {pairs.label_col!r} "
+            "among the negative pairs' diffby columns (and not their sameby)"
+        )
+    profile = np.asarray(pairs.profile, dtype=np.int64)[rows]
+    pos = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
+    neg = np.asarray(pairs.neg, dtype=np.int64).reshape(-1, 2)
+    lone = np.asarray(pairs.lone, dtype=np.int64).reshape(-1, 2)
+    n_prof = 1 + max(
+        int(profile.max(initial=-1)),
+        int(pos.max(initial=-1)),
+        int(neg.max(initial=-1)),
+        int(lone.max(initial=-1)),
+    )
+    nbr_ptr, nbr = _adjacency(n_prof, neg)
+    comp = _components(n_prof, neg)
+    order = np.argsort(comp, kind="stable")
+    roots, starts = np.unique(comp[order], return_index=True)
+    ends = np.append(starts[1:], len(order))
+    comp_profiles = {
+        int(c): order[a:b] for c, a, b in zip(roots, starts, ends, strict=True)
+    }
+    key_index = {k: i for i, k in enumerate(np.asarray(pairs.keys).tolist())}
+    n_keys = len(key_index)
+    pos_order, pos_ptr = _segments(np.asarray(pairs.pos_key), n_keys)
+    lone_order, lone_ptr = _segments(np.asarray(pairs.lone_key), n_keys)
+    local = np.full(n_prof, -1, dtype=np.int64)
+    layouts = []
+    for ix in groups:
+        values = set(np.asarray(labels)[ix].tolist())
+        if len(values) != 1:
+            raise ValueError(
+                "the permutation null of multilabel APs needs each group to hold "
+                f"one {pairs.label_col!r} value; group by it"
+            )
+        label = values.pop()
+        key = key_index.get(label)
+        members = profile[ix]
+        n = len(members)
+        if key is None or len(np.unique(members)) != n:
+            raise ValueError(
+                f"group {label!r}: its rows must be distinct profiles holding a "
+                "label with positive pairs"
+            )
+        local[members] = np.arange(n)
+        layout = [members]
+        for found, order_, ptr, kind in (
+            (pos, pos_order, pos_ptr, "positive"),
+            (lone, lone_order, lone_ptr, "lone"),
+        ):
+            seg = found[order_[ptr[key] : ptr[key + 1]]]
+            ends_ = local[seg]
+            if (ends_ < 0).any():
+                local[members] = -1
+                raise ValueError(
+                    f"group {label!r} lacks profiles holding its label ({kind} "
+                    "pairs leave the group); the permutation null needs every "
+                    "profile with the label in the group"
+                )
+            layout.append(ends_)
+        degree = np.bincount(layout[1].ravel(), minlength=n)
+        local[members] = -1
+        n_neg = nbr_ptr[members + 1] - nbr_ptr[members]
+        for count, want, kind in (
+            (degree, num_pos[ix], "positive"),
+            (n_neg, num_neg[ix], "negative"),
+        ):
+            wrong = np.flatnonzero(count != want)
+            if len(wrong):
+                raise ValueError(
+                    f"profile {members[wrong[0]]} has {count[wrong[0]]} {kind} "
+                    f"pairs for {label!r} but {want[wrong[0]]} in the AP table; "
+                    "pass the pairs multilabel.average_precision(..., "
+                    "return_pairs=True) returned with the frame it returned"
+                )
+        comps, block_of = np.unique(comp[members], return_inverse=True)
+        layout += [tuple(int(c) for c in comps), block_of.ravel().astype(np.int64), key]
+        layouts.append(tuple(layout))
+    return layouts, comp_profiles, (nbr_ptr, nbr)
+
+
+def label_permutation_null(
+    members, edges, lone, comps, block_of, key, pool, null_size, seed, out=None
+):
+    """Run ``null_size`` label moves of one multilabel group on its pool.
+
+    Returns ``(count, identity)`` as :func:`permutation_null`.
+    """
+    n = len(members)
+    member_code = pool.code[members]
+    bm_slot = np.argsort(block_of, kind="stable").astype(np.int64)
+    bm_ptr = np.searchsorted(block_of[bm_slot], np.arange(len(comps) + 1))
+    bm_ptr = bm_ptr.astype(np.int64)
+    adjm = np.zeros((n, n), dtype=np.bool_)
+    adjm[edges[:, 0], edges[:, 1]] = True
+    adjm[edges[:, 1], edges[:, 0]] = True
+    deg = adjm.sum(axis=1).astype(np.int64)
+    lonem = np.zeros((n, n), dtype=np.bool_)
+    lonem[lone[:, 0], lone[:, 1]] = True
+    lonem[lone[:, 1], lone[:, 0]] = True
+    loc = np.full(len(pool.profiles), -1, dtype=np.int64)
+    loc[member_code] = np.arange(n)
+    # Each member's codes to the members sharing only the moved label, sorted.
+    codes = pool.keys[np.ix_(member_code, member_code)]
+    rows = [np.sort(codes[i, lonem[i]]) for i in range(n)]
+    gptr = np.cumsum([0] + [len(r) for r in rows]).astype(np.int64)
+    grow = np.concatenate(rows).astype(np.uint32) if n else np.zeros(0, np.uint32)
+    k0, k1 = group_key(seed, members, key)
+    out = np.zeros(0) if out is None else out
+    count, identity = _label_permutation_count(
+        member_code, adjm, deg, bm_ptr, bm_slot, pool.cr_lo, pool.cr_hi,
+        pool.keys, pool.rank, pool.ranked, pool.nptr, pool.nrow, pool.nbits, loc,
+        lonem, gptr, grow, k0, k1, TIE_TOL, int(null_size), out,
+    )  # fmt: skip
+    return int(count), float(identity)
+
+
+def label_permutation_pvalues(
+    groups, rows, labels, num_pos, num_total, pairs, null_size, seed,
+    observed=None, progress_bar=False,
+):  # fmt: skip
+    """P-value of each multilabel group's mAP against moves of its label.
+
+    Under the null hypothesis the profiles holding a label are a random set of
+    their components' profiles. A draw moves the group's label to as many
+    profiles of each component as hold it there, keeping every other label,
+    and recomputes the group's mAP from the observed similarities: a profile
+    that receives the label ranks the other receivers (positives) against its
+    own negatives and the profiles that share only this label with it, minus
+    the receivers.
+
+    Parameters
+    ----------
+    groups : list of np.ndarray
+        Each group's rows of the AP table; a group holds one label.
+    rows : np.ndarray
+        The AP table's index (rows of ``pairs.profile``).
+    labels : np.ndarray
+        The AP rows' labels (``pairs.label_col``).
+    num_pos, num_total, null_size, seed, observed, progress_bar
+        As in :func:`permutation_pvalues`.
+    pairs : copairs.map.LabelPairs
+        The pairs the APs were computed from.
+
+    Returns
+    -------
+    np.ndarray
+        float64 p-values.
+    """
+    null_size = _check_null_size(null_size)
+    seed = resolve_seed(seed)
+    num_pos = np.asarray(num_pos, dtype=np.int64)
+    num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
+    groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
+    layouts, comp_profiles, (nbr_ptr, nbr) = label_layouts(
+        groups, np.asarray(rows, dtype=np.int64), np.asarray(labels), num_pos,
+        num_neg, pairs,
+    )  # fmt: skip
+    order = sorted(range(len(groups)), key=lambda g: layouts[g][3])
+    pvals = np.empty(len(groups), dtype=np.float64)
+    pool = None
+    for g in _progress(order, len(order), progress_bar, "permutation null"):
+        layout = layouts[g]
+        if pool is None or pool.comps != layout[3]:
+            pool = _LabelPool(layout[3], comp_profiles, nbr_ptr, nbr, pairs.similarity)
+        count, identity = label_permutation_null(*layout, pool, null_size, seed)
         if observed is not None and abs(identity - observed[g]) > 1e-6:
             raise ValueError(
                 f"group {g}: mAP {identity} from the pairs differs from "

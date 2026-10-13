@@ -38,6 +38,39 @@ class RankPairs:
     similarity: Callable[[np.ndarray], np.ndarray]
 
 
+@dataclass(frozen=True, kw_only=True)
+class LabelPairs(RankPairs):
+    """The pairs behind a multilabel AP table, whose rows are (profile, label).
+
+    Returned by ``multilabel.average_precision(..., return_pairs=True)``;
+    ``pos``, ``neg`` and ``lone`` index rows of the metadata.
+
+    Attributes
+    ----------
+    profile : np.ndarray
+        Profile of each AP row, by the AP frame's index.
+    label_col : str
+        The multilabel column.
+    keys : np.ndarray
+        Label values.
+    pos_key : np.ndarray
+        Label (index into ``keys``) of each positive pair; a pair sharing
+        several labels appears once per label.
+    lone, lone_key : np.ndarray or None
+        Pairs that share exactly one label, ``keys[lone_key]``, and meet the
+        negative rules on the other columns, so that without that label they
+        would be negatives. None when the label column is not one of the
+        negative pairs' ``diffby`` columns.
+    """
+
+    profile: np.ndarray
+    label_col: str
+    keys: np.ndarray
+    pos_key: np.ndarray
+    lone: np.ndarray | None
+    lone_key: np.ndarray | None
+
+
 def build_rank_lists(
     pos_pairs: np.ndarray,
     neg_pairs: np.ndarray,

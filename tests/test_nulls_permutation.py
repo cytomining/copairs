@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from scipy import stats
 
-from copairs.map import average_precision, mean_average_precision
+from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import permutation
 
 SPEC = dict(pos_sameby=["g"], pos_diffby=[], neg_sameby=[], neg_diffby=["g"])
@@ -193,3 +193,126 @@ def test_rank_table_matches_binary_search(monkeypatch):
     searched = draws_of(meta, feats, spec, 5000)
     assert ranked[1:3] == searched[1:3]
     np.testing.assert_array_equal(ranked[3], searched[3])
+
+
+ML_SPEC = dict(
+    pos_sameby=["target"], pos_diffby=[], neg_sameby=[], neg_diffby=["target"]
+)
+
+
+def label_meta():
+    """Compounds with overlapping targets; c1 and c8 share two of them.
+
+    Each compound also has a label of its own, so none is left without one
+    when a label moves away; such labels make no pairs.
+    """
+    targets = [["A"], ["A", "B"], ["B"], ["A", "C"], ["C"], ["B", "C"], ["D"]]
+    targets += [["D", "A"], ["A", "B"]]
+    return pd.DataFrame({"target": [t + [f"own{i}"] for i, t in enumerate(targets)]})
+
+
+def multilabel_ap(meta, feats, **kwargs):
+    """Multilabel APs of ``meta`` under ML_SPEC."""
+    return multilabel.average_precision(
+        meta, feats, **ML_SPEC, multilabel_col="target", progress_bar=False,
+        **kwargs,
+    )  # fmt: skip
+
+
+def moved_maps(meta, feats, label):
+    """MAP of ``label`` after moving it to every same-size set of profiles."""
+    holders = [i for i, t in enumerate(meta["target"]) if label in t]
+    values = []
+    for chosen in itertools.combinations(range(len(meta)), len(holders)):
+        target = [
+            [t for t in labels if t != label] + ([label] if i in chosen else [])
+            for i, labels in enumerate(meta["target"])
+        ]
+        ap = multilabel_ap(meta.assign(target=target), feats)
+        values.append(ap.loc[ap["target"] == label, "average_precision"].mean())
+    return np.array(values)
+
+
+def label_draws(meta, feats, label, null_size, seed=0):
+    """Observed mAP of ``label`` and the kernel's draws for it."""
+    ap, pairs = multilabel_ap(meta, feats, return_pairs=True)
+    ap = ap[ap["target"] == label]
+    layouts, comp_profiles, (nbr_ptr, nbr) = permutation.label_layouts(
+        [np.arange(len(ap))],
+        ap.index.to_numpy(),
+        ap["target"].to_numpy(),
+        ap["n_pos_pairs"].to_numpy().astype(np.int64),
+        (ap["n_total_pairs"] - ap["n_pos_pairs"]).to_numpy().astype(np.int64),
+        pairs,
+    )
+    pool = permutation._LabelPool(
+        layouts[0][3], comp_profiles, nbr_ptr, nbr, pairs.similarity
+    )
+    out = np.empty(null_size)
+    count, identity = permutation.label_permutation_null(
+        *layouts[0], pool, null_size, seed, out=out
+    )
+    return ap["average_precision"].mean(), identity, count, out
+
+
+@pytest.mark.parametrize("label", ["A", "B"])
+def test_label_moves_match_multilabel_average_precision(label):
+    """Draws follow the mAP of uniformly random label moves, as copairs computes them."""
+    meta = label_meta()
+    feats = np.random.default_rng(7).standard_normal((len(meta), 5))
+    exact = moved_maps(meta, feats, label)
+    observed, identity, count, draws = label_draws(meta, feats, label, 60_000)
+    assert identity == pytest.approx(observed, abs=1e-12)
+    values, freq = np.unique(np.round(exact, 9), return_counts=True)
+    ix = np.searchsorted(values, np.round(draws, 9))
+    assert (values[np.minimum(ix, len(values) - 1)] == np.round(draws, 9)).all()
+    expected = freq / freq.sum() * len(draws)
+    chi2 = ((np.bincount(ix, minlength=len(values)) - expected) ** 2 / expected).sum()
+    assert stats.chi2.sf(chi2, len(values) - 1) > 1e-3
+    assert count == (draws >= identity - 1e-10).sum()
+
+
+def test_label_permutation_through_mean_average_precision():
+    """Multilabel APs with their pairs get permutation p-values per label."""
+    meta = label_meta()
+    feats = np.random.default_rng(8).standard_normal((len(meta), 5))
+    for method in ("fast", "legacy"):
+        ap, pairs = multilabel_ap(meta, feats, method=method, return_pairs=True)
+        res = mean_average_precision(
+            ap, ["target"], 500, 0.05, 0, progress_bar=False,
+            null="permutation", pairs=pairs,
+        )  # fmt: skip
+        assert set(res["target"]) == {"A", "B", "C", "D"}
+        assert ((res["p_value"] > 0) & (res["p_value"] <= 1)).all()
+    with pytest.raises(ValueError, match="one 'target' value"):
+        mean_average_precision(
+            ap.assign(g=0), ["g"], 100, 0.05, 0, progress_bar=False,
+            null="permutation", pairs=pairs,
+        )  # fmt: skip
+
+
+def test_label_permutation_calibrated():
+    """Labels assigned independently of exchangeable profiles get uniform p-values."""
+    rng = np.random.default_rng(9)
+    n_cpd, n_labels = 300, 150
+    has = rng.random((n_cpd, n_labels)) < 0.03
+    meta = pd.DataFrame(
+        {
+            "target": [
+                [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"]
+                for i, h in enumerate(has)
+            ]
+        }
+    )
+    feats = rng.standard_normal((n_cpd, 4))
+    ap, pairs = multilabel_ap(meta, feats, return_pairs=True)
+    ap = ap[ap["target"].str.startswith("L")]
+    res = mean_average_precision(
+        ap, ["target"], 999, 0.05, 0, progress_bar=False, null="permutation",
+        pairs=pairs,
+    )  # fmt: skip
+    p = res["p_value"].to_numpy()
+    n = len(p)
+    assert stats.binom(n, 0.05).ppf(0.0005) <= (p <= 0.05).sum()
+    assert (p <= 0.05).sum() <= stats.binom(n, 0.05).ppf(0.9995)
+    assert stats.kstest(p, "uniform").pvalue > 1e-3
