@@ -293,7 +293,7 @@ class _Pool:
         for lo, hi in zip(self.cr_lo, self.cr_hi):
             block = krr[lo:hi, lo:hi]
             off = ~np.eye(hi - lo, dtype=bool)
-            rows = np.sort(block[off].reshape(hi - lo, hi - lo - 1), axis=1)
+            rows = np.sort(block[off].reshape(hi - lo, max(hi - lo - 1, 0)), axis=1)
             vals.append(rows.ravel())
             ptr.extend(ptr[-1] + (hi - lo - 1) * np.arange(1, hi - lo + 1))
         self.srr_ptr = np.asarray(ptr, dtype=np.int64)

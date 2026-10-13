@@ -162,6 +162,27 @@ def test_rejects_unsupported_layouts():
         )  # fmt: skip
 
 
+def test_group_without_references():
+    """Members with positives but no negatives have one relabelling: p = 1."""
+    meta = pd.DataFrame(
+        {
+            "g": ["q"] * 3 + ["r"] * 2 + [f"c{i}" for i in range(5)],
+            "plate": [0] * 3 + [1] * 7,
+        }
+    )
+    feats = np.random.default_rng(4).standard_normal((len(meta), 4))
+    spec = dict(SPEC, neg_sameby=["plate"])
+    ap, pairs = average_precision(
+        meta, feats, progress_bar=False, return_pairs=True, **spec
+    )
+    res = mean_average_precision(
+        ap, ["g"], 100, 0.05, 0, progress_bar=False, null="permutation", pairs=pairs
+    ).set_index("g")
+    assert res.loc["q", "mean_average_precision"] == 1.0
+    assert res.loc["q", "p_value"] == 1.0
+    assert res.loc["r", "p_value"] < 1.0
+
+
 def test_rank_table_matches_binary_search(monkeypatch):
     """Pools above RANK_POOL search sorted rows; both paths give the same draws."""
     meta = layout_meta(2, 2, 4)
