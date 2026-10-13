@@ -29,6 +29,10 @@ _uniform = numba.njit(inline="always")(uniform53)
 
 # Draws per parallel task; each task allocates its scratch once.
 _TASK = 128
+# Draws per kernel call; a run that may stop early starts with _FIRST_ROUND
+# draws and doubles them each round.
+_ROUND = 2**20
+_FIRST_ROUND = 2 * _TASK
 # A slot sorts up to this many drawn profiles by insertion, more by quicksort.
 _INSERTION = 128
 # Reference profiles per group pool; a pool keeps its key matrix and each
@@ -238,28 +242,34 @@ def _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen):
             pm[bm_slot[bm_ptr[b] + z]] = code
 
 
-@numba.njit(parallel=True, cache=True)
-def _permutation_count(
-    n, slot_block, adjm, deg, bm_ptr, bm_slot, cr_lo, cr_hi, kmu, krr, gptr,
-    grow, smr_ptr, smr, srr_ptr, srr, rmu, rcm, rrr, ranked, k0, k1, tol,
-    null_size, out,
+@numba.njit(cache=True)
+def _permutation_identity(
+    n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr, srr_ptr, srr,
+    rmu, rcm, rrr, ranked,
 ):  # fmt: skip
-    """Count draws with mAP ``>= identity - tol`` (stored in ``out`` if it has room).
-
-    Returns ``(count, identity)``, where ``identity`` is the mAP of the
-    observed labels.
-    """
-    n_block = len(bm_ptr) - 1
-    max_k = max(1, np.max(np.diff(bm_ptr)))
-    identity = _group_map(
+    """Return the mAP of the observed labels."""
+    return _group_map(
         np.arange(n), n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr,
         smr, srr_ptr, srr, rmu, rcm, rrr, ranked, np.empty(n, np.int64),
         np.empty(n, np.int64), np.empty(n, np.uint64), np.empty(n, np.int32),
         np.empty(n, np.float64),
     )  # fmt: skip
-    thr = identity - tol
-    n_tasks = (null_size + _TASK - 1) // _TASK
-    hits = np.zeros(n_tasks, dtype=np.int64)
+
+
+@numba.njit(parallel=True, cache=True)
+def _permutation_hits(
+    n, slot_block, adjm, deg, bm_ptr, bm_slot, cr_lo, cr_hi, kmu, krr, gptr,
+    grow, smr_ptr, smr, srr_ptr, srr, rmu, rcm, rrr, ranked, k0, k1, thr, start,
+    hits, out,
+):  # fmt: skip
+    """Mark in ``hits`` which of draws ``start, start + 1, ...`` have mAP ``>= thr``.
+
+    Draw ``j``'s mAP is also stored in ``out[j]`` if ``out`` has room.
+    """
+    n_block = len(bm_ptr) - 1
+    max_k = max(1, np.max(np.diff(bm_ptr)))
+    stop = start + len(hits)
+    n_tasks = (len(hits) + _TASK - 1) // _TASK
     for task in numba.prange(n_tasks):
         pm = np.empty(n, dtype=np.int64)
         chosen = np.empty(max_k, dtype=np.int64)
@@ -268,7 +278,7 @@ def _permutation_count(
         ent = np.empty(n, dtype=np.uint64)
         rank = np.empty(n, dtype=np.int32)
         term = np.empty(n, dtype=np.float64)
-        for j in range(task * _TASK, min(null_size, (task + 1) * _TASK)):
+        for j in range(start + task * _TASK, min(stop, start + (task + 1) * _TASK)):
             _draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen)
             v = _group_map(
                 pm, n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr,
@@ -276,9 +286,57 @@ def _permutation_count(
             )  # fmt: skip
             if j < len(out):
                 out[j] = v
-            if v >= thr:
-                hits[task] += 1
-    return hits.sum(), identity
+            hits[j - start] = v >= thr
+
+
+def _count_hits(hits_of, null_size, stop_after):
+    """Run a group's draws in rounds, stopping at the ``stop_after``-th hit.
+
+    ``hits_of(start, hits)`` marks which of draws ``start, start + 1, ...``
+    reach the observed mAP. Returns ``(count, draws)``: the hits and the
+    draws they came from, which is the draw of the ``stop_after``-th hit when
+    the run stops early. Round sizes are fixed (doubling from
+    :data:`_FIRST_ROUND`), so results do not depend on the threads.
+    """
+    count = 0
+    start = 0
+    size = _ROUND if stop_after is None else _FIRST_ROUND
+    while start < null_size:
+        hits = np.empty(min(size, null_size - start), dtype=np.bool_)
+        hits_of(start, hits)
+        if stop_after is None:
+            count += int(hits.sum())
+        else:
+            seen = np.cumsum(hits)
+            if count + seen[-1] >= stop_after:
+                at = int(np.searchsorted(seen, stop_after - count))
+                return stop_after, start + at + 1
+            count += int(seen[-1])
+        start += len(hits)
+        size = min(2 * size, _ROUND)
+    return count, null_size
+
+
+def sequential_pvalue(count, draws, null_size, stop_after=None) -> float:
+    """P-value of a permutation run from :func:`permutation_null`.
+
+    ``(count + 1) / (null_size + 1)`` after all draws; ``count / draws`` when
+    the run stopped at its ``stop_after``-th hit (Besag and Clifford, 1991,
+    Biometrika 78:301), which is valid and spends few draws on groups with
+    large p-values.
+    """
+    if stop_after is not None and count >= stop_after:
+        return count / draws
+    return (count + 1) / (null_size + 1)
+
+
+def check_stop_after(stop_after):
+    """Return ``stop_after`` as an int, or None; raise unless a positive integer."""
+    if stop_after is None:
+        return None
+    if int(stop_after) != stop_after or stop_after < 1:
+        raise ValueError(f"stop_after must be a positive integer, got {stop_after}")
+    return int(stop_after)
 
 
 def _keys(similarity, a, b):
@@ -508,14 +566,16 @@ def group_key(seed: int, members, label=None) -> tuple[np.uint64, np.uint64]:
 
 def permutation_null(
     members, edges, blocks, block_of, similarity, null_size, seed, pool=None,
-    out=None,
+    out=None, stop_after=None,
 ):  # fmt: skip
-    """Run ``null_size`` label permutations of one group.
+    """Run up to ``null_size`` label permutations of one group.
 
-    Returns ``(count, identity, pool)``: the draws whose mAP ties or exceeds
-    the observed labels' (``identity``, within :data:`TIE_TOL`), that mAP, and
-    the reference pool, reusable by groups ranking the same references.
-    ``out`` receives the draws' mAPs if given.
+    Returns ``(count, identity, pool, draws)``: the draws whose mAP ties or
+    exceeds the observed labels' (``identity``, within :data:`TIE_TOL`), that
+    mAP, the reference pool, reusable by groups ranking the same references,
+    and the draws run (fewer than ``null_size`` when ``stop_after`` hits came
+    first; see :func:`sequential_pvalue`). ``out`` receives the draws' mAPs
+    if given.
     """
     members = np.asarray(members, dtype=np.int64)
     block_of = np.asarray(block_of, dtype=np.int64)
@@ -567,17 +627,25 @@ def permutation_null(
         rmu = rcm = np.zeros((0, 0), dtype=np.int32)
     k0, k1 = group_key(seed, members)
     out = np.zeros(0) if out is None else out
-    count, identity = _permutation_count(
-        n, block_of, adjm, deg, bm_ptr, bm_slot, pool.cr_lo, pool.cr_hi, kmu,
-        pool.krr, gptr, grow, smr_ptr, smr, pool.srr_ptr, pool.srr, rmu, rcm,
-        pool.rrr, pool.ranked, k0, k1, TIE_TOL, int(null_size), out,
+    identity = _permutation_identity(
+        n, block_of, adjm, deg, kmu, pool.krr, gptr, grow, smr_ptr, smr,
+        pool.srr_ptr, pool.srr, rmu, rcm, pool.rrr, pool.ranked,
     )  # fmt: skip
-    return int(count), float(identity), pool
+
+    def hits_of(start, hits):
+        _permutation_hits(
+            n, block_of, adjm, deg, bm_ptr, bm_slot, pool.cr_lo, pool.cr_hi, kmu,
+            pool.krr, gptr, grow, smr_ptr, smr, pool.srr_ptr, pool.srr, rmu, rcm,
+            pool.rrr, pool.ranked, k0, k1, identity - TIE_TOL, start, hits, out,
+        )  # fmt: skip
+
+    count, draws = _count_hits(hits_of, int(null_size), stop_after)
+    return count, float(identity), pool, draws
 
 
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
-    null_size, seed, observed=None, progress_bar=False,
+    null_size, seed, observed=None, progress_bar=False, stop_after=None,
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
 
@@ -602,6 +670,9 @@ def permutation_pvalues(
         Each group's mAP from the AP table; a group whose recomputed mAP
         differs by more than 1e-6 raises, since then its pairs or similarity
         do not match the table.
+    stop_after : int, optional
+        Stop a group's draws at its ``stop_after``-th draw that reaches its
+        mAP, with ``p = stop_after / draws`` (:func:`sequential_pvalue`).
 
     Returns
     -------
@@ -610,6 +681,7 @@ def permutation_pvalues(
     """
     null_size = _check_null_size(null_size)
     seed = resolve_seed(seed)
+    stop_after = check_stop_after(stop_after)
     profile = np.asarray(profile, dtype=np.int64)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
@@ -623,8 +695,8 @@ def permutation_pvalues(
     pvals = np.empty(len(groups), dtype=np.float64)
     pool = None
     for g in _progress(order, len(order), progress_bar, "permutation null"):
-        count, identity, pool = permutation_null(
-            *layouts[g], similarity, null_size, seed, pool
+        count, identity, pool, draws = permutation_null(
+            *layouts[g], similarity, null_size, seed, pool, stop_after=stop_after
         )
         if observed is not None and abs(identity - observed[g]) > 1e-6:
             raise ValueError(
@@ -632,7 +704,7 @@ def permutation_pvalues(
                 f"{observed[g]} in the AP table; the pairs or similarity do not "
                 "match the AP scores"
             )
-        pvals[g] = (count + 1) / (null_size + 1)
+        pvals[g] = sequential_pvalue(count, draws, null_size, stop_after)
     return pvals
 
 
@@ -828,24 +900,32 @@ def _draw_pool(j, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen):
             pm[bm_slot[bm_ptr[b] + z]] = cr_lo[b] + chosen[z]
 
 
-@numba.njit(parallel=True, cache=True)
-def _label_permutation_count(
-    member_code, adjm, deg, bm_ptr, bm_slot, cr_lo, cr_hi, keys, rank_table,
-    ranked, nptr, nrow, nbits, loc, lone, gptr, grow, k0, k1, tol, null_size,
-    out,
+@numba.njit(cache=True)
+def _label_identity(
+    member_code, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits, loc,
+    lone, gptr, grow,
 ):  # fmt: skip
-    """Count draws with mAP ``>= identity - tol``, as :func:`_permutation_count`."""
+    """Return the mAP of a multilabel group's observed labels."""
     n = len(member_code)
-    n_block = len(bm_ptr) - 1
-    max_k = max(1, np.max(np.diff(bm_ptr)))
-    identity = _label_group_map(
+    return _label_group_map(
         member_code, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits,
         loc, lone, gptr, grow, np.empty(n, np.uint64), np.empty(n, np.int32),
         np.empty(n, np.bool_), np.empty(n, np.float64),
     )  # fmt: skip
-    thr = identity - tol
-    n_tasks = (null_size + _TASK - 1) // _TASK
-    hits = np.zeros(n_tasks, dtype=np.int64)
+
+
+@numba.njit(parallel=True, cache=True)
+def _label_hits(
+    member_code, adjm, deg, bm_ptr, bm_slot, cr_lo, cr_hi, keys, rank_table,
+    ranked, nptr, nrow, nbits, loc, lone, gptr, grow, k0, k1, thr, start, hits,
+    out,
+):  # fmt: skip
+    """Mark draws with mAP ``>= thr``, as :func:`_permutation_hits`."""
+    n = len(member_code)
+    n_block = len(bm_ptr) - 1
+    max_k = max(1, np.max(np.diff(bm_ptr)))
+    stop = start + len(hits)
+    n_tasks = (len(hits) + _TASK - 1) // _TASK
     for task in numba.prange(n_tasks):
         pm = np.empty(n, dtype=np.int64)
         chosen = np.empty(max_k, dtype=np.int64)
@@ -853,7 +933,7 @@ def _label_permutation_count(
         rank = np.empty(n, dtype=np.int32)
         inb = np.empty(n, dtype=np.bool_)
         term = np.empty(n, dtype=np.float64)
-        for j in range(task * _TASK, min(null_size, (task + 1) * _TASK)):
+        for j in range(start + task * _TASK, min(stop, start + (task + 1) * _TASK)):
             _draw_pool(j, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen)
             v = _label_group_map(
                 pm, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits,
@@ -861,9 +941,7 @@ def _label_permutation_count(
             )  # fmt: skip
             if j < len(out):
                 out[j] = v
-            if v >= thr:
-                hits[task] += 1
-    return hits.sum(), identity
+            hits[j - start] = v >= thr
 
 
 def _segments(key, n_keys):
@@ -965,11 +1043,12 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
 
 
 def label_permutation_null(
-    members, edges, lone, comps, block_of, key, pool, null_size, seed, out=None
-):
-    """Run ``null_size`` label moves of one multilabel group on its pool.
+    members, edges, lone, comps, block_of, key, pool, null_size, seed, out=None,
+    stop_after=None,
+):  # fmt: skip
+    """Run up to ``null_size`` label moves of one multilabel group on its pool.
 
-    Returns ``(count, identity)`` as :func:`permutation_null`.
+    Returns ``(count, identity, draws)`` as :func:`permutation_null`.
     """
     n = len(members)
     member_code = pool.code[members]
@@ -992,17 +1071,25 @@ def label_permutation_null(
     grow = np.concatenate(rows).astype(np.uint32) if n else np.zeros(0, np.uint32)
     k0, k1 = group_key(seed, members, key)
     out = np.zeros(0) if out is None else out
-    count, identity = _label_permutation_count(
-        member_code, adjm, deg, bm_ptr, bm_slot, pool.cr_lo, pool.cr_hi,
-        pool.keys, pool.rank, pool.ranked, pool.nptr, pool.nrow, pool.nbits, loc,
-        lonem, gptr, grow, k0, k1, TIE_TOL, int(null_size), out,
+    identity = _label_identity(
+        member_code, adjm, deg, pool.keys, pool.rank, pool.ranked, pool.nptr,
+        pool.nrow, pool.nbits, loc, lonem, gptr, grow,
     )  # fmt: skip
-    return int(count), float(identity)
+
+    def hits_of(start, hits):
+        _label_hits(
+            member_code, adjm, deg, bm_ptr, bm_slot, pool.cr_lo, pool.cr_hi,
+            pool.keys, pool.rank, pool.ranked, pool.nptr, pool.nrow, pool.nbits,
+            loc, lonem, gptr, grow, k0, k1, identity - TIE_TOL, start, hits, out,
+        )  # fmt: skip
+
+    count, draws = _count_hits(hits_of, int(null_size), stop_after)
+    return count, float(identity), draws
 
 
 def label_permutation_pvalues(
     groups, rows, labels, num_pos, num_total, pairs, null_size, seed,
-    observed=None, progress_bar=False,
+    observed=None, progress_bar=False, stop_after=None,
 ):  # fmt: skip
     """P-value of each multilabel group's mAP against moves of its label.
 
@@ -1022,7 +1109,7 @@ def label_permutation_pvalues(
         The AP table's index (rows of ``pairs.profile``).
     labels : np.ndarray
         The AP rows' labels (``pairs.label_col``).
-    num_pos, num_total, null_size, seed, observed, progress_bar
+    num_pos, num_total, null_size, seed, observed, progress_bar, stop_after
         As in :func:`permutation_pvalues`.
     pairs : copairs.map.LabelPairs
         The pairs the APs were computed from.
@@ -1034,6 +1121,7 @@ def label_permutation_pvalues(
     """
     null_size = _check_null_size(null_size)
     seed = resolve_seed(seed)
+    stop_after = check_stop_after(stop_after)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
@@ -1048,12 +1136,14 @@ def label_permutation_pvalues(
         layout = layouts[g]
         if pool is None or pool.comps != layout[3]:
             pool = _LabelPool(layout[3], comp_profiles, nbr_ptr, nbr, pairs.similarity)
-        count, identity = label_permutation_null(*layout, pool, null_size, seed)
+        count, identity, draws = label_permutation_null(
+            *layout, pool, null_size, seed, stop_after=stop_after
+        )
         if observed is not None and abs(identity - observed[g]) > 1e-6:
             raise ValueError(
                 f"group {g}: mAP {identity} from the pairs differs from "
                 f"{observed[g]} in the AP table; the pairs or similarity do not "
                 "match the AP scores"
             )
-        pvals[g] = (count + 1) / (null_size + 1)
+        pvals[g] = sequential_pvalue(count, draws, null_size, stop_after)
     return pvals

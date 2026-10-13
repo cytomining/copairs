@@ -35,6 +35,7 @@ def get_map_pvalue(
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
     pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
@@ -110,6 +111,15 @@ def get_map_pvalue(
         not given; frames that lost them (built, reloaded, pickled, or
         concatenated from several AP calls) need ``pairs=`` or another null.
         ``ap_scores`` must keep the index of the frame the pairs came with.
+    stop_after : int, optional
+        Permutation null only: stop a group's draws at its ``stop_after``-th
+        draw whose mAP reaches the group's, and report ``stop_after / draws``
+        (Besag and Clifford's sequential p-value, valid like the fixed-size
+        one). Groups with large p-values then need few draws, while groups
+        that never reach ``stop_after`` hits run all ``null_size`` draws and
+        keep the usual p-value, so small p-values are unchanged in
+        resolution. ``stop_after=10`` is a common choice. Default: run all
+        draws.
 
     Returns
     -------
@@ -128,6 +138,9 @@ def get_map_pvalue(
         pairs = attached_pairs(ap_scores)
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
+    if null != "permutation" and stop_after is not None:
+        raise ValueError("stop_after is used by the permutation null only")
+    stop_after = nulls.permutation.check_stop_after(stop_after)
     if null == "permutation" and pairs is None:
         raise ValueError(
             "null='permutation' (the fast method's default) needs the pairs the "
@@ -140,7 +153,7 @@ def get_map_pvalue(
     try:
         return _map_pvalues(
             ap_scores, sameby, null_size, seed, progress_bar, max_workers,
-            cache_dir, method, backend, pos_pairs, null, pairs,
+            cache_dir, method, backend, pos_pairs, null, pairs, stop_after,
         )  # fmt: skip
     finally:
         release = getattr(getattr(pairs, "similarity", None), "release", None)
@@ -150,7 +163,7 @@ def get_map_pvalue(
 
 def _map_pvalues(
     ap_scores, sameby, null_size, seed, progress_bar, max_workers, cache_dir,
-    method, backend, pos_pairs, null, pairs,
+    method, backend, pos_pairs, null, pairs, stop_after,
 ):  # fmt: skip
     """:func:`get_map_pvalue` with its null and pairs resolved."""
     # Filter out invalid or incomplete AP scores, remembering the original rows
@@ -195,6 +208,7 @@ def _map_pvalues(
             seed,
             observed=map_scores["mean_average_precision"].to_numpy(),
             progress_bar=progress_bar,
+            stop_after=stop_after,
         )
         return map_scores
 
@@ -212,6 +226,7 @@ def _map_pvalues(
             seed,
             observed=map_scores["mean_average_precision"].to_numpy(),
             progress_bar=progress_bar,
+            stop_after=stop_after,
         )
         return map_scores
 
@@ -396,6 +411,7 @@ def mean_average_precision(
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
     pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -435,6 +451,8 @@ def mean_average_precision(
     pairs : RankPairs or LabelPairs, optional
         Pairs of the AP scores, needed by ``null="permutation"`` and attached
         to AP frames; see :func:`get_map_pvalue`.
+    stop_after : int, optional
+        Stop each group's permutation draws early; see :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -466,6 +484,7 @@ def mean_average_precision(
         pos_pairs=pos_pairs,
         null=null,
         pairs=pairs,
+        stop_after=stop_after,
     )
 
     # Step 2: Apply multiple testing correction
@@ -493,6 +512,7 @@ def mean_average_precision_hierarchical(
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
     pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -545,6 +565,8 @@ def mean_average_precision_hierarchical(
     pairs : RankPairs or LabelPairs, optional
         Pairs of the AP scores, needed by ``null="permutation"`` and attached
         to AP frames; see :func:`get_map_pvalue`.
+    stop_after : int, optional
+        Stop each group's permutation draws early; see :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -580,6 +602,7 @@ def mean_average_precision_hierarchical(
         pos_pairs=pos_pairs,
         null=null,
         pairs=pairs,
+        stop_after=stop_after,
     )
 
     # Step 2: Apply hierarchical multiple testing correction
