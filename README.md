@@ -91,7 +91,10 @@ We provide examples demonstrating how to use copairs for:
 
   Its smallest p-value is about one over the number of distinct
   relabellings, e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one
-  plate.
+  plate. Its cost grows with group size; `stop_after=10` stops a group's
+  draws at the 10th that reaches its mAP and reports 10 / draws (Besag and
+  Clifford's sequential p-value), which spends few draws on groups with
+  large p-values and leaves small ones as they were.
 - `"joint"` samples the members' APs together: a positive pair inside the
   group is one random number in both members' rank lists, so the null
   narrows as replicates are added. Other similarities are treated as
