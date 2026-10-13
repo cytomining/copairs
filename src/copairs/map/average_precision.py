@@ -1,18 +1,41 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Callable
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from copairs import fastap, compute
 from copairs.matching import UnpairedException, find_pairs
+from copairs.fastap.ranking import _host
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
 
 logger = logging.getLogger("copairs")
+
+
+@dataclass(frozen=True)
+class RankPairs:
+    """The pairs behind an AP table, for mAP nulls that re-rank profiles.
+
+    Returned by ``average_precision(..., return_pairs=True)``; indices are rows
+    of the frame returned with it.
+
+    Attributes
+    ----------
+    pos, neg : np.ndarray
+        ``(n, 2)`` positive and negative pairs.
+    similarity : callable
+        ``pairs -> similarities`` (NumPy), the function the APs were computed
+        with.
+    """
+
+    pos: np.ndarray
+    neg: np.ndarray
+    similarity: Callable[[np.ndarray], np.ndarray]
 
 
 def build_rank_lists(
@@ -94,6 +117,7 @@ def average_precision(
     progress_bar: bool = True,
     method: str = "fast",
     backend: str = "auto",
+    return_pairs: bool = False,
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -159,10 +183,16 @@ def average_precision(
         ``"auto"``, ``"cuda"`` or ``"numba"`` for the fast method (the NumPy
         implementation is ``method="legacy"``).
 
+    return_pairs : bool
+        Also return the :class:`RankPairs` the APs were computed from, which
+        ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
+        needs.
+
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the following columns:
+        A DataFrame (with ``return_pairs``, a ``(DataFrame, RankPairs)``
+        tuple) containing the following columns:
         - 'average_precision': The calculated average precision score for each profile.
         - 'normalized_average_precision': The normalized AP score (scale-independent).
         - 'n_pos_pairs': The number of positive pairs for each profile.
@@ -255,6 +285,8 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
+    if return_pairs:
+        return meta, RankPairs(pos_pairs, neg_pairs, lambda p: _host(similarity(p)))
     return meta
 
 

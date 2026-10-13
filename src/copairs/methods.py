@@ -2,7 +2,7 @@
 
 METHODS = ("fast", "legacy")
 BACKENDS = ("auto", "cuda", "numba", "numpy")
-NULLS = ("joint", "copied")
+NULLS = ("joint", "copied", "permutation")
 
 
 def check_method(method: str, backend: str = "auto") -> None:

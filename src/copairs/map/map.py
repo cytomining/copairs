@@ -16,6 +16,7 @@ from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     apply_hierarchical_fdr_correction,
 )
+from copairs.map.average_precision import RankPairs
 
 logger = logging.getLogger("copairs")
 
@@ -32,6 +33,7 @@ def get_map_pvalue(
     backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
+    pairs: Optional[RankPairs] = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
@@ -76,13 +78,26 @@ def get_map_pvalue(
         `average_precision` returned. When omitted, each group's positives are
         assumed to be its other members, which is the replicate-retrieval case
         (`n_pos_pairs == len(group) - 1`). Groups where that does not hold fall
-        back to copairs' previous null with a warning. Joint null only.
+        back to copairs' previous null with a warning. Joint null only; taken
+        from ``pairs`` when given.
     null : str, optional
         Null of the group mAP. ``"joint"`` (the fast method's default) samples
-        the members' APs jointly, as above. ``"copied"`` averages the members'
-        AP nulls with members of equal configuration sharing samples, as in
-        copairs <= 0.5.5 (the only null of ``method="legacy"``); that null does
-        not narrow as replicates are added, so it is conservative.
+        the members' APs jointly, as above, treating similarities as
+        independent apart from shared pairs. ``"permutation"`` relabels
+        profiles instead (:mod:`copairs.nulls.permutation`): in each block of
+        members ranked against the same references, any of the block's
+        profiles could have carried the group's label, and the group's mAP is
+        recomputed from the observed similarities, which tests the paper's
+        null hypothesis exactly. It needs ``pairs``, and each group's
+        positives must be its other members. ``"copied"`` averages the
+        members' AP nulls with members of equal configuration sharing
+        samples, as in copairs <= 0.5.5 (the only null of
+        ``method="legacy"``); that null does not narrow as replicates are
+        added, so it is conservative.
+    pairs : RankPairs, optional
+        The pairs and similarity the AP scores were computed with, from
+        ``average_precision(..., return_pairs=True)``; ``ap_scores`` must keep
+        the index of the frame returned with them.
 
     Returns
     -------
@@ -104,6 +119,13 @@ def get_map_pvalue(
     null = check_null(method, null)
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
+    if null == "permutation" and pairs is None:
+        raise ValueError(
+            "null='permutation' needs pairs: use the RankPairs from "
+            "average_precision(..., return_pairs=True)"
+        )
+    if null == "joint" and pos_pairs is None and pairs is not None:
+        pos_pairs = pairs.pos
     null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
     null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
     rev_ix = rev_ix.ravel()
@@ -120,6 +142,23 @@ def get_map_pvalue(
         "indices",
         "mean_normalized_average_precision",
     ]
+
+    if null == "permutation":
+        logger.info("Computing p-values...")
+        map_scores["p_value"] = nulls.permutation.permutation_pvalues(
+            map_scores["indices"].tolist(),
+            profile,
+            ap_scores["n_pos_pairs"].to_numpy(),
+            ap_scores["n_total_pairs"].to_numpy(),
+            pairs.pos,
+            pairs.neg,
+            pairs.similarity,
+            null_size,
+            seed,
+            observed=map_scores["mean_average_precision"].to_numpy(),
+            progress_bar=progress_bar,
+        )
+        return map_scores
 
     if method == "fast" and null == "copied":
         logger.info("Computing p-values...")
@@ -290,6 +329,7 @@ def mean_average_precision(
     backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
+    pairs: Optional[RankPairs] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -326,6 +366,9 @@ def mean_average_precision(
         Needed when a group's positives are not its other members.
     null : str, optional
         Null of the group mAP, see :func:`get_map_pvalue`.
+    pairs : RankPairs, optional
+        Pairs of the AP scores, needed by ``null="permutation"``; see
+        :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -356,6 +399,7 @@ def mean_average_precision(
         backend=backend,
         pos_pairs=pos_pairs,
         null=null,
+        pairs=pairs,
     )
 
     # Step 2: Apply multiple testing correction
@@ -382,6 +426,7 @@ def mean_average_precision_hierarchical(
     backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
+    pairs: Optional[RankPairs] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -431,6 +476,9 @@ def mean_average_precision_hierarchical(
         Needed when a group's positives are not its other members.
     null : str, optional
         Null of the group mAP, see :func:`get_map_pvalue`.
+    pairs : RankPairs, optional
+        Pairs of the AP scores, needed by ``null="permutation"``; see
+        :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -464,6 +512,7 @@ def mean_average_precision_hierarchical(
         backend=backend,
         pos_pairs=pos_pairs,
         null=null,
+        pairs=pairs,
     )
 
     # Step 2: Apply hierarchical multiple testing correction
