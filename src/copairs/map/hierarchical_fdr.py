@@ -18,6 +18,22 @@ def _multipletests(pvals, method="fdr_bh"):
     return multipletests(pvals, method=method)
 
 
+def check_hierarchical_by(hierarchical_by: List[str], sameby: List[str]) -> None:
+    """Raise ValueError unless ``hierarchical_by`` is a proper subset of ``sameby``."""
+    if not set(hierarchical_by).issubset(set(sameby)):
+        raise ValueError(
+            f"hierarchical_by columns {hierarchical_by} must be a subset of "
+            f"sameby columns {sameby}"
+        )
+
+    if set(hierarchical_by) == set(sameby):
+        raise ValueError(
+            f"hierarchical_by columns {hierarchical_by} must be a proper subset of "
+            f"sameby columns {sameby}. If they are equal, use standard correction "
+            f"by not specifying hierarchical_by."
+        )
+
+
 def apply_hierarchical_fdr_correction(
     map_scores: pd.DataFrame,
     hierarchical_by: List[str],
@@ -65,19 +81,7 @@ def apply_hierarchical_fdr_correction(
     which is the expected biological behavior.
 
     """
-    # Validate that hierarchical_by is a subset of sameby
-    if not set(hierarchical_by).issubset(set(sameby)):
-        raise ValueError(
-            f"hierarchical_by columns {hierarchical_by} must be a subset of "
-            f"sameby columns {sameby}"
-        )
-
-    if set(hierarchical_by) == set(sameby):
-        raise ValueError(
-            f"hierarchical_by columns {hierarchical_by} must be a proper subset of "
-            f"sameby columns {sameby}. If they are equal, use standard correction "
-            f"by not specifying hierarchical_by."
-        )
+    check_hierarchical_by(hierarchical_by, sameby)
 
     logger.info("Applying hierarchical FDR correction...")
     map_scores = map_scores.copy()
