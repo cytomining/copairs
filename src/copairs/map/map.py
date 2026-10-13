@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import nulls, compute
-from copairs.methods import check_method, check_null
+from copairs.methods import check_null, check_method
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     apply_hierarchical_fdr_correction,
@@ -38,9 +38,9 @@ def get_map_pvalue(
     This function groups AP scores by the specified columns, computes the mean
     Average Precision (mAP) for each group, and calculates p-values by comparing
     against null distributions. With the fast method, a group's null is sampled
-    jointly over its members (`compute.random_map`): every positive pair inside
-    the group is one random number shared by both members' rank lists, so the
-    null has the right width for the number of replicates.
+    jointly over its members (:mod:`copairs.nulls.joint`): every positive pair
+    inside the group is one random number shared by both members' rank lists,
+    so the null has the right width for the number of replicates.
 
     Parameters
     ----------
@@ -143,31 +143,25 @@ def get_map_pvalue(
         signatures = [
             None
             if edges is None
-            else (tuple(zip(num_pos[ix], num_neg[ix])), tuple(sorted(edges)))
+            else nulls.joint.canonical_signature(zip(num_pos[ix], num_neg[ix]), edges)
             for ix, edges in zip(groups, edges_of)
         ]
         scores = map_scores["mean_average_precision"].to_numpy()
-        thr = nulls.tie_thresholds(scores)
         p_values = np.empty(len(groups), dtype=np.float64)
 
-        logger.info("Computing null_dist...")
+        logger.info("Computing p-values...")
         seed = nulls.pvalues.resolve_seed(seed)
         unique = sorted(set(sig for sig in signatures if sig is not None))
-        null_of = {}
-
-        def par_func(k):
-            members, edges = unique[k]
-            null_of[unique[k]] = np.sort(
-                compute.random_map(members, edges, null_size, seed)
-            )
-
-        if unique:
-            compute.parallel_map(par_func, np.arange(len(unique)), progress_bar)
-        for g, sig in enumerate(signatures):
-            if sig is not None:
-                dist = null_of[sig]
-                num = null_size - np.searchsorted(dist, thr[g], side="left")
-                p_values[g] = (num + 1) / (null_size + 1)
+        index = {sig: k for k, sig in enumerate(unique)}
+        joint = [g for g, sig in enumerate(signatures) if sig is not None]
+        p_values[joint] = nulls.joint.joint_pvalues(
+            scores[joint],
+            [index[signatures[g]] for g in joint],
+            unique,
+            null_size,
+            seed,
+            progress_bar=progress_bar,
+        )
 
         legacy = [g for g, sig in enumerate(signatures) if sig is None]
         if legacy:
@@ -268,9 +262,7 @@ def _copied_pvalues(
         return np.zeros(0, dtype=np.float64)
     gid = np.repeat(np.arange(len(groups)), [len(ix) for ix in groups])
     rows = np.concatenate(groups).astype(np.int64)
-    keys, conf_cnt = np.unique(
-        gid * len(null_confs) + rev_ix[rows], return_counts=True
-    )
+    keys, conf_cnt = np.unique(gid * len(null_confs) + rev_ix[rows], return_counts=True)
     ptr = np.searchsorted(keys // len(null_confs), np.arange(len(groups) + 1))
     return nulls.map_pvalues(
         scores,
