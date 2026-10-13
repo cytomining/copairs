@@ -58,6 +58,39 @@ We provide examples demonstrating how to use copairs for:
 - [calculating mAP to assess phenotypic consistency of perturbations](https://github.com/cytomining/copairs/blob/main/docs/examples/phenotypic_consistency.ipynb)
 - [estimating null size for mAP p-value calculation](https://github.com/cytomining/copairs/blob/main/docs/examples/null_size.ipynb)
 
+## mAP null distributions
+
+`mean_average_precision`, `mean_average_precision_hierarchical` and
+`get_map_pvalue` take `null=`, the null of a group's mAP:
+
+- `"joint"` (default of `method="fast"`) samples the members' APs together:
+  a positive pair inside the group is one random number in both members'
+  rank lists, so the null narrows as replicates are added. Other similarities
+  are treated as independent, which real profiles are not (members share
+  references, and some profiles are close to many others), so on real data it
+  can give too small p-values for groups of many replicates.
+- `"permutation"` tests the paper's null hypothesis directly: within each
+  block of members ranked against the same references (e.g. one plate's
+  replicates and controls), any of the block's profiles could have carried
+  the group's label. Draws relabel profiles and recompute the mAP from the
+  observed similarities. It needs the pairs the APs came from, and each
+  group's positives must be its other members:
+
+  ```python
+  ap, pairs = copairs.map.average_precision(meta, feats, ..., return_pairs=True)
+  result = copairs.map.mean_average_precision(
+      ap, sameby, null_size=10_000, threshold=0.05, seed=0,
+      null="permutation", pairs=pairs,
+  )
+  ```
+
+  Its smallest p-value is bounded by the number of distinct relabellings,
+  e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one plate.
+- `"copied"` is the null of copairs <= 0.5.5 (and the only null of
+  `method="legacy"`): members with equal pair counts share one AP draw, so the
+  null does not narrow with replicates, while members with different counts
+  get independent draws.
+
 ## Performance
 
 `average_precision`, `mean_average_precision` and the p-value functions take
@@ -85,6 +118,9 @@ count null values `>=` the observed mAP, as in the paper, where legacy counted
 ones to float32 rounding, so near-tied pairs can rank differently. The kernels
 compute in float64, so float32 profiles whose norms overflow float32 (entries
 around 1e19 and up) get their actual similarity instead of the generic 0 or NaN.
+
+Numba starts one thread per host CPU. In a container or job with a CPU quota,
+set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs.
 
 Multiprocessing: a process forked after copairs ran on the GPU picks a CPU
 backend, since CUDA cannot be used after `fork`. If Numba uses its GNU OpenMP
