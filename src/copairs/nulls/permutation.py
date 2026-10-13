@@ -501,7 +501,8 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
             raise ValueError(
                 f"profile {m} has {count[m]} {kind} pairs but {want[wrong[0]]} in "
                 "the AP table; pass the pairs average_precision(..., "
-                "return_pairs=True) returned with the frame it returned"
+                "return_pairs=True) returned with the frame it returned, and keep "
+                "that frame's index (no reset_index)"
             )
     if bad.any():
         raise ValueError(
@@ -702,7 +703,7 @@ def permutation_pvalues(
             raise ValueError(
                 f"group {g}: mAP {identity} from the pairs differs from "
                 f"{observed[g]} in the AP table; the pairs or similarity do not "
-                "match the AP scores"
+                "match the AP scores (keep the AP frame's index: no reset_index)"
             )
         pvals[g] = sequential_pvalue(count, draws, null_size, stop_after)
     return pvals
@@ -1034,7 +1035,8 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
                     f"profile {members[wrong[0]]} has {count[wrong[0]]} {kind} "
                     f"pairs for {label!r} but {want[wrong[0]]} in the AP table; "
                     "pass the pairs multilabel.average_precision(..., "
-                    "return_pairs=True) returned with the frame it returned"
+                    "return_pairs=True) returned with the frame it returned, and keep "
+                    "that frame's index (no reset_index)"
                 )
         comps, block_of = np.unique(comp[members], return_inverse=True)
         layout += [tuple(int(c) for c in comps), block_of.ravel().astype(np.int64), key]
@@ -1143,7 +1145,7 @@ def label_permutation_pvalues(
             raise ValueError(
                 f"group {g}: mAP {identity} from the pairs differs from "
                 f"{observed[g]} in the AP table; the pairs or similarity do not "
-                "match the AP scores"
+                "match the AP scores (keep the AP frame's index: no reset_index)"
             )
         pvals[g] = sequential_pvalue(count, draws, null_size, stop_after)
     return pvals
