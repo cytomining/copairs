@@ -34,16 +34,18 @@ def get_map_pvalue(
     backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
-    pairs: Optional[RankPairs] = None,
+    pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
     This function groups AP scores by the specified columns, computes the mean
     Average Precision (mAP) for each group, and calculates p-values by comparing
-    against null distributions. With the fast method, a group's null is sampled
-    jointly over its members (:mod:`copairs.nulls.joint`): every positive pair
-    inside the group is one random number shared by both members' rank lists,
-    so the null has the right width for the number of replicates.
+    against null distributions. With the fast method, a group's null is the
+    distribution of its mAP when its label is given to other profiles
+    (:mod:`copairs.nulls.permutation`), recomputed from the observed
+    similarities: the paper's null hypothesis that the group's profiles and its
+    references come from the same distribution, tested without assuming
+    anything about how similarities depend on each other.
 
     Parameters
     ----------
@@ -80,25 +82,34 @@ def get_map_pvalue(
         assumed to be its other members, which is the replicate-retrieval case
         (`n_pos_pairs == len(group) - 1`). Groups where that does not hold fall
         back to copairs' previous null with a warning. Joint null only; taken
-        from ``pairs`` when given.
+        from ``pairs`` (single-label APs) when available.
     null : str, optional
-        Null of the group mAP. ``"joint"`` (the fast method's default) samples
-        the members' APs jointly, as above, treating similarities as
-        independent apart from shared pairs. ``"permutation"`` relabels
-        profiles instead (:mod:`copairs.nulls.permutation`): in each block of
-        members ranked against the same references, any of the block's
-        profiles could have carried the group's label, and the group's mAP is
-        recomputed from the observed similarities, which tests the paper's
-        null hypothesis exactly. It needs ``pairs``, and each group's
-        positives must be its other members. ``"copied"`` averages the
-        members' AP nulls with members of equal configuration sharing
-        samples, as in copairs <= 0.5.5 (the only null of
-        ``method="legacy"``); that null does not narrow as replicates are
-        added, so it is conservative.
-    pairs : RankPairs, optional
-        The pairs and similarity the AP scores were computed with, from
-        ``average_precision(..., return_pairs=True)``; ``ap_scores`` must keep
-        the index of the frame returned with them.
+        Null of the group mAP. ``"permutation"`` (the fast method's default)
+        relabels profiles: in each block of members ranked against the same
+        references (e.g. a plate's replicates and controls), any of the
+        block's profiles could have carried the group's label; for multilabel
+        APs, the group's label moves to other profiles of its components of
+        the negative graph, which keep their other labels. Each group's
+        positives must be its other members, and its smallest p-value is
+        about one over its number of distinct relabellings. ``"joint"``
+        samples the members' APs jointly (:mod:`copairs.nulls.joint`): a
+        positive pair inside the group is one random number in both members'
+        rank lists, and other similarities are independent, which real
+        profiles are not (members share references, and some profiles are
+        close to many others), so it can give too small p-values for groups
+        of many replicates. ``"copied"`` averages the members' AP nulls with
+        members of equal configuration sharing samples, as in copairs <= 0.5.5
+        (the only null of ``method="legacy"``): it does not narrow as
+        replicates are added, and members with different pair counts get
+        independent samples.
+    pairs : RankPairs or LabelPairs, optional
+        The pairs and similarity the AP scores were computed with. Taken from
+        ``ap_scores.attrs["copairs_pairs"]``, where
+        :func:`~copairs.map.average_precision` and
+        :func:`~copairs.map.multilabel.average_precision` attach them, when
+        not given; frames that lost them (built, reloaded, pickled, or
+        concatenated from several AP calls) need ``pairs=`` or another null.
+        ``ap_scores`` must keep the index of the frame the pairs came with.
 
     Returns
     -------
@@ -384,7 +395,7 @@ def mean_average_precision(
     backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
-    pairs: Optional[RankPairs] = None,
+    pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -421,9 +432,9 @@ def mean_average_precision(
         Needed when a group's positives are not its other members.
     null : str, optional
         Null of the group mAP, see :func:`get_map_pvalue`.
-    pairs : RankPairs, optional
-        Pairs of the AP scores, needed by ``null="permutation"``; see
-        :func:`get_map_pvalue`.
+    pairs : RankPairs or LabelPairs, optional
+        Pairs of the AP scores, needed by ``null="permutation"`` and attached
+        to AP frames; see :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -481,7 +492,7 @@ def mean_average_precision_hierarchical(
     backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: Optional[str] = None,
-    pairs: Optional[RankPairs] = None,
+    pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -531,9 +542,9 @@ def mean_average_precision_hierarchical(
         Needed when a group's positives are not its other members.
     null : str, optional
         Null of the group mAP, see :func:`get_map_pvalue`.
-    pairs : RankPairs, optional
-        Pairs of the AP scores, needed by ``null="permutation"``; see
-        :func:`get_map_pvalue`.
+    pairs : RankPairs or LabelPairs, optional
+        Pairs of the AP scores, needed by ``null="permutation"`` and attached
+        to AP frames; see :func:`get_map_pvalue`.
 
     Returns
     -------

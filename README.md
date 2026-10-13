@@ -63,29 +63,41 @@ We provide examples demonstrating how to use copairs for:
 `mean_average_precision`, `mean_average_precision_hierarchical` and
 `get_map_pvalue` take `null=`, the null of a group's mAP:
 
-- `"joint"` (default of `method="fast"`) samples the members' APs together:
-  a positive pair inside the group is one random number in both members'
-  rank lists, so the null narrows as replicates are added. Other similarities
-  are treated as independent, which real profiles are not (members share
-  references, and some profiles are close to many others), so on real data it
-  can give too small p-values for groups of many replicates.
-- `"permutation"` tests the paper's null hypothesis directly: within each
-  block of members ranked against the same references (e.g. one plate's
-  replicates and controls), any of the block's profiles could have carried
-  the group's label. Draws relabel profiles and recompute the mAP from the
-  observed similarities. It needs the pairs the APs came from, and each
-  group's positives must be its other members:
+- `"permutation"` (default of `method="fast"`) tests the paper's null
+  hypothesis directly: within each block of members ranked against the same
+  references (e.g. one plate's replicates and controls), any of the block's
+  profiles could have carried the group's label. Draws relabel profiles and
+  recompute the mAP from the observed similarities, so whatever dependence
+  the data has between rank lists stays in the null. For multilabel APs
+  (`map.multilabel.average_precision`), a draw moves the group's label to
+  other profiles, which keep their other labels. Each group's positives must
+  be its other members. It needs the pairs the APs came from, which
+  `average_precision` and `multilabel.average_precision` attach to the frame
+  they return, so the usual calls need nothing extra:
 
   ```python
-  ap, pairs = copairs.map.average_precision(meta, feats, ..., return_pairs=True)
+  ap = copairs.map.average_precision(meta, feats, ...)
   result = copairs.map.mean_average_precision(
-      ap, sameby, null_size=10_000, threshold=0.05, seed=0,
-      null="permutation", pairs=pairs,
+      ap, sameby, null_size=10_000, threshold=0.05, seed=0
   )
   ```
 
-  Its smallest p-value is bounded by the number of distinct relabellings,
-  e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one plate.
+  The pairs (`ap.attrs["copairs_pairs"]`) follow the frame through filtering
+  and copies, but not through saving, pickling or concatenating frames of
+  different AP calls; such frames raise under this null. Recompute them,
+  pass `pairs=` (`average_precision(..., return_pairs=True)` also returns
+  them), or choose another null. They hold a reference to the features;
+  `ap.attrs.pop("copairs_pairs")` drops it.
+
+  Its smallest p-value is about one over the number of distinct
+  relabellings, e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one
+  plate.
+- `"joint"` samples the members' APs together: a positive pair inside the
+  group is one random number in both members' rank lists, so the null
+  narrows as replicates are added. Other similarities are treated as
+  independent, which real profiles are not (members share references, and
+  some profiles are close to many others), so on real data it can give too
+  small p-values for groups of many replicates. It needs no pairs.
 - `"copied"` is the null of copairs <= 0.5.5 (and the only null of
   `method="legacy"`): members with equal pair counts share one AP draw, so the
   null does not narrow with replicates, while members with different counts
