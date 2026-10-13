@@ -17,6 +17,7 @@ from copairs.fastap.ranking import (
     ap_from_counts,
     resolve_fast_backend,
 )
+from copairs.fastap.similarity import _ROW_BLOCK
 
 DEFAULT_BUDGET = 2**29
 
@@ -25,6 +26,8 @@ def unit_rows(feats, normalized: bool = False) -> np.ndarray:
     """float32 rows of unit norm; raises on non-finite or zero-norm rows.
 
     With ``normalized``, rows already have unit norm and are only checked.
+    Norms are computed in float64 one block of rows at a time, so rows whose
+    squared norm overflows float32 keep their direction.
     """
     xp = array_module(feats)
     x = xp.asarray(feats, dtype=xp.float32)
@@ -32,10 +35,14 @@ def unit_rows(feats, normalized: bool = False) -> np.ndarray:
         raise ValueError("non-finite features; clean them first")
     if normalized:
         return x
-    norms = xp.linalg.norm(x, axis=1, keepdims=True)
-    if bool((norms == 0).any()):
-        raise ValueError("zero-norm feature vector; cosine similarity is undefined")
-    return x / norms
+    out = xp.empty_like(x)
+    for start in range(0, len(x), _ROW_BLOCK):
+        block = x[start : start + _ROW_BLOCK].astype(xp.float64)
+        norms = xp.linalg.norm(block, axis=1, keepdims=True)
+        if bool((norms == 0).any()):
+            raise ValueError("zero-norm feature vector; cosine similarity is undefined")
+        out[start : start + _ROW_BLOCK] = block / norms
+    return out
 
 
 @numba.njit(parallel=True, cache=True)

@@ -146,8 +146,8 @@ def test_average_precision_fast_similarity(backend):
 def reference_draw_ap(query, reference):
     """AP of each query by fully sorting its rank list (ties: queries first)."""
     k = len(query)
-    feats = np.concatenate([query, reference]).astype(np.float32)
-    feats = feats / np.linalg.norm(feats, axis=1, keepdims=True)
+    feats = np.concatenate([query, reference]).astype(np.float64)
+    feats = (feats / np.linalg.norm(feats, axis=1, keepdims=True)).astype(np.float32)
     sims = feats[:k] @ feats.T
     sims[np.arange(k), np.arange(k)] = -np.inf
     order = np.argsort(-sims, axis=1, kind="stable")[:, :-1]
@@ -212,6 +212,20 @@ def test_draw_average_precisions_beyond_shared_memory():
     queries, refs = np.arange(k)[None], np.arange(k, k + m)[None]
     got = fastap.draw_average_precisions(cuda.cp.asarray(feats), queries, refs)
     expected = fastap.draw_average_precisions(feats, queries, refs, backend="numba")
+    np.testing.assert_array_equal(got, expected)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_draw_average_precisions_large_norms(backend):
+    """Rows whose squared norm overflows float32 keep their cosine ranking."""
+    rng = np.random.default_rng(6)
+    feats = rng.normal(size=(40, 16)).astype(np.float32)
+    queries = np.stack([rng.choice(40, 5, replace=False) for _ in range(10)])
+    refs = np.stack([rng.choice(40, 20, replace=False) for _ in range(10)])
+    expected = fastap.draw_average_precisions(feats, queries, refs, backend=backend)
+    big = feats.copy()
+    big[::2] *= np.float32(2.0**66)  # exact scaling; squares exceed float32
+    got = fastap.draw_average_precisions(big, queries, refs, backend=backend)
     np.testing.assert_array_equal(got, expected)
 
 
