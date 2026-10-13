@@ -263,3 +263,59 @@ def test_multilabel_has_normalized_ap():
     )
 
     assert "normalized_average_precision" in result.columns
+
+
+def _ap_frame(rows):
+    """Build an `ap_scores` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
+    frame = pd.DataFrame(
+        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
+    )
+    frame["normalized_average_precision"] = 0.0
+    return frame
+
+
+def test_map_pvalue_replicates_use_the_joint_null():
+    """Replicate groups get the joint null, inferred or from explicit `pos_pairs`."""
+    from copairs.map import get_map_pvalue
+    from copairs.matching import find_pairs
+
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
+    feats = rng.standard_normal((len(meta), 10))
+    ap_scores = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    inferred = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, progress_bar=False)
+    explicit = get_map_pvalue(
+        ap_scores,
+        ["g"],
+        20_000,
+        SEED,
+        progress_bar=False,
+        pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+    )
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    assert ((inferred["p_value"] > 0) & (inferred["p_value"] <= 1)).all()
+
+
+def test_map_pvalue_narrows_with_group_size():
+    """The same mAP is more significant with more replicates."""
+    from copairs.map import get_map_pvalue
+
+    rows = []
+    for n in (2, 4, 8):
+        rows += [(f"n{n}", 0.18, n - 1, n - 1 + 100)] * n
+    result = get_map_pvalue(_ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False)
+    p = result.set_index("g")["p_value"]
+    assert p["n2"] > p["n4"] > p["n8"]
+
+
+def test_map_pvalue_falls_back_with_warning(tmp_path):
+    """Groups whose positives are not their other members use the previous null."""
+    from copairs.map import get_map_pvalue
+
+    rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
+    with pytest.warns(UserWarning, match="pos_pairs"):
+        result = get_map_pvalue(
+            _ap_frame(rows), ["g"], 1000, SEED, progress_bar=False, cache_dir=tmp_path
+        )
+    p = result.set_index("g")["p_value"]
+    assert 0 < p["odd"] <= 1 and 0 < p["rep"] <= 1

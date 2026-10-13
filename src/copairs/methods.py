@@ -2,6 +2,7 @@
 
 METHODS = ("fast", "legacy")
 BACKENDS = ("auto", "cuda", "numba", "numpy")
+NULLS = ("joint", "copied")
 
 
 def check_method(method: str, backend: str = "auto") -> None:
@@ -14,3 +15,18 @@ def check_method(method: str, backend: str = "auto") -> None:
         raise ValueError(f"unknown method {method!r}; expected one of {METHODS}")
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+
+
+def check_null(method: str, null: str | None) -> str:
+    """Return the mAP null to use, ``null`` or the method's default.
+
+    The fast method defaults to the ``"joint"`` null; ``method="legacy"``
+    reproduces copairs <= 0.5.5, whose null is ``"copied"``.
+    """
+    if null is None:
+        return "joint" if method == "fast" else "copied"
+    if null not in NULLS:
+        raise ValueError(f"unknown null {null!r}; expected one of {NULLS}")
+    if method == "legacy" and null != "copied":
+        raise ValueError(f"method='legacy' supports only null='copied', got {null!r}")
+    return null

@@ -38,12 +38,24 @@ def perfect_retrieval_scores():
 
 
 def test_map_pvalue_counts_ties(tmp_path):
-    """An mAP equal to a null atom counts the atom: P(AP >= 1) = 1/100 here."""
+    """An mAP equal to a null atom counts the atom.
+
+    Under the copied null P(mAP >= 1) = P(AP >= 1) = 1/100. Under the joint
+    null, given the shared similarity u each member's rank - 1 is
+    Binomial(99, 1 - u): both APs are 1 with probability int u^198 = 1/199, and
+    mAP >= 0.5 needs one rank of 1 or both of 2.
+    """
     kwargs = dict(null_size=100_000, threshold=0.05, seed=0, progress_bar=False)
-    fast = mean_average_precision(perfect_retrieval_scores(), ["g"], **kwargs)
-    expected = np.array([0.01, 0.02])
-    se = np.sqrt(expected * (1 - expected) / kwargs["null_size"])
-    assert (np.abs(fast["p_value"].to_numpy() - expected) < 5 * se).all()
+    both_two = 99**2 * 2 / (197 * 198 * 199)  # int (99 (1 - u) u^98)^2 du
+    for null, expected in (
+        ("copied", np.array([0.01, 0.02])),
+        ("joint", np.array([1 / 199, 2 / 100 - 1 / 199 + both_two])),
+    ):
+        fast = mean_average_precision(
+            perfect_retrieval_scores(), ["g"], null=null, **kwargs
+        )
+        se = np.sqrt(expected * (1 - expected) / kwargs["null_size"])
+        assert (np.abs(fast["p_value"].to_numpy() - expected) < 5 * se).all()
     legacy = mean_average_precision(
         perfect_retrieval_scores(), ["g"], cache_dir=tmp_path, method="legacy", **kwargs
     )
@@ -76,7 +88,7 @@ def test_float32_scores_count_ties(backend):
 
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_map_fast_vs_legacy(backend, tmp_path):
-    """Fast and legacy mAP p-values agree within Monte Carlo error away from ties."""
+    """Fast copied-null and legacy mAP p-values agree within Monte Carlo error."""
     rng = np.random.default_rng(3)
     n = 400
     dframe = pd.DataFrame(
@@ -92,7 +104,9 @@ def test_map_fast_vs_legacy(backend, tmp_path):
     dframe["average_precision"] = np.clip(mu + rng.normal(0, 0.15, size=n), 0, 1)
     dframe["normalized_average_precision"] = 0.0
     kwargs = dict(null_size=20_000, threshold=0.05, seed=0, progress_bar=False)
-    fast = mean_average_precision(dframe, ["g"], backend=backend, **kwargs)
+    fast = mean_average_precision(
+        dframe, ["g"], backend=backend, null="copied", **kwargs
+    )
     legacy = mean_average_precision(
         dframe, ["g"], cache_dir=tmp_path, method="legacy", **kwargs
     )
@@ -136,7 +150,18 @@ def test_unknown_backend(method, tmp_path):
         )
 
 
-def test_map_fast_empty_input():
+def test_unknown_null():
+    """Unknown nulls, and nulls legacy does not implement, raise."""
+    scores = perfect_retrieval_scores()
+    kwargs = dict(null_size=10, threshold=0.05, seed=0, progress_bar=False)
+    with pytest.raises(ValueError, match="unknown null"):
+        mean_average_precision(scores, ["g"], null="exact", **kwargs)
+    with pytest.raises(ValueError, match="supports only null='copied'"):
+        mean_average_precision(scores, ["g"], method="legacy", null="joint", **kwargs)
+
+
+@pytest.mark.parametrize("null", ["joint", "copied"])
+def test_map_fast_empty_input(null):
     """No valid AP scores give an empty result with the usual columns."""
     empty = pd.DataFrame(
         {
@@ -147,6 +172,8 @@ def test_map_fast_empty_input():
             "n_total_pairs": pd.Series([], dtype=int),
         }
     )
-    result = mean_average_precision(empty, ["g"], 100, 0.05, 0, progress_bar=False)
+    result = mean_average_precision(
+        empty, ["g"], 100, 0.05, 0, progress_bar=False, null=null
+    )
     assert len(result) == 0
     assert {"p_value", "corrected_p_value", "below_corrected_p"} <= set(result.columns)

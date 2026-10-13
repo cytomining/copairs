@@ -1,6 +1,7 @@
 """Functions to compute mean average precision."""
 
 import logging
+import warnings
 from os import cpu_count
 from typing import List, Union, Optional
 from pathlib import Path
@@ -10,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import nulls, compute
-from copairs.methods import check_method
+from copairs.methods import check_method, check_null
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     apply_hierarchical_fdr_correction,
@@ -29,12 +30,17 @@ def get_map_pvalue(
     cache_dir: Optional[Union[str, Path]] = None,
     method: str = "fast",
     backend: str = "auto",
+    pos_pairs: Optional[np.ndarray] = None,
+    null: Optional[str] = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
     This function groups AP scores by the specified columns, computes the mean
     Average Precision (mAP) for each group, and calculates p-values by comparing
-    against null distributions.
+    against null distributions. With the fast method, a group's null is sampled
+    jointly over its members (`compute.random_map`): every positive pair inside
+    the group is one random number shared by both members' rank lists, so the
+    null has the right width for the number of replicates.
 
     Parameters
     ----------
@@ -62,6 +68,21 @@ def get_map_pvalue(
     backend : str
         Backend of the fast method: ``"auto"``, ``"cuda"``, ``"numba"`` or
         ``"numpy"``.
+    pos_pairs : np.ndarray, optional
+        The `(n_pairs, 2)` positive pairs (row indices of `ap_scores`) used to
+        compute the AP scores, as returned by
+        `find_pairs(meta, sameby=pos_sameby, diffby=pos_diffby)` on the `meta`
+        given to `average_precision`; `ap_scores` must keep the index that
+        `average_precision` returned. When omitted, each group's positives are
+        assumed to be its other members, which is the replicate-retrieval case
+        (`n_pos_pairs == len(group) - 1`). Groups where that does not hold fall
+        back to copairs' previous null with a warning. Joint null only.
+    null : str, optional
+        Null of the group mAP. ``"joint"`` (the fast method's default) samples
+        the members' APs jointly, as above. ``"copied"`` averages the members'
+        AP nulls with members of equal configuration sharing samples, as in
+        copairs <= 0.5.5 (the only null of ``method="legacy"``); that null does
+        not narrow as replicates are added, so it is conservative.
 
     Returns
     -------
@@ -74,11 +95,15 @@ def get_map_pvalue(
         - `indices`: List of indices in the original ap_scores for this group.
 
     """
-    # Filter out invalid or incomplete AP scores
+    # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
+    profile = ap_scores.index.to_numpy()
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
     check_method(method, backend)
+    null = check_null(method, null)
+    if null != "joint" and pos_pairs is not None:
+        raise ValueError("pos_pairs is used by the joint null only")
     null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
     null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
     rev_ix = rev_ix.ravel()
@@ -96,28 +121,75 @@ def get_map_pvalue(
         "mean_normalized_average_precision",
     ]
 
-    if method == "fast":
+    if method == "fast" and null == "copied":
         logger.info("Computing p-values...")
-        # (group, configuration) member counts in CSR layout; groups are numbered
-        # in map_scores' row order, and rows with missing keys belong to none.
-        group = ap_scores.groupby(sameby, observed=True).ngroup().to_numpy()
-        member = ~np.isnan(group)
-        keys, conf_cnt = np.unique(
-            group[member].astype(np.int64) * len(null_confs) + rev_ix[member],
-            return_counts=True,
-        )
-        ptr = np.searchsorted(keys // len(null_confs), np.arange(len(map_scores) + 1))
-        map_scores["p_value"] = nulls.map_pvalues(
+        map_scores["p_value"] = _copied_pvalues(
             map_scores["mean_average_precision"].to_numpy(),
-            ptr,
-            keys % len(null_confs),
-            conf_cnt,
+            map_scores["indices"].tolist(),
+            rev_ix,
             null_confs,
             null_size,
             seed,
-            backend=backend,
-            progress_bar=progress_bar,
+            backend,
+            progress_bar,
         )
+        return map_scores
+
+    if method == "fast":
+        groups = map_scores["indices"].tolist()
+        num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
+        num_neg = ap_scores["n_total_pairs"].to_numpy().astype(np.int64) - num_pos
+        edges_of = _group_edges(groups, num_pos, profile, pos_pairs)
+        signatures = [
+            None
+            if edges is None
+            else (tuple(zip(num_pos[ix], num_neg[ix])), tuple(sorted(edges)))
+            for ix, edges in zip(groups, edges_of)
+        ]
+        scores = map_scores["mean_average_precision"].to_numpy()
+        thr = nulls.tie_thresholds(scores)
+        p_values = np.empty(len(groups), dtype=np.float64)
+
+        logger.info("Computing null_dist...")
+        seed = nulls.pvalues.resolve_seed(seed)
+        unique = sorted(set(sig for sig in signatures if sig is not None))
+        null_of = {}
+
+        def par_func(k):
+            members, edges = unique[k]
+            null_of[unique[k]] = np.sort(
+                compute.random_map(members, edges, null_size, seed)
+            )
+
+        if unique:
+            compute.parallel_map(par_func, np.arange(len(unique)), progress_bar)
+        for g, sig in enumerate(signatures):
+            if sig is not None:
+                dist = null_of[sig]
+                num = null_size - np.searchsorted(dist, thr[g], side="left")
+                p_values[g] = (num + 1) / (null_size + 1)
+
+        legacy = [g for g, sig in enumerate(signatures) if sig is None]
+        if legacy:
+            warnings.warn(
+                f"{len(legacy)} group(s) have positives that are not their other "
+                "members; pass pos_pairs to sample their mAP null jointly. Falling "
+                "back to the previous null, which copies one draw across members "
+                "with equal pair counts.",
+                stacklevel=2,
+            )
+            logger.info("Computing p-values...")
+            p_values[legacy] = _copied_pvalues(
+                scores[legacy],
+                [groups[g] for g in legacy],
+                rev_ix,
+                null_confs,
+                null_size,
+                seed,
+                backend,
+                progress_bar,
+            )
+        map_scores["p_value"] = p_values
         return map_scores
 
     logger.info("Computing null_dist...")
@@ -154,6 +226,65 @@ def get_map_pvalue(
     return map_scores
 
 
+def _group_edges(groups, num_pos, profile, pos_pairs):
+    """Positive pairs inside each group, as local ``(i, j)`` member pairs.
+
+    Without ``pos_pairs``, a group whose members each have ``len(group) - 1``
+    positives is taken to be a replicate group (all its pairs are positives),
+    and other groups get None.
+    """
+    if pos_pairs is None:
+        return [
+            [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
+            if (num_pos[ix] == len(ix) - 1).all()
+            else None
+            for ix in groups
+        ]
+    pos_pairs = np.asarray(pos_pairs)
+    group_of = np.full(int(max(pos_pairs.max(), profile.max())) + 1, -1)
+    local = np.empty_like(group_of)
+    for g, ix in enumerate(groups):
+        group_of[profile[ix]] = g
+        local[profile[ix]] = np.arange(len(ix))
+    ga, gb = group_of[pos_pairs[:, 0]], group_of[pos_pairs[:, 1]]
+    inside = (ga >= 0) & (ga == gb)
+    edges_of = [[] for _ in groups]
+    for g, a, b in zip(
+        ga[inside], local[pos_pairs[inside, 0]], local[pos_pairs[inside, 1]]
+    ):
+        edges_of[g].append((int(a), int(b)))
+    return edges_of
+
+
+def _copied_pvalues(
+    scores, groups, rev_ix, null_confs, null_size, seed, backend, progress_bar
+):
+    """P-values against the mean of the members' AP nulls (:func:`nulls.map_pvalues`).
+
+    ``groups`` lists each group's rows; members sharing a configuration share
+    null samples, as in copairs <= 0.5.5.
+    """
+    if not groups:
+        return np.zeros(0, dtype=np.float64)
+    gid = np.repeat(np.arange(len(groups)), [len(ix) for ix in groups])
+    rows = np.concatenate(groups).astype(np.int64)
+    keys, conf_cnt = np.unique(
+        gid * len(null_confs) + rev_ix[rows], return_counts=True
+    )
+    ptr = np.searchsorted(keys // len(null_confs), np.arange(len(groups) + 1))
+    return nulls.map_pvalues(
+        scores,
+        ptr,
+        keys % len(null_confs),
+        conf_cnt,
+        null_confs,
+        null_size,
+        seed,
+        backend=backend,
+        progress_bar=progress_bar,
+    )
+
+
 def mean_average_precision(
     ap_scores: pd.DataFrame,
     sameby: List[str],
@@ -165,6 +296,8 @@ def mean_average_precision(
     cache_dir: Optional[Union[str, Path]] = None,
     method: str = "fast",
     backend: str = "auto",
+    pos_pairs: Optional[np.ndarray] = None,
+    null: Optional[str] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -196,6 +329,11 @@ def mean_average_precision(
         ``"fast"`` (default) or ``"legacy"``, see :func:`get_map_pvalue`.
     backend : str
         Backend of the fast method, see :func:`get_map_pvalue`.
+    pos_pairs : np.ndarray, optional
+        Positive pairs used to compute the AP scores; see `get_map_pvalue`.
+        Needed when a group's positives are not its other members.
+    null : str, optional
+        Null of the group mAP, see :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -224,6 +362,8 @@ def mean_average_precision(
         cache_dir=cache_dir,
         method=method,
         backend=backend,
+        pos_pairs=pos_pairs,
+        null=null,
     )
 
     # Step 2: Apply multiple testing correction
@@ -248,6 +388,8 @@ def mean_average_precision_hierarchical(
     cache_dir: Optional[Union[str, Path]] = None,
     method: str = "fast",
     backend: str = "auto",
+    pos_pairs: Optional[np.ndarray] = None,
+    null: Optional[str] = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -292,6 +434,11 @@ def mean_average_precision_hierarchical(
         ``"fast"`` (default) or ``"legacy"``, see :func:`get_map_pvalue`.
     backend : str
         Backend of the fast method, see :func:`get_map_pvalue`.
+    pos_pairs : np.ndarray, optional
+        Positive pairs used to compute the AP scores; see `get_map_pvalue`.
+        Needed when a group's positives are not its other members.
+    null : str, optional
+        Null of the group mAP, see :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -323,6 +470,8 @@ def mean_average_precision_hierarchical(
         cache_dir=cache_dir,
         method=method,
         backend=backend,
+        pos_pairs=pos_pairs,
+        null=null,
     )
 
     # Step 2: Apply hierarchical multiple testing correction
