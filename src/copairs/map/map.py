@@ -91,8 +91,10 @@ def get_map_pvalue(
         block's profiles could have carried the group's label; for multilabel
         APs, the group's label moves to other profiles of its components of
         the negative graph, which keep their other labels. Each group's
-        positives must be its other members, and its smallest p-value is
-        about one over its number of distinct relabellings. ``"joint"``
+        positives must be its other members (for groups of one profile with
+        positives in other groups, use ``"joint"``: there it is that
+        profile's AP null), and its smallest p-value is about one over its
+        number of distinct relabellings. ``"joint"``
         samples the members' APs jointly (:mod:`copairs.nulls.joint`): a
         positive pair inside the group is one random number in both members'
         rank lists, and other similarities are independent, which real

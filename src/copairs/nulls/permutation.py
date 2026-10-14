@@ -508,7 +508,10 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
         raise ValueError(
             f"{int(bad.sum())} group(s) have positives outside the group or "
             "negatives inside it; the permutation null needs each group's "
-            "positives to be its other members and its references outside it"
+            "positives to be its other members and its references outside it. "
+            "Group so they are, or pass null='joint', which for a group of one "
+            "profile (e.g. one profile per guide, positives by gene) is that "
+            "profile's AP null"
         )
     # One representative per distinct negative set; gather only their lists.
     h1, h2 = hashes[1]
@@ -1019,7 +1022,8 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
                 raise ValueError(
                     f"group {label!r} lacks profiles holding its label ({kind} "
                     "pairs leave the group); the permutation null needs every "
-                    "profile with the label in the group"
+                    "profile with the label in the group. Group by the label "
+                    "alone, or pass null='joint'"
                 )
             layout.append(ends_)
         degree = np.bincount(layout[1].ravel(), minlength=n)

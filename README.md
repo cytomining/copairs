@@ -71,7 +71,9 @@ We provide examples demonstrating how to use copairs for:
   the data has between rank lists stays in the null. For multilabel APs
   (`map.multilabel.average_precision`), a draw moves the group's label to
   other profiles, which keep their other labels. Each group's positives must
-  be its other members. It needs the pairs the APs came from, which
+  be its other members; for groups of one profile whose positives are in other
+  groups (e.g. one profile per guide, positives by gene), use `"joint"`, which
+  there is that profile's AP null. It needs the pairs the APs came from, which
   `average_precision` and `multilabel.average_precision` attach to the frame
   they return, so the usual calls need nothing extra:
 

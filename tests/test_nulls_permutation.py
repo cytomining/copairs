@@ -162,7 +162,7 @@ def test_rejects_unsupported_layouts():
         meta, feats, progress_bar=False, return_pairs=True, **spec
     )
     meta_ap = ap.assign(half=[0, 0, 1, 0, 0, 0, 0, 0])
-    with pytest.raises(ValueError, match="positives outside the group"):
+    with pytest.raises(ValueError, match="positives outside the group.*null='joint'"):
         mean_average_precision(
             meta_ap, ["moa", "half"], 100, 0.05, 0, progress_bar=False,
             null="permutation", pairs=pairs,
@@ -295,6 +295,12 @@ def test_label_permutation_through_mean_average_precision():
     with pytest.raises(ValueError, match="one 'target' value"):
         mean_average_precision(
             ap.assign(g=0), ["g"], 100, 0.05, 0, progress_bar=False,
+            null="permutation", pairs=pairs,
+        )  # fmt: skip
+    split = ap.assign(half=np.arange(len(ap)) % 2)
+    with pytest.raises(ValueError, match="lacks profiles.*null='joint'"):
+        mean_average_precision(
+            split, ["target", "half"], 100, 0.05, 0, progress_bar=False,
             null="permutation", pairs=pairs,
         )  # fmt: skip
 
