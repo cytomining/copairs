@@ -341,12 +341,12 @@ def _group_edges(groups, num_pos, profile, pos_pairs):
 
     Without ``pos_pairs``, a group whose members each have ``len(group) - 1``
     positives is taken to be a replicate group (all its pairs are positives),
-    and other groups get None.
+    a group of one profile has no pairs inside it, and other groups get None.
     """
     if pos_pairs is None:
         return [
             [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
-            if (num_pos[ix] == len(ix) - 1).all()
+            if len(ix) == 1 or (num_pos[ix] == len(ix) - 1).all()
             else None
             for ix in groups
         ]
