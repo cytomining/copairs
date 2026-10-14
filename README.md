@@ -98,7 +98,10 @@ We provide examples demonstrating how to use copairs for:
   grows with group size; `stop_after=10` stops a group's
   draws at the 10th that reaches its mAP and reports 10 / draws (Besag and
   Clifford's sequential p-value), which spends few draws on groups with
-  large p-values and leaves small ones as they were.
+  large p-values and leaves small ones as they were. It stays calibrated, but
+  p-values near a threshold carry about `1 / sqrt(stop_after)` relative error
+  however large `null_size` is, so borderline calls depend on the seed: use it
+  to screen, or raise it for final calls.
 - `"joint"` samples the members' APs together: a positive pair inside the
   group is one random number in both members' rank lists, so the null
   narrows as replicates are added. Other similarities are treated as

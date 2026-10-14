@@ -118,7 +118,12 @@ def get_map_pvalue(
         one). Groups with large p-values then need few draws, while groups
         that never reach ``stop_after`` hits run all ``null_size`` draws and
         keep the usual p-value, so small p-values are unchanged in
-        resolution. ``stop_after=10`` is a common choice. Default: run all
+        resolution. Near a decision threshold, though, a stopped p-value has
+        about ``1 / sqrt(stop_after)`` relative Monte Carlo error whatever
+        ``null_size`` is, so borderline calls change with the seed (on the
+        paper's cellhealth data, ``stop_after=10`` flipped 8 of ~210 calls
+        between seeds where full runs flipped none, at 3-6x the speed). Use it
+        to screen, or with a larger value for final calls. Default: run all
         draws.
 
     Returns
