@@ -91,7 +91,11 @@ We provide examples demonstrating how to use copairs for:
 
   Its smallest p-value is about one over the number of distinct
   relabellings, e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one
-  plate. Its cost grows with group size; `stop_after=10` stops a group's
+  plate. The null assumes the group's profiles are exchangeable with the
+  references they are ranked against: replicates that share structure the
+  references lack (the same well, clone or batch) make it too narrow, so match
+  references to that structure (`neg_sameby`) or test whole units. Its cost
+  grows with group size; `stop_after=10` stops a group's
   draws at the 10th that reaches its mAP and reports 10 / draws (Besag and
   Clifford's sequential p-value), which spends few draws on groups with
   large p-values and leaves small ones as they were.
@@ -139,10 +143,14 @@ set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs.
 
 Multiprocessing: a process forked after copairs ran on the GPU picks a CPU
 backend, since CUDA cannot be used after `fork`. If Numba uses its GNU OpenMP
-threading layer (the default when TBB is not installed), it terminates a forked
-child that runs a parallel kernel once the parent has run one. Use the `spawn`
-or `forkserver` start method, or set `NUMBA_THREADING_LAYER=workqueue` (or
-install `tbb`) before the first copairs call.
+threading layer (the default when it cannot load TBB), a forked child that runs
+any Numba parallel kernel (copairs', or e.g. UMAP's) once the parent has run one
+stops with "Terminating: fork() called from a process already using GNU
+OpenMP", and a `ProcessPoolExecutor` reports `BrokenProcessPool`. Use the
+`spawn` or `forkserver` start method (`forkserver` is the Linux default from
+Python 3.14), or set `NUMBA_THREADING_LAYER=workqueue` before the first copairs
+call; that layer is fork-safe but stops the process if Numba parallel kernels
+are called from several threads at once.
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):
