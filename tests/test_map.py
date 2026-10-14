@@ -362,3 +362,25 @@ def test_map_pvalue_rejects_misaligned_pos_pairs():
             pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
             null="joint",
         )
+
+
+def test_joint_null_ignores_attached_pairs():
+    """The joint null infers edges from AP frames, even after reset_index."""
+    from copairs.map import get_map_pvalue
+
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame(
+        {"g": ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * 3}
+    )
+    meta = meta.sample(frac=1, random_state=1).reset_index(drop=True)
+    feats = rng.standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    reset = ap[ap["g"] != "other"].reset_index(drop=True)  # pairs now misaligned
+    bare = reset.copy()
+    bare.attrs.clear()
+    kwargs = dict(progress_bar=False, null="joint")
+    got = get_map_pvalue(reset, ["g"], 2000, SEED, **kwargs)
+    expected = get_map_pvalue(bare, ["g"], 2000, SEED, **kwargs)
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    with pytest.raises(ValueError, match="no reset_index"):
+        get_map_pvalue(reset, ["g"], 2000, SEED, progress_bar=False)

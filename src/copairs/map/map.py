@@ -134,7 +134,9 @@ def get_map_pvalue(
     """
     check_method(method, backend)
     null = check_null(method, null)
-    if pairs is None:
+    if pairs is None and null == "permutation":
+        # Only the permutation null reads attached pairs: the joint null
+        # infers its edges without them, as before they were attached.
         pairs = attached_pairs(ap_scores)
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
