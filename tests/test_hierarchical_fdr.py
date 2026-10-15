@@ -127,6 +127,7 @@ class TestHierarchicalFDR:
             threshold=0.05,
             seed=42,
             progress_bar=False,
+            null="copied",
         )
 
         # Hierarchical correction
@@ -138,6 +139,7 @@ class TestHierarchicalFDR:
             threshold=0.05,
             seed=42,
             progress_bar=False,
+            null="copied",
         )
 
         # For truly significant compounds, hierarchical should find at least
@@ -167,6 +169,7 @@ class TestHierarchicalFDR:
             threshold=0.05,
             seed=42,
             progress_bar=False,
+            null="copied",
         )
 
         # For non-significant groups, corrected p-value should be 1.0

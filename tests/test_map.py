@@ -1,5 +1,8 @@
 """Tests for (mean) Average Precision calculation."""
 
+import warnings
+import itertools
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -263,3 +266,151 @@ def test_multilabel_has_normalized_ap():
     )
 
     assert "normalized_average_precision" in result.columns
+
+
+def _ap_frame(rows):
+    """Build an `ap_scores` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
+    frame = pd.DataFrame(
+        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
+    )
+    frame["normalized_average_precision"] = 0.0
+    return frame
+
+
+def test_map_pvalue_replicates_use_the_joint_null():
+    """Replicate groups get the joint null, inferred or from explicit `pos_pairs`."""
+    from copairs.map import get_map_pvalue
+    from copairs.matching import find_pairs
+
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
+    feats = rng.standard_normal((len(meta), 10))
+    ap_scores = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    kwargs = dict(progress_bar=False, null="joint")
+    bare = ap_scores.copy()
+    bare.attrs.clear()  # no attached pairs: positives are inferred
+    inferred = get_map_pvalue(bare, ["g"], 20_000, SEED, **kwargs)
+    attached = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, **kwargs)
+    explicit = get_map_pvalue(
+        bare,
+        ["g"],
+        20_000,
+        SEED,
+        pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+        **kwargs,
+    )
+    assert attached["p_value"].tolist() == explicit["p_value"].tolist()
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    assert ((inferred["p_value"] > 0) & (inferred["p_value"] <= 1)).all()
+
+
+def test_map_pvalue_narrows_with_group_size():
+    """The same mAP is more significant with more replicates."""
+    from copairs.map import get_map_pvalue
+
+    rows = []
+    for n in (2, 4, 8):
+        rows += [(f"n{n}", 0.18, n - 1, n - 1 + 100)] * n
+    result = get_map_pvalue(
+        _ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False, null="joint"
+    )
+    p = result.set_index("g")["p_value"]
+    assert p["n2"] > p["n4"] > p["n8"]
+
+
+def test_map_pvalue_falls_back_with_warning(tmp_path):
+    """Groups whose positives are not their other members use the previous null."""
+    from copairs.map import get_map_pvalue
+
+    rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
+    with pytest.warns(UserWarning, match="pos_pairs"):
+        result = get_map_pvalue(
+            _ap_frame(rows),
+            ["g"],
+            1000,
+            SEED,
+            progress_bar=False,
+            cache_dir=tmp_path,
+            null="joint",
+        )
+    p = result.set_index("g")["p_value"]
+    assert 0 < p["odd"] <= 1 and 0 < p["rep"] <= 1
+
+
+def test_map_pvalue_one_profile_groups_use_their_ap_null():
+    """A group of one profile, positives in other groups, gets that AP's null."""
+    from copairs.map import get_map_pvalue
+
+    genes = ["a"] * 4 + ["b"] * 4 + ["neg"] * 10  # one profile per guide
+    meta = pd.DataFrame({"gene": genes, "guide": range(len(genes))})
+    meta["ref"] = np.where(meta["gene"] == "neg", meta.index, -1)
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 8))
+    ap, pairs = average_precision(
+        meta, feats, ["gene", "ref"], [], [], ["gene", "ref"], progress_bar=False,
+        return_pairs=True,
+    )  # fmt: skip
+    ap = ap[ap["gene"] != "neg"]
+    kwargs = dict(progress_bar=False, null="joint")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        inferred = get_map_pvalue(ap, ["guide"], 20_000, SEED, **kwargs)
+    explicit = get_map_pvalue(
+        ap, ["guide"], 20_000, SEED, pos_pairs=pairs.pos, **kwargs
+    )
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    ranks = itertools.combinations(range(13), 3)  # 3 sibling guides, 10 controls
+    null = np.array([np.mean(np.arange(1, 4) / (np.array(r) + 1)) for r in ranks])
+    exact = [(null >= m - 1e-9).mean() for m in inferred["mean_average_precision"]]
+    np.testing.assert_allclose(inferred["p_value"], exact, atol=0.01)
+
+
+def test_map_pvalue_rejects_misaligned_pos_pairs():
+    """pos_pairs from a meta whose index has gaps no longer index ap_scores."""
+    from copairs.map import get_map_pvalue
+    from copairs.matching import find_pairs
+
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
+    meta = meta.drop(index=[1, 7, 20])  # filtered by the user: index 0, 2, 3, 4, ...
+    feats = rng.standard_normal((len(meta), 10))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    bare = ap.copy()
+    bare.attrs.clear()
+    kwargs = dict(progress_bar=False, null="joint")
+    inferred = get_map_pvalue(bare, ["g"], 2000, SEED, **kwargs)
+    explicit = get_map_pvalue(bare, ["g"], 2000, SEED, pairs=pairs, **kwargs)
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    with pytest.raises(ValueError, match="pos_pairs must index"):
+        get_map_pvalue(
+            ap,
+            ["g"],
+            2000,
+            SEED,
+            progress_bar=False,
+            pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+            null="joint",
+        )
+
+
+def test_joint_null_ignores_attached_pairs():
+    """The joint null infers edges from AP frames, even after reset_index."""
+    from copairs.map import get_map_pvalue
+
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame(
+        {"g": ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * 3}
+    )
+    meta = meta.sample(frac=1, random_state=1).reset_index(drop=True)
+    feats = rng.standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    reset = ap[ap["g"] != "other"].reset_index(drop=True)  # pairs now misaligned
+    bare = reset.copy()
+    bare.attrs.clear()
+    kwargs = dict(progress_bar=False, null="joint")
+    got = get_map_pvalue(reset, ["g"], 2000, SEED, **kwargs)
+    expected = get_map_pvalue(bare, ["g"], 2000, SEED, **kwargs)
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    with pytest.raises(ValueError, match="no reset_index"):
+        get_map_pvalue(reset, ["g"], 2000, SEED, progress_bar=False)

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from copairs.map.normalization import expected_ap, normalize_ap
+from copairs.map.normalization import expected_ap, normalize_ap, expected_ap_array
 
 
 def test_expected_ap_basic_properties():
@@ -145,3 +145,22 @@ def test_normalization_interpretability():
 
     assert normalized[0] < 0, "AP=0 should give negative normalized score"
     assert normalized[-1] > 0.99, "AP=1 should give normalized score near 1"
+
+
+def test_expected_ap_array_bitwise():
+    """The vectorized expected AP equals the scalar formula bit for bit."""
+    rng = np.random.default_rng(3)
+    M = rng.integers(0, 40, size=2000)
+    N = rng.integers(0, 2000, size=2000)
+    M[:4], N[:4] = [1, 0, 1, 5], [0, 1, 4, 0]
+    keep = M + N >= 1
+    M, N = M[keep], N[keep]
+    scalar = np.array([expected_ap(int(m), int(n)) for m, n in zip(M, N)])
+    np.testing.assert_array_equal(
+        expected_ap_array(M, N).view(np.uint64), scalar.view(np.uint64)
+    )
+    with pytest.raises(ValueError):
+        expected_ap_array(np.array([-1]), np.array([3]))
+    assert normalize_ap(0.5, 3, 10) == pytest.approx(
+        (0.5 - expected_ap(3, 10)) / (1 - expected_ap(3, 10))
+    )

@@ -16,6 +16,7 @@ dependencies = [
   "tqdm",
   "statsmodels",
   "duckdb>=1.4.4",
+  "numba>=0.60",
 ]
 
 [project.optional-dependencies]

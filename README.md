@@ -15,6 +15,8 @@ copairs depends on widely used Python packages:
 * pandas
 * tqdm
 * statsmodels
+* duckdb
+* numba
 
 ### Installation
 
@@ -26,6 +28,18 @@ pip install copairs
 To also install dependencies for running examples, run:
 ```bash
 pip install copairs[demo]
+```
+
+#### GPU acceleration (optional)
+
+With [CuPy](https://cupy.dev) installed and a CUDA GPU visible, copairs runs
+null distributions, p-values, pair similarities and AP on the GPU
+(`backend="auto"` picks it). Install the CuPy wheel matching your driver, one
+of the two (the `ctk` extra brings the CUDA runtime and NVRTC, so no CUDA
+Toolkit is needed):
+```bash
+pip install "cupy-cuda12x[ctk]>=14"  # CUDA 12 drivers, any GPU from Maxwell on
+pip install "cupy-cuda13x[ctk]>=14"  # CUDA 13 drivers, compute capability >= 7.5
 ```
 
 ### Testing
@@ -43,6 +57,105 @@ We provide examples demonstrating how to use copairs for:
 - [calculating mAP to assess phenotypic activity of perturbations](https://github.com/cytomining/copairs/blob/main/docs/examples/phenotypic_activity.ipynb)
 - [calculating mAP to assess phenotypic consistency of perturbations](https://github.com/cytomining/copairs/blob/main/docs/examples/phenotypic_consistency.ipynb)
 - [estimating null size for mAP p-value calculation](https://github.com/cytomining/copairs/blob/main/docs/examples/null_size.ipynb)
+
+## mAP null distributions
+
+`mean_average_precision`, `mean_average_precision_hierarchical` and
+`get_map_pvalue` take `null=`, the null of a group's mAP:
+
+- `"permutation"` (default of `method="fast"`) tests the paper's null
+  hypothesis directly: within each block of members ranked against the same
+  references (e.g. one plate's replicates and controls), any of the block's
+  profiles could have carried the group's label. Draws relabel profiles and
+  recompute the mAP from the observed similarities, so whatever dependence
+  the data has between rank lists stays in the null. For multilabel APs
+  (`map.multilabel.average_precision`), a draw moves the group's label to
+  other profiles, which keep their other labels. Each group's positives must
+  be its other members; for groups of one profile whose positives are in other
+  groups (e.g. one profile per guide, positives by gene), use `"joint"`, which
+  there is that profile's AP null. It needs the pairs the APs came from, which
+  `average_precision` and `multilabel.average_precision` attach to the frame
+  they return, so the usual calls need nothing extra:
+
+  ```python
+  ap = copairs.map.average_precision(meta, feats, ...)
+  result = copairs.map.mean_average_precision(
+      ap, sameby, null_size=10_000, threshold=0.05, seed=0
+  )
+  ```
+
+  The pairs (`ap.attrs["copairs_pairs"]`) follow the frame through filtering
+  and copies, but not through saving, pickling or concatenating frames of
+  different AP calls; such frames raise under this null. Recompute them,
+  pass `pairs=` (`average_precision(..., return_pairs=True)` also returns
+  them), or choose another null. They hold a reference to the features;
+  `ap.attrs.pop("copairs_pairs")` drops it.
+
+  Its smallest p-value is about one over the number of distinct
+  relabellings, e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one
+  plate. The null assumes the group's profiles are exchangeable with the
+  references they are ranked against: replicates that share structure the
+  references lack (the same well, clone or batch) make it too narrow, so match
+  references to that structure (`neg_sameby`) or test whole units. Its cost
+  grows with group size; `stop_after=10` stops a group's
+  draws at the 10th that reaches its mAP and reports 10 / draws (Besag and
+  Clifford's sequential p-value), which spends few draws on groups with
+  large p-values and leaves small ones as they were. It stays calibrated, but
+  p-values near a threshold carry about `1 / sqrt(stop_after)` relative error
+  however large `null_size` is, so borderline calls depend on the seed: use it
+  to screen, or raise it for final calls.
+- `"joint"` samples the members' APs together: a positive pair inside the
+  group is one random number in both members' rank lists, so the null
+  narrows as replicates are added. Other similarities are treated as
+  independent, which real profiles are not (members share references, and
+  some profiles are close to many others), so on real data it can give too
+  small p-values for groups of many replicates. It needs no pairs.
+- `"copied"` is the null of copairs <= 0.5.5 (and the only null of
+  `method="legacy"`): members with equal pair counts share one AP draw, so the
+  null does not narrow with replicates, while members with different counts
+  get independent draws.
+
+## Performance
+
+`average_precision`, `mean_average_precision` and the p-value functions take
+`method="fast"` (default) or `"legacy"`, and a `backend`. `"auto"` (default)
+picks `"cuda"` when CuPy can compile kernels for a visible GPU, else `"numba"`.
+The null and p-value functions also accept `"numpy"`, a slower reference
+implementation; the fast AP stage (`average_precision`, `multilabel`) runs on
+`"cuda"` or `"numba"` only, and its NumPy code is `method="legacy"`.
+
+- Null distributions are sampled exactly (Philox counter-based RNG, Vitter's
+  Algorithm A) in O(1) memory per sample instead of permuting a
+  `null_size x total` matrix, and p-values are streamed in chunks. Sample `j`
+  of a `(num_pos, total)` null depends only on `(seed, num_pos, total, j)`, and
+  the NumPy, Numba and CUDA backends return identical samples.
+- AP is computed by counting, without sorting rank lists, and similarities by
+  per-pair kernels; multilabel pairs come from an inverted label index.
+- `copairs.fastap.draw_average_precisions` scores many query-vs-reference draws
+  in one batched call.
+
+Differences from `method="legacy"` (copairs <= 0.5.5): null samples come from a
+different random stream (p-values agree within Monte Carlo error); mAP p-values
+count null values `>=` the observed mAP, as in the paper, where legacy counted
+`>` and returned too small p-values when the mAP equals an atom of the null
+(e.g. perfect retrieval); and similarities from the kernels match the generic
+ones to float32 rounding, so near-tied pairs can rank differently. The kernels
+compute in float64, so float32 profiles whose norms overflow float32 (entries
+around 1e19 and up) get their actual similarity instead of the generic 0 or NaN.
+
+Numba starts one thread per host CPU. In a container or job with a CPU quota,
+set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs.
+
+Multiprocessing: a process forked after copairs ran on the GPU picks a CPU
+backend, since CUDA cannot be used after `fork`. If Numba uses its GNU OpenMP
+threading layer (the default when it cannot load TBB), a forked child that runs
+any Numba parallel kernel (copairs', or e.g. UMAP's) once the parent has run one
+stops with "Terminating: fork() called from a process already using GNU
+OpenMP", and a `ProcessPoolExecutor` reports `BrokenProcessPool`. Use the
+`spawn` or `forkserver` start method (`forkserver` is the Linux default from
+Python 3.14), or set `NUMBA_THREADING_LAYER=workqueue` before the first copairs
+call; that layer is fork-safe but stops the process if Numba parallel kernels
+are called from several threads at once.
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):

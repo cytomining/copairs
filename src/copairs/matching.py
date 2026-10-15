@@ -13,6 +13,8 @@ import numpy as np
 import duckdb
 import pandas as pd
 
+from copairs.methods import check_method
+
 logger = logging.getLogger("copairs")
 ColumnList = Union[Sequence[str], pd.Index]
 ColumnDict = Dict[str, ColumnList]
@@ -540,11 +542,34 @@ def _validate(sameby, diffby):
     return sameby, diffby
 
 
+def _as_label_lists(labels: pd.Series) -> pd.Series:
+    """Cells as lists, converting ExtensionArray cells from groupby().unique()."""
+    return labels.map(
+        lambda v: v.tolist() if isinstance(v, pd.api.extensions.ExtensionArray) else v
+    )
+
+
+def _find_pairs_multilabel_fast(dframe, sameby, diffby, multilabel_col):
+    """Inverted-index :func:`find_pairs_multilabel`, or None when unsupported."""
+    # Imported here: fastap.multilabel imports this module's find_pairs.
+    from copairs.fastap import multilabel as fast
+
+    if not isinstance(dframe, pd.DataFrame):
+        return None
+    rest_same = [c for c in sameby if c != multilabel_col]
+    if multilabel_col in sameby:
+        # Also in diffby, as in SQL, the label lists must differ as a whole.
+        return fast.shared_label_pairs(dframe, rest_same, diffby, multilabel_col)
+    rest_diff = [c for c in diffby if c != multilabel_col]
+    return fast.disjoint_label_pairs(dframe, rest_same, rest_diff, multilabel_col)
+
+
 def find_pairs_multilabel(
     dframe: Union[pd.DataFrame, duckdb.DuckDBPyRelation],
     sameby: Union[str, ColumnList],
     diffby: Union[str, ColumnList],
     multilabel_col: str,
+    method: str = "fast",
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     Find pairs of rows in a DataFrame that have the same or different values in certain columns.
@@ -561,11 +586,17 @@ def find_pairs_multilabel(
         List of column names to consider for finding different values.
     multilabel_col : str
         Name of the column containing multiple labels.
+    method : str
+        ``"fast"`` (default) matches through an inverted label index when the
+        input allows it, falling back to SQL otherwise; ``"legacy"`` always uses
+        the SQL implementation of copairs <= 0.5.5. Both return the same pairs.
 
     Returns
     -------
     np.ndarray
         Array of pairs of indices with matching or non-matching values in the specified columns.
+        With ``multilabel_col`` in ``diffby``, pairs ``(i < j)`` are unique, and
+        sorted with ``method="fast"``.
 
     Notes
     -----
@@ -578,18 +609,22 @@ def find_pairs_multilabel(
     assert (multilabel_col in sameby) or (multilabel_col in diffby), (
         f"Missing {multilabel_col} in sameby and diffby"
     )
+    check_method(method)
+
+    if isinstance(dframe, pd.DataFrame):
+        # pandas groupby().unique() can produce ExtensionArray cells, which DuckDB
+        # otherwise infers as VARCHAR instead of LIST. Keep NumPy arrays and
+        # missing cells intact; list(ndarray) would leave unsupported NumPy
+        # scalar elements.
+        labels = _as_label_lists(dframe[multilabel_col])
+        dframe = dframe.assign(**{multilabel_col: labels})
+
+    if method == "fast":
+        fast = _find_pairs_multilabel_fast(dframe, sameby, diffby, multilabel_col)
+        if fast is not None:
+            return fast
 
     df = dframe.reset_index()
-    # pandas groupby().unique() can produce ExtensionArray cells, which DuckDB
-    # otherwise infers as VARCHAR instead of LIST. Keep NumPy arrays and missing
-    # cells intact; list(ndarray) would leave unsupported NumPy scalar elements.
-    df[multilabel_col] = df[multilabel_col].map(
-        lambda labels: (
-            labels.tolist()
-            if isinstance(labels, pd.api.extensions.ExtensionArray)
-            else labels
-        )
-    )
 
     if multilabel_col in sameby:
         sameby = copy(sameby)
@@ -657,5 +692,17 @@ def find_pairs_multilabel(
             result = np.array(
                 [index_d[k] for k in ("index", "index_1")], dtype=np.uint32
             ).T
+            if method == "fast":  # sorted, like the inverted-index matcher
+                result = sorted_unique_pairs(result)
 
     return result
+
+
+def sorted_unique_pairs(pairs: np.ndarray) -> np.ndarray:
+    """``np.unique(pairs, axis=0)`` for uint32 ``(i, j)`` pairs, via packed keys."""
+    packed = np.unique(
+        (pairs[:, 0].astype(np.uint64) << np.uint64(32)) | pairs[:, 1].astype(np.uint64)
+    )
+    return np.stack(
+        [packed >> np.uint64(32), packed & np.uint64(0xFFFFFFFF)], axis=1
+    ).astype(np.uint32)

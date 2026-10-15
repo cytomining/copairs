@@ -1,18 +1,148 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Callable
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from copairs import compute
+from copairs import fastap, compute
 from copairs.matching import UnpairedException, find_pairs
+from copairs.fastap.ranking import _host
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
 
 logger = logging.getLogger("copairs")
+
+
+# Key of the pairs an AP function attaches to the frame it returns.
+PAIRS_ATTR = "copairs_pairs"
+
+
+class _AttachedPairs(dict):
+    """A frame's pairs, carried in ``DataFrame.attrs``.
+
+    pandas deep-copies ``attrs`` on every operation and writes them to parquet
+    as JSON. This handle is shared by copies, serializes as ``{}`` and pickles
+    to an empty handle, so frames stay cheap to copy and safe to save, and a
+    reloaded frame has no pairs. Handles are equal only to themselves, so
+    pandas drops them when concatenating frames of different AP calls.
+    """
+
+    __slots__ = ("pairs",)
+
+    def __init__(self, pairs=None):
+        super().__init__()
+        self.pairs = pairs
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __reduce__(self):
+        return (_AttachedPairs, ())
+
+    def __eq__(self, other):
+        return self is other
+
+    def __ne__(self, other):
+        return self is not other
+
+
+def attach_pairs(frame: pd.DataFrame, pairs) -> pd.DataFrame:
+    """Attach ``pairs`` to ``frame`` (in place) and return it."""
+    frame.attrs[PAIRS_ATTR] = _AttachedPairs(pairs)
+    return frame
+
+
+def attached_pairs(frame: pd.DataFrame):
+    """Return the pairs an AP function attached to ``frame``, or None."""
+    handle = frame.attrs.get(PAIRS_ATTR)
+    return handle.pairs if isinstance(handle, _AttachedPairs) else None
+
+
+class _FeatureSimilarity:
+    """``pairs -> similarities`` (NumPy) of an AP call's features.
+
+    Holds the features, not the kernel built from them (which may live on the
+    GPU): the kernel is built on first use with the AP call's method, backend
+    and distance, so similarities equal the AP stage's, and dropped by
+    :meth:`release`.
+    """
+
+    def __init__(self, method, backend, feats, distance, batch_size):
+        self._setup = (method, backend, feats, distance, batch_size)
+        self._fn = None
+
+    def __call__(self, pairs):
+        if self._fn is None:
+            method, backend, feats, distance, batch_size = self._setup
+            self._fn = fastap.setup(
+                method, backend, feats, distance, batch_size, False
+            )[1]
+        return _host(self._fn(pairs))
+
+    def release(self):
+        """Drop the kernel, and with it any copy of the features it holds."""
+        self._fn = None
+
+
+@dataclass(frozen=True)
+class RankPairs:
+    """The pairs behind an AP table, for mAP nulls that re-rank profiles.
+
+    Attached to the frame :func:`average_precision` returns (and returned with
+    it by ``return_pairs=True``); indices are rows of that frame.
+
+    Attributes
+    ----------
+    pos, neg : np.ndarray
+        ``(n, 2)`` positive and negative pairs.
+    similarity : callable
+        ``pairs -> similarities`` (NumPy), the function the APs were computed
+        with.
+    """
+
+    pos: np.ndarray
+    neg: np.ndarray
+    similarity: Callable[[np.ndarray], np.ndarray]
+
+
+@dataclass(frozen=True, kw_only=True)
+class LabelPairs(RankPairs):
+    """The pairs behind a multilabel AP table, whose rows are (profile, label).
+
+    Returned by ``multilabel.average_precision(..., return_pairs=True)``;
+    ``pos``, ``neg`` and ``lone`` index rows of the metadata.
+
+    Attributes
+    ----------
+    profile : np.ndarray
+        Profile of each AP row, by the AP frame's index.
+    label_col : str
+        The multilabel column.
+    keys : np.ndarray
+        Label values.
+    pos_key : np.ndarray
+        Label (index into ``keys``) of each positive pair; a pair sharing
+        several labels appears once per label.
+    lone, lone_key : np.ndarray or None
+        Pairs that share exactly one label, ``keys[lone_key]``, and meet the
+        negative rules on the other columns, so that without that label they
+        would be negatives. None when the label column is not one of the
+        negative pairs' ``diffby`` columns.
+    """
+
+    profile: np.ndarray
+    label_col: str
+    keys: np.ndarray
+    pos_key: np.ndarray
+    lone: np.ndarray | None
+    lone_key: np.ndarray | None
 
 
 def build_rank_lists(
@@ -92,6 +222,9 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
     progress_bar: bool = True,
+    method: str = "fast",
+    backend: str = "auto",
+    return_pairs: bool = False,
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -143,10 +276,34 @@ def average_precision(
     distance : str
         The distance function used for computing similarities. Default is "cosine".
 
+    method : str
+        ``"fast"`` (default) computes similarities with parallel kernels (for
+        cosine, abs_cosine, correlation, euclidean, manhattan and chebyshev;
+        other metrics use the generic path) and AP by counting, without
+        sorting rank lists. AP values match ``"legacy"`` to float64 rounding
+        for identical similarities; the kernels' similarities match to float32
+        rounding, so near-ties can order differently (and, computed in
+        float64, stay finite for float32 rows whose norms overflow float32).
+        ``"legacy"`` reproduces copairs <= 0.5.5.
+
+    backend : str
+        ``"auto"``, ``"cuda"`` or ``"numba"`` for the fast method (the NumPy
+        implementation is ``method="legacy"``).
+
+    return_pairs : bool
+        Also return the :class:`RankPairs` the APs were computed from, which
+        ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
+        needs. They are attached to the returned frame either way, in
+        ``frame.attrs["copairs_pairs"]``, and follow it through filtering
+        and copies (not saving, pickling or concatenating with other AP
+        calls' frames). They hold a reference to ``feats``; drop them with
+        ``frame.attrs.pop("copairs_pairs")``.
+
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the following columns:
+        A DataFrame (with ``return_pairs``, a ``(DataFrame, RankPairs)``
+        tuple) containing the following columns:
         - 'average_precision': The calculated average precision score for each profile.
         - 'normalized_average_precision': The normalized AP score (scale-independent).
         - 'n_pos_pairs': The number of positive pairs for each profile.
@@ -175,7 +332,9 @@ def average_precision(
     validate_pipeline_input(meta, feats, columns)
 
     # Get the distance function for similarity calculations (e.g., cosine)
-    similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    backend, similarity = fastap.setup(
+        method, backend, feats, distance, batch_size, progress_bar, on_device=True
+    )
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
@@ -196,21 +355,27 @@ def average_precision(
 
     # Compute similarities for positive pairs
     logger.info("Computing positive similarities...")
-    pos_sims = similarity_fn(feats, pos_pairs, batch_size)
+    pos_sims = similarity(pos_pairs)
 
     # Compute similarities for negative pairs
     logger.info("Computing negative similarities...")
-    neg_sims = similarity_fn(feats, neg_pairs, batch_size)
+    neg_sims = similarity(neg_pairs)
 
-    # Build rank lists for calculating average precision
-    logger.info("Building rank lists...")
-    paired_ix, rel_k_list, counts = build_rank_lists(
-        pos_pairs, neg_pairs, pos_sims, neg_sims
-    )
+    if method == "fast":
+        logger.info("Computing average precision...")
+        paired_ix, ap_scores, null_confs = fastap.ap_from_pairs(
+            pos_pairs, neg_pairs, pos_sims, neg_sims, backend=backend
+        )
+    else:
+        # Build rank lists for calculating average precision
+        logger.info("Building rank lists...")
+        paired_ix, rel_k_list, counts = build_rank_lists(
+            pos_pairs, neg_pairs, pos_sims, neg_sims
+        )
 
-    # Compute average precision scores and associated configurations
-    logger.info("Computing average precision...")
-    ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
+        # Compute average precision scores and associated configurations
+        logger.info("Computing average precision...")
+        ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
 
     # Add AP scores and pair counts to the metadata DataFrame
     logger.info("Creating result DataFrame...")
@@ -231,11 +396,22 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
-    return meta
+    pairs = RankPairs(
+        pos_pairs,
+        neg_pairs,
+        _FeatureSimilarity(method, backend, feats, distance, batch_size),
+    )
+    attach_pairs(meta, pairs)
+    return (meta, pairs) if return_pairs else meta
 
 
 def p_values(
-    dframe: pd.DataFrame, null_size: int, seed: int, progress_bar: bool = True
+    dframe: pd.DataFrame,
+    null_size: int,
+    seed: int,
+    progress_bar: bool = True,
+    method: str = "fast",
+    backend: str = "auto",
 ) -> np.ndarray:
     """Compute p-values for average precision scores based on a null distribution.
 
@@ -257,6 +433,10 @@ def p_values(
         Random seed for reproducibility of the null distribution.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    method : str
+        ``"fast"`` (default) or ``"legacy"``, see :func:`copairs.compute.p_values`.
+    backend : str
+        Backend of the fast method, see :func:`copairs.compute.get_null_dists`.
 
     Returns
     -------
@@ -275,7 +455,9 @@ def p_values(
     null_confs = dframe.loc[mask, ["n_pos_pairs", "n_total_pairs"]].values
 
     # Compute p-values for profiles with valid configurations using the null distribution
-    pvals[mask] = compute.p_values(scores, null_confs, null_size, seed, progress_bar)
+    pvals[mask] = compute.p_values(
+        scores, null_confs, null_size, seed, progress_bar, method, backend
+    )
 
     # Return the array of p-values, including NaN for invalid profiles
     return pvals

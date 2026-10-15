@@ -1,15 +1,20 @@
 """Functions to compute distances and ranks using numpy operations."""
 
 import os
+import hashlib
 import tempfile
 import itertools
-from typing import Tuple, Union, Callable, Optional
+from typing import Tuple, Union, Callable, Optional, Sequence
 from pathlib import Path
 from multiprocessing.pool import ThreadPool
 
 import numpy as np
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
+
+from copairs import nulls
+from copairs.methods import check_method
+from copairs.nulls.pvalues import resolve_seed, _check_null_size
 
 
 def parallel_map(
@@ -460,6 +465,92 @@ def random_ap(num_perm: int, num_pos: int, total: int, seed: int):
     return null_dist
 
 
+def random_map(
+    members: Sequence[Tuple[int, int]],
+    edges: Sequence[Tuple[int, int]],
+    null_size: int,
+    seed: int,
+    chunk: int = 200_000,
+) -> np.ndarray:
+    """Null distribution of a group's mAP, sampled jointly over its members.
+
+    Under the null every pair's similarity is an independent random number. A
+    positive pair between two members of the group (an edge) is ONE number that
+    sits in both members' rank lists, so their APs move together exactly as much
+    as the retrieval bookkeeping dictates. Everything else a member ranks is
+    private to it. Each member's marginal is the uniform placement of its
+    positives that `random_ap` samples, so per-profile AP p-values are unchanged;
+    only the null of the average changes.
+
+    Per member and sample, its shared values and private positives are drawn
+    explicitly and sorted; its negatives are then dropped into the gaps between
+    them with one multinomial draw, so the cost does not depend on how many
+    negatives it ranks.
+
+    Parameters
+    ----------
+    members : sequence of (num_pos, num_neg)
+        Positive and negative pair counts of each member of the group.
+    edges : sequence of (i, j)
+        Positive pairs between members i and j (local indices into `members`).
+    null_size : int
+        Number of mAP samples.
+    seed : int
+        Master seed; the stream is a pure function of (seed, members, edges).
+
+    Returns
+    -------
+    np.ndarray
+        `null_size` samples of the group's mAP under the null.
+    """
+    if int(chunk) != chunk or chunk < 1:
+        raise ValueError(f"chunk must be a positive integer, got {chunk}")
+    n = len(members)
+    members = [(int(num_pos), int(num_neg)) for num_pos, num_neg in members]
+    edges = sorted({(min(int(i), int(j)), max(int(i), int(j))) for i, j in edges})
+    key = repr((int(seed), tuple(sorted(members)), tuple(edges)))
+    digest = hashlib.blake2b(key.encode(), digest_size=8).digest()
+    rng = np.random.default_rng(int.from_bytes(digest, "little"))
+
+    incident = [[] for _ in range(n)]
+    for e, (i, j) in enumerate(edges):
+        if i == j or not (0 <= i < n and 0 <= j < n):
+            raise ValueError(f"edge {(i, j)} does not join two distinct members")
+        incident[i].append(e)
+        incident[j].append(e)
+    plan = []
+    for i, (num_pos, num_neg) in enumerate(members):
+        shared = len(incident[i])
+        if num_pos < 1 or shared > num_pos or num_neg < 0:
+            raise ValueError(
+                f"member {i} has {num_pos} positives, {num_neg} negatives and "
+                f"{shared} positive pairs inside the group"
+            )
+        plan.append(
+            (np.array(incident[i], dtype=np.int64), num_pos - shared, num_pos, num_neg)
+        )
+
+    out = np.empty(null_size, dtype=np.float64)
+    done = 0
+    while done < null_size:
+        b = min(chunk, null_size - done)
+        shared_vals = rng.random((b, len(edges)))
+        total = np.zeros(b)
+        for edge_ix, private_pos, num_pos, num_neg in plan:
+            vals = np.concatenate(
+                [shared_vals[:, edge_ix], rng.random((b, private_pos))], axis=1
+            )
+            vals = -np.sort(-vals, axis=1)  # the member's positives, best first
+            bounds = np.concatenate([np.ones((b, 1)), vals, np.zeros((b, 1))], axis=1)
+            gaps = -np.diff(bounds, axis=1)  # room for negatives around each positive
+            above = np.cumsum(rng.multinomial(num_neg, gaps), axis=1)[:, :-1]
+            t = np.arange(1, num_pos + 1)
+            total += (t / (t + above)).sum(axis=1) / num_pos
+        out[done : done + b] = total / n
+        done += b
+    return out
+
+
 def _cache_read(path: Path) -> Optional[np.ndarray]:
     """Read a cached .npy file, returning None on any corruption or absence."""
     try:
@@ -532,6 +623,8 @@ def get_null_dists(
     seed: int,
     cache_dir: Optional[Union[str, Path]] = None,
     progress_bar: bool = True,
+    method: str = "fast",
+    backend: str = "auto",
 ) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
 
@@ -544,15 +637,59 @@ def get_null_dists(
         Number of samples to generate in the null distribution.
     seed : int
         Random seed for reproducibility.
+    cache_dir : str or Path, optional
+        Cache location for ``method="legacy"`` (default ``~/.copairs``). The fast
+        method regenerates nulls deterministically and does not cache them.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    method : str
+        ``"fast"`` (default) samples each null exactly with
+        :func:`copairs.nulls.ap_nulls`: sample ``j`` depends only on
+        ``(seed, num_pos, total, j)``, in O(1) memory per sample. ``"legacy"``
+        reproduces copairs <= 0.5.5 bitwise by permuting a
+        ``null_size x total`` matrix per configuration.
+    backend : str
+        Backend of the fast method: ``"auto"``, ``"cuda"``, ``"numba"`` or
+        ``"numpy"``. All return identical values.
 
     Returns
     -------
     np.ndarray
-        A 2D array where each row corresponds to a null distribution for a specific
-        configuration.
+        A 2D float32 array where each row corresponds to a null distribution for a
+        specific configuration.
     """
+    check_method(method, backend)
+    if method == "legacy":
+        return _get_null_dists_legacy(confs, null_size, seed, cache_dir, progress_bar)
+    confs = np.asarray(confs)
+    null_size = _check_null_size(null_size)
+    out = np.full((len(confs), null_size), np.nan, dtype=np.float32)
+    ranked = ~_without_positives(confs)
+    if ranked.any():
+        out[ranked] = nulls.ap_nulls(
+            confs[ranked], null_size, resolve_seed(seed), backend=backend
+        )
+    return out
+
+
+def _without_positives(confs: np.ndarray) -> np.ndarray:
+    """Mask of configurations with no positives, whose AP is undefined.
+
+    copairs 0.5.5 gives them NaN nulls and p-values of 1; sample ``j`` of any
+    other configuration does not depend on them.
+    """
+    confs = np.asarray(confs).reshape(-1, 2)
+    return (confs[:, 0] == 0) & (confs[:, 1] >= 0)
+
+
+def _get_null_dists_legacy(
+    confs: np.ndarray,
+    null_size: int,
+    seed: int,
+    cache_dir: str | Path | None = None,
+    progress_bar: bool = True,
+) -> np.ndarray:
+    """Null distributions as computed by copairs <= 0.5.5 (``method="legacy"``)."""
     cache_dir = Path.home() / ".copairs" if cache_dir is None else Path(cache_dir)
     cache_dir = cache_dir / f"seed{seed}" / f"ns{null_size}"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -583,6 +720,8 @@ def p_values(
     null_size: int,
     seed: int,
     progress_bar: bool = True,
+    method: str = "fast",
+    backend: str = "auto",
 ):
     """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
@@ -600,17 +739,48 @@ def p_values(
         distribution.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    method : str
+        ``"fast"`` (default) streams exact null samples (see
+        :func:`get_null_dists`) and counts null scores ``>= score``, treating
+        values within the scores' rounding as ties (see
+        :func:`copairs.nulls.tie_thresholds`). ``"legacy"`` reproduces copairs
+        <= 0.5.5.
+    backend : str
+        Backend of the fast method, see :func:`get_null_dists`.
 
     Returns
     -------
     np.ndarray
         An array of p-values corresponding to the input AP scores.
     """
+    check_method(method, backend)
     # Identify unique configurations and their indices
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
 
+    if method == "fast":
+        rev_ix = rev_ix.ravel()
+        ranked = ~_without_positives(confs)
+        pvals = np.ones(len(rev_ix), dtype=np.float32)
+        rows = ranked[rev_ix]
+        if rows.any():
+            index = np.cumsum(ranked) - 1  # configuration -> row of confs[ranked]
+            pvals[rows] = nulls.ap_pvalues(
+                np.asarray(ap_scores)[rows],
+                index[rev_ix[rows]],
+                confs[ranked],
+                null_size,
+                seed,
+                backend=backend,
+                progress_bar=progress_bar,
+            )
+        else:
+            _check_null_size(null_size)
+        return pvals
+
     # Generate null distributions for each unique configuration
-    null_dists = get_null_dists(confs, null_size, seed, progress_bar=progress_bar)
+    null_dists = _get_null_dists_legacy(
+        confs, null_size, seed, progress_bar=progress_bar
+    )
 
     # Sort null distributions for efficient p-value computation
     null_dists.sort(axis=1)
