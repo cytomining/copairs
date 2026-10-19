@@ -12,6 +12,7 @@ import pandas as pd
 from copairs import compute
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
+    check_hierarchical_by,
     apply_hierarchical_fdr_correction,
 )
 
@@ -262,6 +263,7 @@ def mean_average_precision_hierarchical(
     mean_average_precision : For standard BH FDR correction.
 
     """
+    check_hierarchical_by(hierarchical_by, sameby)
     # Step 1: Compute mAP scores and p-values
     map_scores = get_map_pvalue(
         ap_scores=ap_scores,

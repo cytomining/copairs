@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import copairs.map.map as map_module
 from copairs.map.map import mean_average_precision, mean_average_precision_hierarchical
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
@@ -120,6 +121,38 @@ class TestHierarchicalFDR:
                 seed=42,
                 progress_bar=False,
             )
+
+    @pytest.mark.parametrize(
+        "sameby, hierarchical_by, match",
+        [
+            (["compound", "dose"], ["other_column"], "must be a subset of"),
+            (["compound"], ["compound"], "must be a proper subset"),
+        ],
+    )
+    def test_hierarchical_by_validated_before_pvalues(
+        self, sample_ap_scores, tmp_path, monkeypatch, sameby, hierarchical_by, match
+    ):
+        """A bad hierarchical_by raises before any mAP p-value is computed."""
+        calls = []
+        get_map_pvalue = map_module.get_map_pvalue
+
+        def counting_get_map_pvalue(*args, **kwargs):
+            calls.append(1)
+            return get_map_pvalue(*args, **kwargs)
+
+        monkeypatch.setattr(map_module, "get_map_pvalue", counting_get_map_pvalue)
+        with pytest.raises(ValueError, match=match):
+            mean_average_precision_hierarchical(
+                sample_ap_scores,
+                sameby=sameby,
+                hierarchical_by=hierarchical_by,
+                null_size=100,
+                threshold=0.05,
+                seed=42,
+                progress_bar=False,
+                cache_dir=tmp_path,
+            )
+        assert calls == []
 
     def test_hierarchical_fewer_corrections(self, sample_ap_scores):
         """Hierarchical FDR should be less stringent than flat BH."""
