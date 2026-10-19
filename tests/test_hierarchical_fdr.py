@@ -12,6 +12,10 @@ import pandas as pd
 import pytest
 
 from copairs.map.map import mean_average_precision, mean_average_precision_hierarchical
+from copairs.map.hierarchical_fdr import (
+    apply_fdr_correction,
+    apply_hierarchical_fdr_correction,
+)
 
 
 class TestHierarchicalFDR:
@@ -173,3 +177,55 @@ class TestHierarchicalFDR:
         nonsig_mask = ~result["stage1_significant"]
         if nonsig_mask.any():
             assert (result.loc[nonsig_mask, "corrected_p_value"] == 1.0).all()
+
+    @pytest.mark.parametrize("hierarchical", [False, True])
+    @pytest.mark.parametrize("invalid", ["nan_ap", "no_positives"])
+    def test_no_valid_ap_scores(
+        self, sample_ap_scores, tmp_path, invalid, hierarchical
+    ):
+        """No valid AP scores give an empty mAP table with the usual columns."""
+        ap_scores = sample_ap_scores.copy()
+        if invalid == "nan_ap":
+            ap_scores["average_precision"] = np.nan
+        else:
+            ap_scores["n_pos_pairs"] = 0
+        kwargs = dict(
+            sameby=["compound", "dose"],
+            null_size=100,
+            threshold=0.05,
+            seed=42,
+            progress_bar=False,
+            cache_dir=tmp_path,
+        )
+        if hierarchical:
+            result = mean_average_precision_hierarchical(
+                ap_scores, hierarchical_by=["compound"], **kwargs
+            )
+        else:
+            result = mean_average_precision(ap_scores, **kwargs)
+
+        assert len(result) == 0
+        assert {
+            "mean_average_precision",
+            "p_value",
+            "corrected_p_value",
+            "below_p",
+            "below_corrected_p",
+        } <= set(result.columns)
+
+    def test_fdr_correction_no_tests(self):
+        """FDR correction of zero p-values returns an empty table."""
+        empty = pd.DataFrame(
+            {
+                "compound": pd.Series([], dtype=str),
+                "dose": pd.Series([], dtype=int),
+                "p_value": pd.Series([], dtype=float),
+            }
+        )
+        standard = apply_fdr_correction(empty)
+        hierarchical = apply_hierarchical_fdr_correction(
+            empty, ["compound"], ["compound", "dose"]
+        )
+        for result in (standard, hierarchical):
+            assert len(result) == 0
+            assert "corrected_p_value" in result.columns

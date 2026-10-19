@@ -305,3 +305,23 @@ def test_get_null_dists_cache_hit_matches_uncached(tmp_path):
     cold = compute.get_null_dists(confs, **kwargs)
     warm = compute.get_null_dists(confs, **kwargs)
     assert np.array_equal(cold, warm)
+
+
+@pytest.mark.parametrize("progress_bar", [True, False])
+def test_get_null_dists_empty(tmp_path, progress_bar):
+    """No configurations give an empty array of null distributions."""
+    confs = np.empty((0, 2), dtype=int)
+    null_dists = compute.get_null_dists(
+        confs, 100, seed=0, cache_dir=tmp_path, progress_bar=progress_bar
+    )
+    assert null_dists.shape == (0, 100)
+
+
+def test_p_values_empty(tmp_path, monkeypatch):
+    """No AP scores give no p-values."""
+    # p_values has no cache_dir argument; keep the default cache out of ~/.copairs
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pvals = compute.p_values(
+        np.array([]), np.empty((0, 2), dtype=int), 100, 0, progress_bar=False
+    )
+    assert len(pvals) == 0

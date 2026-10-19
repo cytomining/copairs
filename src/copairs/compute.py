@@ -33,6 +33,8 @@ def parallel_map(
     """
     # Total number of items to process
     num_items = len(items)
+    if num_items == 0:
+        return
 
     # Determine the number of threads to use, limited by CPU count
     pool_size = min(num_items, os.cpu_count())

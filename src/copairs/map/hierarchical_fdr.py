@@ -3,10 +3,19 @@
 import logging
 from typing import List
 
+import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
 logger = logging.getLogger("copairs")
+
+
+def _multipletests(pvals, method="fdr_bh"):
+    """Run multipletests, also for no tests (statsmodels < 0.15 divides by zero)."""
+    pvals = np.asarray(pvals, dtype=float)
+    if len(pvals) == 0:
+        return np.zeros(0, dtype=bool), pvals, 0.0, 0.0
+    return multipletests(pvals, method=method)
 
 
 def apply_hierarchical_fdr_correction(
@@ -81,7 +90,7 @@ def apply_hierarchical_fdr_correction(
     stage1_pvals.columns = ["stage1_p_value"]
 
     # Apply BH correction at the group level
-    reject_stage1, stage1_corrected, _, _ = multipletests(
+    reject_stage1, stage1_corrected, _, _ = _multipletests(
         stage1_pvals["stage1_p_value"], method="fdr_bh"
     )
     stage1_pvals["stage1_corrected_p_value"] = stage1_corrected
@@ -136,6 +145,6 @@ def apply_fdr_correction(
 
     """
     map_scores = map_scores.copy()
-    _, pvals_corrected, _, _ = multipletests(map_scores["p_value"], method=method)
+    _, pvals_corrected, _, _ = _multipletests(map_scores["p_value"], method=method)
     map_scores["corrected_p_value"] = pvals_corrected
     return map_scores
