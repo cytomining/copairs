@@ -215,10 +215,10 @@ def test_null_dist_cached():
         assert np.all(null_dist >= 0)
         assert np.all(null_dist <= 1)
 
-        # Cache stores one .npy file per (total, num_pos) pair
+        # Cache stores one .npy file per (total, num_pos, seed) triple
         npy_files = list(cache_dir.glob("*.npy"))
         assert len(npy_files) == 1
-        assert npy_files[0].name == "n20_k5.npy"
+        assert npy_files[0].name == "n20_k5_s42.npy"
 
 
 def test_null_dist_cached_hit():
@@ -236,7 +236,7 @@ def test_null_dist_cached_corrupt():
     """Test that a corrupted cache file is regenerated, not propagated."""
     with tempfile.TemporaryDirectory() as tmpdir:
         cache_dir = Path(tmpdir)
-        path = cache_dir / "n20_k5.npy"
+        path = cache_dir / "n20_k5_s42.npy"
 
         # Write garbage to simulate corruption
         path.write_bytes(b"not a valid npy file")
@@ -274,3 +274,34 @@ def test_null_dist_cached_parallel():
         # All workers should return identical results
         for r in results:
             assert np.array_equal(results[0], r)
+
+
+def test_get_null_dists_cache_independent_of_other_configurations(tmp_path):
+    """A cached null must equal the uncached null for the same inputs.
+
+    Run A computes configurations {X, Y}; run B then asks for {Y} alone with
+    the same seed and cache_dir. B must not depend on whether A ran first.
+    """
+    seed, null_size = 0, 200
+    x, y = [3, 20], [5, 30]
+    shared = tmp_path / "shared"
+
+    compute.get_null_dists(
+        np.array([x, y]), null_size, seed, cache_dir=shared, progress_bar=False
+    )
+    after_a = compute.get_null_dists(
+        np.array([y]), null_size, seed, cache_dir=shared, progress_bar=False
+    )
+    fresh = compute.get_null_dists(
+        np.array([y]), null_size, seed, cache_dir=tmp_path / "fresh", progress_bar=False
+    )
+    assert np.array_equal(after_a, fresh)
+
+
+def test_get_null_dists_cache_hit_matches_uncached(tmp_path):
+    """A second run on a warm cache returns the first run's values exactly."""
+    confs = np.array([[3, 20], [5, 30], [2, 11]])
+    kwargs = dict(null_size=200, seed=7, cache_dir=tmp_path, progress_bar=False)
+    cold = compute.get_null_dists(confs, **kwargs)
+    warm = compute.get_null_dists(confs, **kwargs)
+    assert np.array_equal(cold, warm)

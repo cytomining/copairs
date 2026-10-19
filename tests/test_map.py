@@ -6,7 +6,7 @@ import pytest
 from sklearn.metrics import average_precision_score
 
 from copairs import compute
-from copairs.map import average_precision
+from copairs.map import average_precision, mean_average_precision
 from tests.helpers import simulate_random_dframe
 from copairs.matching import UnpairedException
 from copairs.map.multilabel import average_precision as multilabel_average_precision
@@ -311,3 +311,36 @@ def test_multilabel_profile_without_negatives(labels, plates, feats, no_neg_ix):
     pd.testing.assert_frame_equal(
         result[cols], expected.loc[result.index, cols], check_dtype=False
     )
+
+
+def test_mean_average_precision_cache_independent_of_other_groups(tmp_path):
+    """P-values from mAP must not depend on which groups an earlier run cached."""
+
+    def ap_frame(groups):
+        rows = {
+            "X": [(0.9, 3, 20), (0.8, 3, 20)],
+            "Y": [(0.7, 5, 30), (0.6, 5, 30)],
+        }
+        recs = [
+            dict(
+                group=g,
+                average_precision=ap,
+                normalized_average_precision=ap,
+                n_pos_pairs=k,
+                n_total_pairs=n,
+            )
+            for g in groups
+            for ap, k, n in rows[g]
+        ]
+        return pd.DataFrame(recs)
+
+    kwargs = dict(
+        sameby=["group"], null_size=200, threshold=0.05, seed=0, progress_bar=False
+    )
+    shared = tmp_path / "shared"
+    mean_average_precision(ap_frame(["X", "Y"]), cache_dir=shared, **kwargs)
+    after_a = mean_average_precision(ap_frame(["Y"]), cache_dir=shared, **kwargs)
+    fresh = mean_average_precision(
+        ap_frame(["Y"]), cache_dir=tmp_path / "fresh", **kwargs
+    )
+    pd.testing.assert_frame_equal(after_a, fresh)

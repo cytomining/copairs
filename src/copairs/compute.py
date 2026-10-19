@@ -493,7 +493,8 @@ def null_dist_cached(
 ) -> np.ndarray:
     """Generate or retrieve a cached null distribution for a given configuration.
 
-    Each (num_pos, total) pair is cached as an individual .npy file. Reads
+    Each (num_pos, total, seed) triple is cached as an individual .npy file,
+    so a cached null is exactly the one ``random_ap`` would generate. Reads
     are lock-free (just np.load), and writes use atomic rename to prevent
     corruption from concurrent workers.
 
@@ -518,7 +519,7 @@ def null_dist_cached(
     if seed is None:
         return random_ap(null_size, num_pos, total, seed)
 
-    path = cache_dir / f"n{total}_k{num_pos}.npy"
+    path = cache_dir / f"n{total}_k{num_pos}_s{seed}.npy"
     null_dist = _cache_read(path)
     if null_dist is None:
         null_dist = random_ap(null_size, num_pos, total, seed)
@@ -565,12 +566,11 @@ def get_null_dists(
 
     def par_func(i):
         num_pos, total = confs[i]
-        path = cache_dir / f"n{total}_k{num_pos}.npy"
-        null_dist = _cache_read(path)
-        if null_dist is None:
-            null_dist = random_ap(null_size, num_pos, total, seeds[i])
-            _cache_write(path, null_dist)
-        null_dists[i] = null_dist
+        # The cache key includes the per-configuration seed: seeds[i] depends
+        # on the position of the configuration in `confs`, so keying by
+        # (num_pos, total) alone would make a cached null depend on which
+        # run wrote it.
+        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
 
     parallel_map(par_func, np.arange(num_confs), progress_bar)
 
