@@ -27,8 +27,11 @@ def _create_neg_query_solver(neg_pairs, neg_sims):
     neg_cutoffs = compute.to_cutoffs(neg_counts)
 
     def negs_for(query: np.ndarray):
+        # A query without negatives is absent from neg_ix: searchsorted returns
+        # its insertion point, so give it zero negatives instead of a neighbour's.
         locs = np.searchsorted(neg_ix, query)
-        sizes = neg_counts[locs]
+        locs = np.minimum(locs, len(neg_ix) - 1)
+        sizes = np.where(neg_ix[locs] == query, neg_counts[locs], 0)
         start = neg_cutoffs[locs]
         end = start + sizes
         slices = compute.concat_ranges(start, end)

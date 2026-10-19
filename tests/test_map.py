@@ -263,3 +263,51 @@ def test_multilabel_has_normalized_ap():
     )
 
     assert "normalized_average_precision" in result.columns
+
+
+@pytest.mark.parametrize(
+    "labels, plates, feats, no_neg_ix",
+    [
+        # Profile 1 sorts before profile 2, which has negatives.
+        (
+            ["A", "A", "B", "B"],
+            [1, 2, 1, 1],
+            [[1, 0], [0, 1], [1, 0.1], [0.9, 0.2]],
+            1,
+        ),
+        # Profile 2 sorts after every profile that has negatives.
+        (["A", "B", "A"], [1, 1, 2], [[1, 0], [0, 1], [0.6, 0.8]], 2),
+    ],
+)
+def test_multilabel_profile_without_negatives(labels, plates, feats, no_neg_ix):
+    """Test that a multilabel profile with positives but no negatives gets none."""
+    meta = pd.DataFrame({"id": range(len(labels)), "l": labels, "plate": plates})
+    feats = np.asarray(feats, dtype=float)
+    args = (["l"], [], ["plate"], ["l"])
+
+    expected = average_precision(meta, feats, *args, progress_bar=False)
+    result = multilabel_average_precision(
+        meta.assign(l=[[label] for label in labels]),
+        feats,
+        *args,
+        "l",
+        progress_bar=False,
+    )
+    expected = expected.set_index("id")
+    result = result.set_index("id").sort_index()
+
+    row = result.loc[no_neg_ix]
+    assert row["average_precision"] == 1.0
+    assert row["n_pos_pairs"] == 1
+    assert row["n_total_pairs"] == 1
+
+    cols = [
+        "average_precision",
+        "normalized_average_precision",
+        "n_pos_pairs",
+        "n_total_pairs",
+    ]
+    # The two functions store pair counts with different integer dtypes.
+    pd.testing.assert_frame_equal(
+        result[cols], expected.loc[result.index, cols], check_dtype=False
+    )
