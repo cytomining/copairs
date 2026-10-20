@@ -122,7 +122,7 @@ def apply_hierarchical_fdr_correction(
             map_scores.loc[group_indices, "corrected_p_value"] = group_pvals[0]
         else:
             # Apply BH correction within the group
-            _, group_corrected, _, _ = multipletests(group_pvals, method="fdr_bh")
+            _, group_corrected, _, _ = _multipletests(group_pvals, method="fdr_bh")
             map_scores.loc[group_indices, "corrected_p_value"] = group_corrected
 
     return map_scores

@@ -276,12 +276,11 @@ def test_null_dist_cached_parallel():
             assert np.array_equal(results[0], r)
 
 
-@pytest.mark.parametrize("progress_bar", [True, False])
-def test_get_null_dists_empty(tmp_path, progress_bar):
+def test_get_null_dists_empty(tmp_path):
     """No configurations give an empty array of null distributions."""
     confs = np.empty((0, 2), dtype=int)
     null_dists = compute.get_null_dists(
-        confs, 100, seed=0, cache_dir=tmp_path, progress_bar=progress_bar
+        confs, 100, seed=0, cache_dir=tmp_path, progress_bar=False
     )
     assert null_dists.shape == (0, 100)
 

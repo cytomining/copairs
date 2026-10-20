@@ -212,16 +212,14 @@ class TestHierarchicalFDR:
             assert (result.loc[nonsig_mask, "corrected_p_value"] == 1.0).all()
 
     @pytest.mark.parametrize("hierarchical", [False, True])
-    @pytest.mark.parametrize("invalid", ["nan_ap", "no_positives"])
+    @pytest.mark.parametrize(
+        "column, value", [("average_precision", np.nan), ("n_pos_pairs", 0)]
+    )
     def test_no_valid_ap_scores(
-        self, sample_ap_scores, tmp_path, invalid, hierarchical
+        self, sample_ap_scores, tmp_path, column, value, hierarchical
     ):
         """No valid AP scores give an empty mAP table with the usual columns."""
-        ap_scores = sample_ap_scores.copy()
-        if invalid == "nan_ap":
-            ap_scores["average_precision"] = np.nan
-        else:
-            ap_scores["n_pos_pairs"] = 0
+        ap_scores = sample_ap_scores.assign(**{column: value})
         kwargs = dict(
             sameby=["compound", "dose"],
             null_size=100,
