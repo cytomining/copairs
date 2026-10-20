@@ -293,3 +293,13 @@ def test_p_values_empty(tmp_path, monkeypatch):
         np.array([]), np.empty((0, 2), dtype=int), 100, 0, progress_bar=False
     )
     assert len(pvals) == 0
+
+
+def test_get_null_dists_unseeded_skips_cache(tmp_path):
+    """Unseeded nulls are fresh draws and are never written to the cache."""
+    confs = np.array([[3, 20], [5, 30]])
+    kwargs = dict(null_size=200, seed=None, cache_dir=tmp_path, progress_bar=False)
+    first = compute.get_null_dists(confs, **kwargs)
+    second = compute.get_null_dists(confs, **kwargs)
+    assert list(tmp_path.rglob("*.npy")) == []
+    assert not np.array_equal(first, second)

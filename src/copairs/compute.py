@@ -558,11 +558,15 @@ def get_null_dists(
     """
     cache_dir = Path.home() / ".copairs" if cache_dir is None else Path(cache_dir)
     cache_dir = cache_dir / f"seed{seed}" / f"ns{null_size}"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    if seed is not None:
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
     num_confs = len(confs)
     rng = np.random.default_rng(seed)
-    seeds = rng.integers(8096, size=num_confs)
+    # Unseeded nulls are fresh draws: null_dist_cached neither reads nor writes them.
+    seeds = (
+        rng.integers(8096, size=num_confs) if seed is not None else [None] * num_confs
+    )
 
     null_dists = np.empty([len(confs), null_size], dtype=np.float32)
 
