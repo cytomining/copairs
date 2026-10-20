@@ -10,11 +10,16 @@ from statsmodels.stats.multitest import multipletests
 logger = logging.getLogger("copairs")
 
 
-def _multipletests(pvals, method="fdr_bh"):
-    """Run multipletests, also for no tests (statsmodels < 0.15 divides by zero)."""
+def _multipletests(
+    pvals: np.ndarray, method: str = "fdr_bh"
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """Run multipletests, also for no tests (statsmodels < 0.15 divides by zero).
+
+    No tests give what statsmodels 0.15 returns: empty arrays and NaN alphas.
+    """
     pvals = np.asarray(pvals, dtype=float)
     if len(pvals) == 0:
-        return np.zeros(0, dtype=bool), pvals, 0.0, 0.0
+        return np.zeros(0, dtype=bool), pvals, np.nan, np.nan
     return multipletests(pvals, method=method)
 
 
