@@ -568,10 +568,7 @@ def get_null_dists(
 
     def par_func(i):
         num_pos, total = confs[i]
-        # The cache key includes the per-configuration seed: seeds[i] depends
-        # on the position of the configuration in `confs`, so keying by
-        # (num_pos, total) alone would make a cached null depend on which
-        # run wrote it.
+        # seeds[i] depends on the configuration's position, so it keys the cache.
         null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
 
     parallel_map(par_func, np.arange(num_confs), progress_bar)

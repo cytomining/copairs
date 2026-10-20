@@ -315,32 +315,21 @@ def test_multilabel_profile_without_negatives(labels, plates, feats, no_neg_ix):
 
 def test_mean_average_precision_cache_independent_of_other_groups(tmp_path):
     """P-values from mAP must not depend on which groups an earlier run cached."""
-
-    def ap_frame(groups):
-        rows = {
-            "X": [(0.9, 3, 20), (0.8, 3, 20)],
-            "Y": [(0.7, 5, 30), (0.6, 5, 30)],
+    ap_scores = pd.DataFrame(
+        {
+            "group": ["X", "X", "Y", "Y"],
+            "average_precision": [0.9, 0.8, 0.7, 0.6],
+            "normalized_average_precision": [0.9, 0.8, 0.7, 0.6],
+            "n_pos_pairs": [3, 3, 5, 5],
+            "n_total_pairs": [20, 20, 30, 30],
         }
-        recs = [
-            dict(
-                group=g,
-                average_precision=ap,
-                normalized_average_precision=ap,
-                n_pos_pairs=k,
-                n_total_pairs=n,
-            )
-            for g in groups
-            for ap, k, n in rows[g]
-        ]
-        return pd.DataFrame(recs)
-
+    )
+    only_y = ap_scores[ap_scores["group"] == "Y"]
     kwargs = dict(
         sameby=["group"], null_size=200, threshold=0.05, seed=0, progress_bar=False
     )
     shared = tmp_path / "shared"
-    mean_average_precision(ap_frame(["X", "Y"]), cache_dir=shared, **kwargs)
-    after_a = mean_average_precision(ap_frame(["Y"]), cache_dir=shared, **kwargs)
-    fresh = mean_average_precision(
-        ap_frame(["Y"]), cache_dir=tmp_path / "fresh", **kwargs
-    )
+    mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
+    after_a = mean_average_precision(only_y, cache_dir=shared, **kwargs)
+    fresh = mean_average_precision(only_y, cache_dir=tmp_path / "fresh", **kwargs)
     pd.testing.assert_frame_equal(after_a, fresh)

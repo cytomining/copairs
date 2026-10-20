@@ -276,37 +276,6 @@ def test_null_dist_cached_parallel():
             assert np.array_equal(results[0], r)
 
 
-def test_get_null_dists_cache_independent_of_other_configurations(tmp_path):
-    """A cached null must equal the uncached null for the same inputs.
-
-    Run A computes configurations {X, Y}; run B then asks for {Y} alone with
-    the same seed and cache_dir. B must not depend on whether A ran first.
-    """
-    seed, null_size = 0, 200
-    x, y = [3, 20], [5, 30]
-    shared = tmp_path / "shared"
-
-    compute.get_null_dists(
-        np.array([x, y]), null_size, seed, cache_dir=shared, progress_bar=False
-    )
-    after_a = compute.get_null_dists(
-        np.array([y]), null_size, seed, cache_dir=shared, progress_bar=False
-    )
-    fresh = compute.get_null_dists(
-        np.array([y]), null_size, seed, cache_dir=tmp_path / "fresh", progress_bar=False
-    )
-    assert np.array_equal(after_a, fresh)
-
-
-def test_get_null_dists_cache_hit_matches_uncached(tmp_path):
-    """A second run on a warm cache returns the first run's values exactly."""
-    confs = np.array([[3, 20], [5, 30], [2, 11]])
-    kwargs = dict(null_size=200, seed=7, cache_dir=tmp_path, progress_bar=False)
-    cold = compute.get_null_dists(confs, **kwargs)
-    warm = compute.get_null_dists(confs, **kwargs)
-    assert np.array_equal(cold, warm)
-
-
 @pytest.mark.parametrize("progress_bar", [True, False])
 def test_get_null_dists_empty(tmp_path, progress_bar):
     """No configurations give an empty array of null distributions."""
