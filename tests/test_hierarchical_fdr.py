@@ -96,32 +96,6 @@ class TestHierarchicalFDR:
 
         return pd.DataFrame(data)
 
-    def test_hierarchical_by_validation_not_subset(self, sample_ap_scores):
-        """hierarchical_by must be subset of sameby."""
-        with pytest.raises(ValueError, match="must be a subset of"):
-            mean_average_precision_hierarchical(
-                sample_ap_scores,
-                sameby=["compound", "dose"],
-                hierarchical_by=["other_column"],
-                null_size=100,
-                threshold=0.05,
-                seed=42,
-                progress_bar=False,
-            )
-
-    def test_hierarchical_by_validation_equal_to_sameby(self, sample_ap_scores):
-        """hierarchical_by must be proper subset of sameby."""
-        with pytest.raises(ValueError, match="must be a proper subset"):
-            mean_average_precision_hierarchical(
-                sample_ap_scores,
-                sameby=["compound"],
-                hierarchical_by=["compound"],
-                null_size=100,
-                threshold=0.05,
-                seed=42,
-                progress_bar=False,
-            )
-
     @pytest.mark.parametrize(
         "sameby, hierarchical_by, match",
         [
@@ -129,18 +103,15 @@ class TestHierarchicalFDR:
             (["compound"], ["compound"], "must be a proper subset"),
         ],
     )
-    def test_hierarchical_by_validated_before_pvalues(
-        self, sample_ap_scores, tmp_path, monkeypatch, sameby, hierarchical_by, match
+    def test_hierarchical_by_validation(
+        self, sample_ap_scores, monkeypatch, sameby, hierarchical_by, match
     ):
-        """A bad hierarchical_by raises before any mAP p-value is computed."""
-        calls = []
-        get_map_pvalue = map_module.get_map_pvalue
-
-        def counting_get_map_pvalue(*args, **kwargs):
-            calls.append(1)
-            return get_map_pvalue(*args, **kwargs)
-
-        monkeypatch.setattr(map_module, "get_map_pvalue", counting_get_map_pvalue)
+        """hierarchical_by must be a proper subset of sameby, checked before p-values."""
+        monkeypatch.setattr(
+            map_module,
+            "get_map_pvalue",
+            lambda *args, **kwargs: pytest.fail("p-values computed before validation"),
+        )
         with pytest.raises(ValueError, match=match):
             mean_average_precision_hierarchical(
                 sample_ap_scores,
@@ -150,9 +121,7 @@ class TestHierarchicalFDR:
                 threshold=0.05,
                 seed=42,
                 progress_bar=False,
-                cache_dir=tmp_path,
             )
-        assert calls == []
 
     def test_hierarchical_fewer_corrections(self, sample_ap_scores):
         """Hierarchical FDR should be less stringent than flat BH."""
