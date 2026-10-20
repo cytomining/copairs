@@ -37,7 +37,7 @@ def parallel_map(
         return
 
     # Determine the number of threads to use, limited by CPU count
-    pool_size = min(num_items, os.cpu_count())
+    pool_size = min(num_items, os.cpu_count() or 1)
 
     # Calculate chunk size for dividing work among threads
     chunksize = num_items // pool_size

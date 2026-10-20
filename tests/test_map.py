@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 from sklearn.metrics import average_precision_score
 
+import copairs.map.map as map_module
 from copairs import compute
 from copairs.map import average_precision, mean_average_precision
 from tests.helpers import simulate_random_dframe
@@ -333,3 +334,28 @@ def test_mean_average_precision_cache_independent_of_other_groups(tmp_path):
     after_a = mean_average_precision(only_y, cache_dir=shared, **kwargs)
     fresh = mean_average_precision(only_y, cache_dir=tmp_path / "fresh", **kwargs)
     pd.testing.assert_frame_equal(after_a, fresh)
+
+
+def test_mean_average_precision_unknown_cpu_count(tmp_path, monkeypatch):
+    """When os.cpu_count() cannot tell the CPU count, use one CPU."""
+    monkeypatch.setattr(compute.os, "cpu_count", lambda: None)
+    monkeypatch.setattr(map_module, "cpu_count", lambda: None)
+    ap_scores = pd.DataFrame(
+        {
+            "group": ["X", "X", "Y", "Y"],
+            "average_precision": [0.9, 0.8, 0.7, 0.6],
+            "normalized_average_precision": [0.9, 0.8, 0.7, 0.6],
+            "n_pos_pairs": [3, 3, 5, 5],
+            "n_total_pairs": [20, 20, 30, 30],
+        }
+    )
+    result = mean_average_precision(
+        ap_scores,
+        ["group"],
+        null_size=100,
+        threshold=0.05,
+        seed=0,
+        progress_bar=False,
+        cache_dir=tmp_path,
+    )
+    assert len(result) == 2
