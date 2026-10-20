@@ -288,7 +288,7 @@ def test_get_null_dists_empty(tmp_path):
 def test_p_values_empty(tmp_path, monkeypatch):
     """No AP scores give no p-values."""
     # p_values has no cache_dir argument; keep the default cache out of ~/.copairs
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     pvals = compute.p_values(
         np.array([]), np.empty((0, 2), dtype=int), 100, 0, progress_bar=False
     )
