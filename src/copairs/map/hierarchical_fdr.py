@@ -23,7 +23,7 @@ def _multipletests(
     return multipletests(pvals, method=method)
 
 
-def check_hierarchical_by(hierarchical_by: List[str], sameby: List[str]) -> None:
+def check_hierarchical_by(hierarchical_by: list[str], sameby: list[str]) -> None:
     """Raise ValueError unless ``hierarchical_by`` is a proper subset of ``sameby``."""
     if not set(hierarchical_by).issubset(set(sameby)):
         raise ValueError(
