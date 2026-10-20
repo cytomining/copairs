@@ -15,21 +15,21 @@ from .normalization import normalize_ap
 logger = logging.getLogger("copairs")
 
 
-def _create_neg_query_solver(neg_pairs, neg_sims):
-    # Melting and sorting by ix. neg_cutoffs splits the contiguous array
+def _create_neg_query_solver(neg_pairs, neg_sims, num_profiles):
+    # Melting and sorting by ix. neg_cutoffs splits the contiguous array. Both
+    # tables are indexed by profile, so a profile without negatives has none.
     neg_ix = neg_pairs.ravel()
     neg_sims = np.repeat(neg_sims, 2)
 
     sort_ix = np.argsort(neg_ix)
     neg_sims = neg_sims[sort_ix]
 
-    neg_ix, neg_counts = np.unique(neg_ix, return_counts=True)
+    neg_counts = np.bincount(neg_ix, minlength=num_profiles)
     neg_cutoffs = compute.to_cutoffs(neg_counts)
 
     def negs_for(query: np.ndarray):
-        locs = np.searchsorted(neg_ix, query)
-        sizes = neg_counts[locs]
-        start = neg_cutoffs[locs]
+        sizes = neg_counts[query]
+        start = neg_cutoffs[query]
         end = start + sizes
         slices = compute.concat_ranges(start, end)
         batch_sims = neg_sims[slices]
@@ -122,7 +122,7 @@ def average_precision(
     neg_sims = distance_fn(feats, neg_pairs, batch_size)
 
     logger.info("Computing AP per label...")
-    negs_for = _create_neg_query_solver(neg_pairs, neg_sims)
+    negs_for = _create_neg_query_solver(neg_pairs, neg_sims, len(meta))
     ap_scores_list, null_confs_list, ix_list = _build_rank_lists_multi(
         pos_pairs, pos_sims, pos_counts, negs_for
     )

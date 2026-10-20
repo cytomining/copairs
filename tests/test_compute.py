@@ -215,10 +215,10 @@ def test_null_dist_cached():
         assert np.all(null_dist >= 0)
         assert np.all(null_dist <= 1)
 
-        # Cache stores one .npy file per (total, num_pos) pair
+        # Cache stores one .npy file per (total, num_pos, seed) triple
         npy_files = list(cache_dir.glob("*.npy"))
         assert len(npy_files) == 1
-        assert npy_files[0].name == "n20_k5.npy"
+        assert npy_files[0].name == "n20_k5_s42.npy"
 
 
 def test_null_dist_cached_hit():
@@ -236,7 +236,7 @@ def test_null_dist_cached_corrupt():
     """Test that a corrupted cache file is regenerated, not propagated."""
     with tempfile.TemporaryDirectory() as tmpdir:
         cache_dir = Path(tmpdir)
-        path = cache_dir / "n20_k5.npy"
+        path = cache_dir / "n20_k5_s42.npy"
 
         # Write garbage to simulate corruption
         path.write_bytes(b"not a valid npy file")
@@ -274,3 +274,32 @@ def test_null_dist_cached_parallel():
         # All workers should return identical results
         for r in results:
             assert np.array_equal(results[0], r)
+
+
+def test_get_null_dists_empty(tmp_path):
+    """No configurations give an empty array of null distributions."""
+    confs = np.empty((0, 2), dtype=int)
+    null_dists = compute.get_null_dists(
+        confs, 100, seed=0, cache_dir=tmp_path, progress_bar=False
+    )
+    assert null_dists.shape == (0, 100)
+
+
+def test_p_values_empty(tmp_path, monkeypatch):
+    """No AP scores give no p-values."""
+    # p_values has no cache_dir argument; keep the default cache out of ~/.copairs
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    pvals = compute.p_values(
+        np.array([]), np.empty((0, 2), dtype=int), 100, 0, progress_bar=False
+    )
+    assert len(pvals) == 0
+
+
+def test_get_null_dists_unseeded_skips_cache(tmp_path):
+    """Unseeded nulls are fresh draws and are never written to the cache."""
+    confs = np.array([[3, 20], [5, 30]])
+    kwargs = dict(null_size=200, seed=None, cache_dir=tmp_path, progress_bar=False)
+    first = compute.get_null_dists(confs, **kwargs)
+    second = compute.get_null_dists(confs, **kwargs)
+    assert list(tmp_path.rglob("*.npy")) == []
+    assert not np.array_equal(first, second)
