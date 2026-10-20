@@ -314,8 +314,8 @@ def test_multilabel_profile_without_negatives(labels, plates, feats, no_neg_ix):
     )
 
 
-def test_mean_average_precision_cache_independent_of_other_groups(tmp_path):
-    """P-values from mAP must not depend on which groups an earlier run cached."""
+def test_mean_average_precision_independent_of_other_groups(tmp_path):
+    """A group's mAP p-value depends neither on the other groups nor on the cache."""
     ap_scores = pd.DataFrame(
         {
             "group": ["X", "X", "Y", "Y"],
@@ -330,10 +330,16 @@ def test_mean_average_precision_cache_independent_of_other_groups(tmp_path):
         sameby=["group"], null_size=200, threshold=0.05, seed=0, progress_bar=False
     )
     shared = tmp_path / "shared"
-    mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
-    after_a = mean_average_precision(only_y, cache_dir=shared, **kwargs)
-    fresh = mean_average_precision(only_y, cache_dir=tmp_path / "fresh", **kwargs)
-    pd.testing.assert_frame_equal(after_a, fresh)
+    both = mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
+    cached = list(shared.rglob("*.npy"))
+    after_both = mean_average_precision(only_y, cache_dir=shared, **kwargs)
+    alone = mean_average_precision(only_y, cache_dir=tmp_path / "fresh", **kwargs)
+
+    # The second run reads Y's null from the first run's cache.
+    assert sorted(shared.rglob("*.npy")) == sorted(cached)
+    pd.testing.assert_frame_equal(after_both, alone)
+    y_in_both = both.loc[both["group"] == "Y", "p_value"].tolist()
+    assert y_in_both == alone["p_value"].tolist()
 
 
 def test_mean_average_precision_unknown_cpu_count(tmp_path, monkeypatch):

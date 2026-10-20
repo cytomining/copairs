@@ -529,6 +529,11 @@ def null_dist_cached(
     return null_dist
 
 
+def _conf_seed(seed: int, num_pos: int, total: int) -> int:
+    """Return the seed of one configuration's null, a function of its values only."""
+    return int(np.random.SeedSequence([seed, num_pos, total]).generate_state(1)[0])
+
+
 def get_null_dists(
     confs: np.ndarray,
     null_size: int,
@@ -546,7 +551,9 @@ def get_null_dists(
     null_size : int
         Number of samples to generate in the null distribution.
     seed : int
-        Random seed for reproducibility.
+        Random seed for reproducibility. Each configuration's null is seeded by
+        ``(seed, num_pos, total)``, so it does not depend on the other
+        configurations. With ``None``, nulls are fresh draws and are not cached.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
 
@@ -562,18 +569,14 @@ def get_null_dists(
         cache_dir.mkdir(parents=True, exist_ok=True)
 
     num_confs = len(confs)
-    rng = np.random.default_rng(seed)
-    # Unseeded nulls are fresh draws: null_dist_cached neither reads nor writes them.
-    seeds = (
-        rng.integers(8096, size=num_confs) if seed is not None else [None] * num_confs
-    )
-
     null_dists = np.empty([len(confs), null_size], dtype=np.float32)
 
     def par_func(i):
         num_pos, total = confs[i]
-        # seeds[i] depends on the configuration's position, so it keys the cache.
-        null_dists[i] = null_dist_cached(num_pos, total, seeds[i], null_size, cache_dir)
+        conf_seed = None if seed is None else _conf_seed(seed, num_pos, total)
+        null_dists[i] = null_dist_cached(
+            num_pos, total, conf_seed, null_size, cache_dir
+        )
 
     parallel_map(par_func, np.arange(num_confs), progress_bar)
 
