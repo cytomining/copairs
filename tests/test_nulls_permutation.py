@@ -77,18 +77,23 @@ def draws_of(meta, feats, spec, null_size, seed=0):
     return observed, identity, count, out
 
 
-def scalar_draws(layout, start, size, k0, k1):
-    """Return draws ``start, ...`` from the scalar functions, one at a time."""
-    n = layout.n
-    pm = np.empty(n, dtype=np.int64)
-    chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
-    scratch = (
+def map_scratch(n):
+    """Scratch arrays of the scalar ``group_map`` for a group of ``n`` members."""
+    return (
         np.empty(n, np.int64),
         np.empty(n, np.int64),
         np.empty(n, np.uint64),
         np.empty(n, np.int32),
         np.empty(n, np.float64),
     )
+
+
+def scalar_draws(layout, start, size, k0, k1):
+    """Return draws ``start, ...`` from the scalar functions, one at a time."""
+    n = layout.n
+    pm = np.empty(n, dtype=np.int64)
+    chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
+    scratch = map_scratch(n)
     pms, maps = [], []
     for j in range(start, start + size):
         permutation._draw(j, *layout.draw_args(), k0, k1, pm, chosen)
@@ -142,15 +147,7 @@ def test_vectorized_matches_scalar_draws(
 
 def scalar_identity_map(layout, pm):
     """MAP of the observed labels from the scalar function."""
-    n = layout.n
-    scratch = (
-        np.empty(n, np.int64),
-        np.empty(n, np.int64),
-        np.empty(n, np.uint64),
-        np.empty(n, np.int32),
-        np.empty(n, np.float64),
-    )
-    return permutation._group_map(pm, *layout.map_args(), *scratch)
+    return permutation._group_map(pm, *layout.map_args(), *map_scratch(layout.n))
 
 
 def test_hits_match_scalar_draws():

@@ -13,16 +13,8 @@ from copairs.map import (
     mean_average_precision,
     mean_average_precision_hierarchical,
 )
+from tests.helpers import ap_frame, query_meta
 from copairs.methods import NULLS
-
-
-def ap_frame(rows):
-    """Build an ``ap_scores`` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
-    frame = pd.DataFrame(
-        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
-    )
-    frame["normalized_average_precision"] = 0.0
-    return frame
 
 
 def test_copied_null_averages_configuration_nulls(tmp_path):
@@ -96,7 +88,7 @@ def test_float32_scores_count_ties(null, tmp_path):
 
 def test_nulls_share_the_pair_count_check():
     """Positive pairs that miss the AP table's counts raise alike under both nulls."""
-    meta = pd.DataFrame({"g": ["q"] * 4 + [f"c{i}" for i in range(30)]})
+    meta = query_meta()
     feats = np.random.default_rng(0).standard_normal((len(meta), 10))
     ap, pairs = average_precision(
         meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True

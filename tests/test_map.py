@@ -13,9 +13,9 @@ from sklearn.metrics import average_precision_score
 
 import copairs.map.map as map_module
 from copairs import compute
-from copairs.map import average_precision, mean_average_precision
-from tests.helpers import simulate_random_dframe
-from copairs.matching import UnpairedException
+from copairs.map import get_map_pvalue, average_precision, mean_average_precision
+from tests.helpers import ap_frame, query_meta, simulate_random_dframe
+from copairs.matching import UnpairedException, find_pairs
 from copairs.map.multilabel import average_precision as multilabel_average_precision
 from copairs.map.average_precision import attached_pairs
 
@@ -380,22 +380,10 @@ def test_mean_average_precision_unknown_cpu_count(tmp_path, monkeypatch):
     assert len(result) == 2
 
 
-def _ap_frame(rows):
-    """Build an `ap_scores` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
-    frame = pd.DataFrame(
-        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
-    )
-    frame["normalized_average_precision"] = 0.0
-    return frame
-
-
 def test_map_pvalue_replicates_use_the_joint_null():
     """Replicate groups get the joint null, inferred or from explicit `pos_pairs`."""
-    from copairs.map import get_map_pvalue
-    from copairs.matching import find_pairs
-
     rng = np.random.default_rng(SEED)
-    meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
+    meta = query_meta()
     feats = rng.standard_normal((len(meta), 10))
     ap_scores, pairs = average_precision(
         meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
@@ -422,13 +410,11 @@ def test_map_pvalue_replicates_use_the_joint_null():
 
 def test_map_pvalue_narrows_with_group_size():
     """The same mAP is more significant with more replicates."""
-    from copairs.map import get_map_pvalue
-
     rows = []
     for n in (2, 4, 8):
         rows += [(f"n{n}", 0.18, n - 1, n - 1 + 100)] * n
     result = get_map_pvalue(
-        _ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False, null="joint"
+        ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False, null="joint"
     )
     p = result.set_index("g")["p_value"]
     assert p["n2"] > p["n4"] > p["n8"]
@@ -436,12 +422,10 @@ def test_map_pvalue_narrows_with_group_size():
 
 def test_map_pvalue_falls_back_with_warning(tmp_path):
     """Groups whose positives are not their other members use the previous null."""
-    from copairs.map import get_map_pvalue
-
     rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
     with pytest.warns(UserWarning, match="pos_pairs"):
         result = get_map_pvalue(
-            _ap_frame(rows),
+            ap_frame(rows),
             ["g"],
             1000,
             SEED,
@@ -455,9 +439,6 @@ def test_map_pvalue_falls_back_with_warning(tmp_path):
 
 def test_map_pvalue_one_profile_groups_use_their_ap_null():
     """A group of one profile, positives in other groups, gets that AP's null."""
-    from copairs.map import get_map_pvalue
-    from copairs.matching import find_pairs
-
     genes = ["a"] * 4 + ["b"] * 4 + ["neg"] * 10  # one profile per guide
     meta = pd.DataFrame({"gene": genes, "guide": range(len(genes))})
     meta["ref"] = np.where(meta["gene"] == "neg", meta.index, -1)
@@ -483,12 +464,8 @@ def test_map_pvalue_one_profile_groups_use_their_ap_null():
 
 def test_joint_null_ignores_attached_pairs():
     """The joint null infers edges from AP frames, even after reset_index."""
-    from copairs.map import get_map_pvalue
-
     rng = np.random.default_rng(SEED)
-    meta = pd.DataFrame(
-        {"g": ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * 3}
-    )
+    meta = query_meta(others=3)
     meta = meta.sample(frac=1, random_state=1).reset_index(drop=True)
     feats = rng.standard_normal((len(meta), 10))
     ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
@@ -532,11 +509,8 @@ def test_ap_frames_carry_their_pairs():
 
 def test_map_pvalue_rejects_misaligned_pos_pairs():
     """pos_pairs from a meta whose index has gaps no longer index ap_scores."""
-    from copairs.map import get_map_pvalue
-    from copairs.matching import find_pairs
-
     rng = np.random.default_rng(SEED)
-    meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
+    meta = query_meta()
     meta = meta.drop(index=[1, 7, 20])  # filtered by the user: index 0, 2, 3, 4, ...
     feats = rng.standard_normal((len(meta), 10))
     ap, pairs = average_precision(
