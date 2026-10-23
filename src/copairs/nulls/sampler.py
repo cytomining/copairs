@@ -244,9 +244,9 @@ def _gap_bisect_numpy(remaining, k, u):
     smallest gap where it is ``<= u`` is unique, and each probe decides it
     exactly (see :func:`_make_gap_guided`).
     """
-    gap = remaining - k  # the product is <= u at hi
-    lo = np.full(len(u), -1, dtype=np.int64)  # and > u at lo
-    hi, log_u = gap.copy(), np.log(u)
+    gap = remaining - k  # output; the product is exactly 0 there
+    lo = np.full(len(u), -1, dtype=np.int64)  # the product is > u at lo
+    hi, log_u = gap.copy(), np.log(u)  # and <= u at hi
     run = np.arange(len(u))
     # Bisect only the open intervals, carrying their arrays along.
     while True:
