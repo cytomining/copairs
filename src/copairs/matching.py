@@ -607,6 +607,10 @@ def _multilabel_matcher(dframe, multilabel_col: str, fastap=None):
         assert (multilabel_col in sameby) or (multilabel_col in diffby), (
             f"Missing {multilabel_col} in sameby and diffby"
         )
+        # find_pairs' check on the monolabel columns, which the label index
+        # skips; multilabel_col may be in both (label lists that differ).
+        if set(sameby).difference([multilabel_col]).intersection(diffby):
+            raise ValueError("sameby and diffby must be disjoint lists")
         if found is None:
             return _find_pairs_multilabel_sql(dframe, sameby, diffby, multilabel_col)
         return fastap.multilabel.indexed_pairs(

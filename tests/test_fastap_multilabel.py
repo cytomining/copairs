@@ -94,6 +94,23 @@ def test_disjoint_label_pairs_match_sql(sameby, diffby):
     assert (np.diff(keys) > 0).all() and (pairs[:, 0] < pairs[:, 1]).all()
 
 
+@pytest.mark.parametrize("backend", ["numpy", "numba"])
+@pytest.mark.parametrize(
+    "sameby,diffby",
+    [
+        (["labels", "plate"], ["plate"]),
+        (["labels", "plate"], ["labels", "plate"]),
+        (["plate"], ["labels", "plate"]),
+    ],
+)
+def test_overlapping_sameby_diffby_raise(backend, sameby, diffby):
+    """A monolabel column in both sameby and diffby raises, as in find_pairs."""
+    with pytest.raises(ValueError, match="sameby and diffby must be disjoint lists"):
+        matching.find_pairs_multilabel(
+            label_frame(), sameby, diffby, "labels", backend=backend
+        )
+
+
 @pytest.mark.parametrize(
     "plate",
     [
