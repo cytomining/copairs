@@ -459,18 +459,20 @@ def test_pvalues_tiny_budget_streams_lazily():
     )
 
 
+@pytest.mark.parametrize("budget", [2**18, 2**24])
 @pytest.mark.parametrize("which", ["ap", "map"])
-def test_numpy_pvalues_memory_within_budget(which):
+def test_numpy_pvalues_memory_within_budget(which, budget, monkeypatch):
     """Peak memory of the NumPy p-values stays within 2.5x budget_bytes.
 
-    The chunk of null samples, the sampler's temporaries and the counts' each
-    fit the budget, and a chunk is freed before the next is sampled. Sampling a
-    whole chunk at once peaked at 31x (AP) and 9.7x (mAP).
+    The chunk of null samples, the sampler's temporaries (summed over its 16
+    threads here, at the larger budget) and the counts' each fit the budget,
+    and a chunk is freed before the next is sampled. Sampling a whole chunk at
+    once peaked at 31x (AP) and 9.7x (mAP).
     """
-    budget = 2**18
+    monkeypatch.setattr(sampler, "_numpy_workers", lambda: 16)
     confs = np.array([[5, 505], [3, 50003], [1, 10**6], [8, 20000]])
     ix = np.arange(len(confs))
-    kwargs = dict(null_size=budget // 2, seed=0, backend="numpy", budget_bytes=budget)
+    kwargs = dict(null_size=2**16, seed=0, backend="numpy", budget_bytes=budget)
     tracemalloc.start()
     try:
         if which == "ap":

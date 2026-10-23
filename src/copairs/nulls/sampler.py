@@ -15,7 +15,9 @@ Numba implementations return bitwise-identical nulls. The scalar functions
 here are the reference; :mod:`copairs.nulls._numba` compiles the same source.
 """
 
+import os
 import math
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -48,6 +50,8 @@ DEFAULT_BUDGET = 2**30
 # tracemalloc peak is at most 236 bytes per sample (gap bisection; 140 for one
 # positive, 195 for the plain gap loop), output included.
 _NUMPY_SAMPLE_BYTES = 256
+# Smallest block of samples worth a NumPy worker thread of its own.
+_MIN_BLOCK = 4096
 
 
 def gap_loop(remaining, k, u):
@@ -348,8 +352,10 @@ def ap_nulls(
 def _ap_nulls(plan, null_size, start, backend, dtype, budget_bytes=DEFAULT_BUDGET):
     """:func:`ap_nulls` from a :func:`null_plan` and a resolved backend.
 
-    The NumPy backend samples in blocks whose temporaries stay within
-    ``budget_bytes``; the output is allocated on top of that.
+    The NumPy backend samples blocks of configurations' samples on a thread
+    pool of :func:`_numpy_workers` threads, sized so the blocks in flight keep
+    their temporaries within ``budget_bytes``; the output is allocated on top
+    of that.
     """
     dtype = np.dtype(dtype)
     if dtype not in (np.float32, np.float64):
@@ -359,11 +365,36 @@ def _ap_nulls(plan, null_size, start, backend, dtype, budget_bytes=DEFAULT_BUDGE
     if backend == "numba":
         _import_numba_backend().ap_nulls(num_pos, total, k0, k1, start, out)
         return out
-    block = max(1, budget_bytes // _NUMPY_SAMPLE_BYTES)
-    for c in range(len(num_pos)):
-        for s in range(0, null_size, block):
-            n = min(block, null_size - s)
-            out[c, s : s + n] = _ap_null_numpy(
-                int(num_pos[c]), int(total[c]), start + s, n, k0[c], k1[c]
-            )
+    # Each worker holds one block, so their temporaries together fit the budget.
+    slots = max(1, budget_bytes // _NUMPY_SAMPLE_BYTES)
+    workers = max(1, min(_numpy_workers(), slots // _MIN_BLOCK))
+    # Split configurations into blocks when there are fewer than workers.
+    per_conf = -(-workers // max(len(num_pos), 1))
+    block = min(slots // workers, max(_MIN_BLOCK, -(-null_size // per_conf)))
+    tasks = [(c, s) for c in range(len(num_pos)) for s in range(0, null_size, block)]
+
+    def sample(task):
+        c, s = task
+        n = min(block, null_size - s)
+        out[c, s : s + n] = _ap_null_numpy(
+            int(num_pos[c]), int(total[c]), start + s, n, k0[c], k1[c]
+        )
+
+    if workers == 1 or len(tasks) < 2:
+        for task in tasks:
+            sample(task)
+    else:
+        with ThreadPoolExecutor(min(workers, len(tasks))) as ex:
+            list(ex.map(sample, tasks))
     return out
+
+
+def _numpy_workers() -> int:
+    """Threads of the NumPy backend: the CPUs this process may run on.
+
+    That is the process's CPU affinity where the OS reports it (it follows
+    ``taskset`` and Slurm allocations), else ``os.cpu_count()``.
+    """
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
