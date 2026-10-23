@@ -1189,34 +1189,57 @@ def permutation_pvalues(
     if pos_diffby is not None and np.shape(pos_diffby)[1]:
         check_pos_diffby(layouts, pos_diffby)
 
-    def pvalue(g):
+    keys = [_pool_key(blocks) for _, _, blocks, _ in layouts]
+    refs = {}  # each pool's references, for one key table
+    for key, (_, _, blocks, _) in zip(keys, layouts):
+        if key not in refs:
+            refs[key] = np.concatenate(blocks)
+
+    def build(g, table):
+        return _Pool(layouts[g][2], similarity, table)
+
+    def start(g, pool):
         members, edges, _, block_of = layouts[g]
+        layout = _Layout(members, edges, block_of, similarity, pool, null_size)
+        run = _Run(layout, group_key(seed, members))
+        _check_identity(g, run.identity, observed)
+        return run
+
+    return _run_groups(
+        keys, refs, similarity, build, lambda g: _pool_bytes(layouts[g][2]), start,
+        null_size, stop_after, progress_bar, max_workers,
+    )  # fmt: skip
+
+
+def _run_groups(
+    keys, refs, similarity, build, nbytes, start, null_size, stop_after,
+    progress_bar, max_workers,
+):  # fmt: skip
+    """P-value of each group of a permutation null, running groups on threads.
+
+    ``keys[g]`` names group ``g``'s pool and ``refs`` the profiles of each
+    named pool. ``build(g, table)`` builds group ``g``'s pool, slicing its
+    keys from ``table`` (a ``_KeyTable`` of all pools' profiles, or None),
+    ``nbytes(g)`` estimates the pool's bytes (:class:`_SharedPools`), and
+    ``start(g, pool)`` returns the group's ``_Run``.
+    """
+
+    def pvalue(g):
         try:
-            layout = _Layout(
-                members, edges, block_of, similarity, pools.acquire(g), null_size
-            )
-            run = _Run(layout, group_key(seed, members))
+            run = start(g, pools.acquire(g))
             count, draws = run.count(null_size, stop_after)
         finally:
             pools.release(g)
-        _check_identity(g, run.identity, observed)
         return _sequential_pvalue(count, draws, null_size, stop_after)
 
-    pvals = np.empty(len(groups), dtype=np.float64)
+    pvals = np.empty(len(keys), dtype=np.float64)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         try:
-            # Pools ranking overlapping references slice one key table.
-            refs = {_pool_key(lay[2]): lay[2] for lay in layouts}
-            table = _key_table(
-                [np.concatenate(blocks) for blocks in refs.values()], similarity, ex.map
-            )
-            pools = _SharedPools(
-                [_pool_key(lay[2]) for lay in layouts],
-                lambda g: _Pool(layouts[g][2], similarity, table),
-                lambda g: _pool_bytes(layouts[g][2]),
-            )
+            # Pools ranking overlapping profiles slice one key table.
+            table = _key_table(list(refs.values()), similarity, ex.map)
+            pools = _SharedPools(keys, lambda g: build(g, table), nbytes)
             # Visit groups pool by pool, so few pools are alive at a time.
-            order = sorted(range(len(groups)), key=lambda g: pools.key[g])
+            order = sorted(range(len(keys)), key=lambda g: pools.key[g])
             done = progress(
                 ex.map(pvalue, order), len(order), progress_bar, "permutation null"
             )
@@ -1732,41 +1755,20 @@ def label_permutation_pvalues(
         p = sum(len(part) for part in parts)
         return _label_pool_bytes(p, int(sum(degree[part].sum() for part in parts)))
 
-    def build(g):
+    def build(g, table):
         comps = layouts[g][3]
         return _LabelPool(comps, comp_profiles, nbr_ptr, nbr, pairs.similarity, table)
 
-    def pvalue(g):
-        try:
-            run = _label_run(*layouts[g], pools.acquire(g), seed)
-            count, draws = run.count(null_size, stop_after)
-        finally:
-            pools.release(g)
+    def start(g, pool):
+        run = _label_run(*layouts[g], pool, seed)
         _check_identity(g, run.identity, observed)
-        return _sequential_pvalue(count, draws, null_size, stop_after)
+        return run
 
-    pvals = np.empty(len(groups), dtype=np.float64)
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        try:
-            # Pools sharing components slice one key table.
-            distinct = {lay[3] for lay in layouts}
-            table = _key_table(
-                [
-                    np.concatenate([comp_profiles[c] for c in comps])
-                    for comps in distinct
-                ],
-                pairs.similarity,
-                ex.map,
-            )
-            pools = _SharedPools([lay[3] for lay in layouts], build, pool_bytes)
-            # Visit groups pool by pool, so few pools are alive at a time.
-            order = sorted(range(len(groups)), key=lambda g: pools.key[g])
-            done = progress(
-                ex.map(pvalue, order), len(order), progress_bar, "permutation null"
-            )
-            for g, p in zip(order, done):
-                pvals[g] = p
-        except BaseException:
-            ex.shutdown(wait=False, cancel_futures=True)
-            raise
-    return pvals
+    keys = [lay[3] for lay in layouts]
+    refs = {
+        comps: np.concatenate([comp_profiles[c] for c in comps]) for comps in set(keys)
+    }
+    return _run_groups(
+        keys, refs, pairs.similarity, build, pool_bytes, start, null_size,
+        stop_after, progress_bar, max_workers,
+    )  # fmt: skip
