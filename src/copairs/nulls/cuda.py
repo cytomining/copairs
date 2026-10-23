@@ -6,14 +6,23 @@ Imported only through :func:`copairs.nulls.backend._import_cuda_backend`
 The sampler kernel is a line-by-line port of
 :func:`copairs.nulls.sampler._ap_sample`: the same Philox blocks and the same
 double-precision operations in the same order, compiled without FMA
-contraction, except that the plain gap loop steps in float32, which GPUs with
-few float64 units run up to 64 times faster. A step is taken in float32 only
-when the float32 product clears ``u`` by its band, and otherwise the float64
-product is replayed. The band covers the float32 product's worst-case
-rounding relative to Algorithm A's float64 product for every gap below
-:data:`F32_MAX_GAP` (checked exhaustively by tests/test_cuda.py), and longer
-gaps replay in float64, so the gaps are Algorithm A's and the samples NumPy's.
-That rests on an error analysis rather than on identical arithmetic.
+contraction, with two differences that error bounds, not identical
+arithmetic, keep from changing the samples:
+
+- The guided gap search calls CUDA's ``log1p``, ``log`` and ``exp``, not
+  glibc's. As on the CPU, it decides a gap only outside the log margin of
+  :mod:`copairs.nulls.sampler`, which covers either library, and replays the
+  float64 product inside it.
+- The plain gap loop steps in float32, which GPUs with few float64 units run
+  up to 64 times faster. A step is taken in float32 only when the float32
+  product clears ``u`` by its band, and otherwise the float64 product is
+  replayed. The band covers the float32 product's worst-case rounding
+  relative to Algorithm A's float64 product for every gap below
+  :data:`F32_MAX_GAP` (checked exhaustively by tests/test_cuda.py), and longer
+  gaps replay in float64.
+
+So the gaps are Algorithm A's and the samples NumPy's. A CPU emulation of the
+kernel (glibc's libm) confirms it bit for bit; a GPU run has not yet.
 
 The counts compare float64 nulls against the same thresholds, and sum a
 group's members in the same order, as the NumPy backend; they are exact.

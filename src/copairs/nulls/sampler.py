@@ -9,13 +9,15 @@ Algorithm A), which needs one uniform per positive and no memory beyond a few
 scalars.
 
 Sample ``j`` of configuration ``(num_pos, total)`` is a pure function of
-``(seed, num_pos, total, j)`` through a Philox counter, and every backend
-performs the same IEEE double operations in the same order, so the NumPy,
-Numba and CUDA implementations return bitwise-identical nulls. The scalar
-functions here are the reference; :mod:`copairs.nulls._numba` compiles the
-same source and :mod:`copairs.nulls.cuda` ports it line by line. An explicit
-``backend="cuda"`` also steps long gaps in float32 (see
-:mod:`copairs.nulls.cuda`).
+``(seed, num_pos, total, j)`` through a Philox counter, and every gap is
+Algorithm A's, the smallest whose float64 product is at most ``u``. Searches
+that shortcut the product through ``log1p`` decide only outside an error
+margin and replay the product inside it, so the gap does not depend on the
+library that computes ``log1p``, ``log`` and ``exp`` (NumPy, glibc or CUDA,
+each within a few ulp; the margin covers far more). The scalar functions here
+are the reference; :mod:`copairs.nulls._numba` compiles the same source,
+bitwise identical to the NumPy backend (tested), and :mod:`copairs.nulls.cuda`
+ports it line by line, stepping long gaps in float32.
 """
 
 import os
@@ -41,7 +43,9 @@ GUIDED_RATIO = 32
 # condition implies k < 1449, so the k-term log1p sum errs by < 1e-11.
 GUIDED_MAX_TOTAL = 2**26
 # Bound on |log P(G > g) evaluated with log1p - log of Algorithm A's product|,
-# excluding the product's own rounding, when every factor is <= 1 - 2**-10.
+# excluding the product's own rounding, when every factor is <= 1 - 2**-10. It
+# leaves room for log1p and log errors of thousands of ulp, so it holds for any
+# libm (CUDA documents 1 ulp for log1p, log and exp in double precision).
 _LOG_MARGIN = 1e-9
 _EPS = 2.0**-52
 _FACTOR_LIMIT = 1.0 - 2.0**-10

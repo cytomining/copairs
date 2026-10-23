@@ -80,9 +80,10 @@ cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
 
 - Nulls and p-values: `backend="cuda"`, only when asked for, samples and
   counts on the GPU. It steps long gaps of Algorithm A in float32, which is
-  faster on GPUs with few float64 units. Error bounds keep those gaps equal to
-  the float64 ones, so samples are NumPy's, but not by identical arithmetic,
-  and no GPU run has tested them bit for bit yet; `"auto"` stays on the CPU.
+  faster on GPUs with few float64 units, and its guided gap search uses CUDA's
+  `log1p`, not glibc's. Error bounds keep the gaps equal to the CPU's, so
+  samples are NumPy's, but not by identical arithmetic, and no GPU run has
+  tested them bit for bit yet; `"auto"` stays on the CPU.
 - AP stage: `backend="cuda"`, only when asked for, computes pair similarities
   and AP on the GPU, keeping similarities there, and runs multilabel matching,
   per-label AP and normalized AP on Numba. Given the same similarities, its APs
