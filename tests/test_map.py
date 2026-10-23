@@ -329,6 +329,7 @@ def test_mean_average_precision_independent_of_other_groups(tmp_path):
     kwargs = dict(
         sameby=["group"], null_size=200, threshold=0.05, seed=0, progress_bar=False
     )
+    kwargs["method"] = "legacy"  # the method that caches
     shared = tmp_path / "shared"
     both = mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
     cached = list(shared.rglob("*.npy"))
@@ -363,5 +364,6 @@ def test_mean_average_precision_unknown_cpu_count(tmp_path, monkeypatch):
         seed=0,
         progress_bar=False,
         cache_dir=tmp_path,
+        method="legacy",  # the method that runs a thread pool
     )
     assert len(result) == 2
