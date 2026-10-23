@@ -172,7 +172,7 @@ def _all_pairs_except(n, shared_ptr, shared_j, offsets):
     """
     out = np.empty((offsets[n], 2), dtype=np.uint32)
     for row in numba.prange(n):
-        i = np.int64(row)  # a signed index: n - 1 - i must not wrap
+        i = np.int64(row)  # prange's index is unsigned; uint64 with int64 is float
         s, end, w = shared_ptr[i], shared_ptr[i + 1], offsets[i]
         for j in range(i + 1, n):
             if s < end and shared_j[s] == j:
