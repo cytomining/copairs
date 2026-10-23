@@ -1,15 +1,20 @@
 """Tests for the counter-based random stream, the AP null sampler and p-values."""
 
+import os
 import sys
+import json
+import shutil
 import itertools
 import subprocess
 import tracemalloc
 import importlib.util
+from pathlib import Path
 
 import numpy as np
 import pytest
 from scipy.stats import chisquare
 
+import copairs
 from copairs import nulls, methods
 from copairs.nulls import common, philox, pvalues, sampler
 from tests.helpers import brute_ap_pvalues, brute_group_nulls, brute_map_pvalues
@@ -704,3 +709,68 @@ def test_numba_count_histograms_within_bound(hist_bytes, monkeypatch):
     np.testing.assert_array_equal(counts, expected)
     assert all(8 * bins * max_blocks <= hist_bytes for bins, max_blocks in calls)
     assert (len(calls) > 1) == (hist_bytes < 8 * (sum(lengths) + len(lengths)))
+
+
+# Numba and NumPy nulls, and the cache hits of the Numba kernel, of a copy of
+# copairs in the directory argv[1].
+_CACHE_PROBE = """
+import sys, json
+import numpy as np
+import copairs
+from copairs import nulls
+from copairs.nulls import _numba
+
+assert copairs.__file__.startswith(sys.argv[1]), copairs.__file__
+confs = np.array([[1, 7], [3, 10], [9, 49], [3, 1000]])
+nb = nulls.ap_nulls(confs, 50, 0, backend="numba", dtype=np.float64)
+ref = nulls.ap_nulls(confs, 50, 0, backend="numpy", dtype=np.float64)
+hits = sum(_numba._ap_nulls.stats.cache_hits.values())
+print(json.dumps({"numba": nb.tolist(), "numpy": ref.tolist(), "hits": hits}))
+"""
+
+
+@pytest.mark.parametrize(
+    "name,old,new",
+    [
+        ("philox.py", ") * INV_2_53\n", ") * (INV_2_53 * 0.5)\n"),
+        ("sampler.py", "    while quot > u:\n", "    while quot > 0.5 * u:\n"),
+    ],
+)
+def test_numba_cache_follows_edits_to_compiled_files(tmp_path, name, old, new):
+    """Cached Numba kernels follow edits to the files of the functions they compile.
+
+    Numba checks a cached kernel only against its own file. The kernel of
+    ``ap_nulls`` compiles the sampler, which compiles Philox: an edit to
+    either must reach the Numba nulls in the next process, while a process
+    after an unchanged one still loads the kernel from the cache.
+    """
+    pytest.importorskip("numba")
+    shutil.copytree(
+        Path(copairs.__file__).parent,
+        tmp_path / "copairs",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "numba_cache")}
+
+    def run():
+        done = subprocess.run(
+            [sys.executable, "-c", _CACHE_PROBE, str(tmp_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    before = run()
+    assert run()["hits"] == 1
+    source = tmp_path / "copairs" / "nulls" / name
+    text = source.read_text()
+    assert text.count(old) == 1
+    source.write_text(text.replace(old, new))
+    after = run()
+    assert after["numba"] != before["numba"]
+    if name == "philox.py":  # the NumPy sampler shares Philox, not gap_loop
+        assert after["numba"] == after["numpy"] != before["numpy"]

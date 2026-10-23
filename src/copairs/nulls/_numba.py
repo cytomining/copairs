@@ -17,19 +17,24 @@ import threading
 import numba
 import numpy as np
 
-from copairs.nulls import joint, permutation
+from copairs.nulls import joint, philox, sampler, permutation
+from copairs._numba_cache import cached_njit
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
 
+# The kernels compile functions of these files; Numba's cache would only see
+# this one (see copairs._numba_cache).
+_SOURCES = (__file__, philox.__file__, sampler.__file__)
+
 _philox_nb = numba.njit(inline="always")(philox4x32)
 _uniform_nb = numba.njit(inline="always")(uniform53)
-_gap_loop_nb = numba.njit(cache=True)(gap_loop)
-_ap_sample_nb = numba.njit(cache=True)(
+_gap_loop_nb = cached_njit(_SOURCES)(gap_loop)
+_ap_sample_nb = cached_njit(_SOURCES)(
     _make_ap_sample(
         _philox_nb,
         _uniform_nb,
         _gap_loop_nb,
-        numba.njit(cache=True)(_make_gap_guided(_gap_loop_nb, numba.njit)),
+        cached_njit(_SOURCES)(_make_gap_guided(_gap_loop_nb, numba.njit)),
     )
 )
 _jit = numba.njit(cache=True)
@@ -64,7 +69,7 @@ def ap_nulls(num_pos, total, k0, k1, start, out):
     _launch(_ap_nulls, num_pos, total, k0, k1, start, out)
 
 
-@numba.njit(parallel=True, cache=True)
+@cached_njit(_SOURCES, parallel=True)
 def _ap_nulls(num_pos, total, k0, k1, start, out):
     n_conf, size = out.shape
     for flat in numba.prange(n_conf * size):
@@ -142,7 +147,7 @@ def _split_segments(rows, ptr, max_scores):
     return piece_rows, np.append(starts, ptr[-1])
 
 
-@numba.njit(parallel=True, cache=True)
+@cached_njit(_SOURCES, parallel=True)
 def _count_ge_kernel(null, rows, thr, ptr, counts, max_blocks):
     """Count segment ``s``'s scores ``thr[ptr[s]:ptr[s + 1]]`` on ``null[rows[s]]``."""
     n_seg = len(rows)
@@ -176,7 +181,7 @@ def group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
     _launch(_group_ge, null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
 
 
-@numba.njit(parallel=True, cache=True)
+@cached_njit(_SOURCES, parallel=True)
 def _group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
     n_groups = len(ptr) - 1
     size = null.shape[1]
