@@ -689,21 +689,10 @@ def _group_maps_np(layout, pm):
             keys = _pair_table(x, pm[:, slots], n, layout.kmu, kmu_t[n:], pool.krr)
         else:
             keys = _gather(layout.full_keys, x, pm[:, slots])
-        ent = (keys.astype(np.uint64) << np.uint64(32)) | slots.astype(np.uint64)
-        ent.sort(axis=1)
-        k = ent >> np.uint64(32)
-        t = (ent & np.uint64(0xFFFFFFFF)).astype(np.int64)
+        k, t = _rank_entries(keys, slots)
         # Drawn block profiles ranked strictly before each entry's key.
-        block = layout.slot_block[t] == b
-        new = np.ones(k.shape, dtype=np.bool_)
-        new[:, 1:] = k[:, 1:] != k[:, :-1]
-        run = np.maximum.accumulate(np.where(new, np.arange(k.shape[1]), 0), axis=1)
-        drawn = np.take_along_axis(np.cumsum(block, axis=1) - block, run, axis=1)
-        # The positives, in rank order.
-        deg = layout.deg[s]
-        cols = np.nonzero(layout.adjm[s][t])[1].reshape(size, deg)
-        tp = np.take_along_axis(t, cols, axis=1)
-        yp = np.take_along_axis(pm, tp, axis=1)
+        drawn = _drawn_before(k, layout.slot_block[t] == b)
+        cols, yp = _positives(layout, s, t, pm)
         xp = np.broadcast_to(x, yp.shape)
         if layout.full_before is not None:
             before = _gather(layout.full_before, xp, yp)
@@ -719,12 +708,38 @@ def _group_maps_np(layout, pm):
             # Block members x ranks before the key: count_less on its sorted g-row.
             word = (xp.astype(np.uint64) << np.uint64(32)) | kp
             before = before + (np.searchsorted(layout.gkeys, word) - layout.gptr[xp])
-        before = before - np.take_along_axis(drawn, cols, axis=1)
-        acc = np.zeros(size)
-        for d in range(deg):
-            acc += (d + 1) / (d + 1 + before[:, d])
-        total += acc / deg
+        total += _mean_precision(before - np.take_along_axis(drawn, cols, axis=1))
     return total / n
+
+
+def _rank_entries(keys, slots):
+    """``(k, t)``: each row's keys and slots, sorted by key and then slot."""
+    ent = (keys.astype(np.uint64) << np.uint64(32)) | slots.astype(np.uint64)
+    ent.sort(axis=1)
+    return ent >> np.uint64(32), (ent & np.uint64(0xFFFFFFFF)).astype(np.int64)
+
+
+def _drawn_before(k, block):
+    """Entries where ``block`` holds ranked strictly before each entry's key ``k``."""
+    new = np.ones(k.shape, dtype=np.bool_)
+    new[:, 1:] = k[:, 1:] != k[:, :-1]
+    run = np.maximum.accumulate(np.where(new, np.arange(k.shape[1]), 0), axis=1)
+    return np.take_along_axis(np.cumsum(block, axis=1) - block, run, axis=1)
+
+
+def _positives(layout, s, t, pm):
+    """``(cols, yp)``: slot ``s``'s positives' columns in ``t`` and their codes."""
+    cols = np.nonzero(layout.adjm[s][t])[1].reshape(len(t), layout.deg[s])
+    return cols, np.take_along_axis(pm, np.take_along_axis(t, cols, axis=1), axis=1)
+
+
+def _mean_precision(before):
+    """Each row's AP, its ``d``-th positive ranked after ``before[:, d]`` negatives."""
+    deg = before.shape[1]
+    acc = np.zeros(len(before))
+    for d in range(deg):
+        acc += (d + 1) / (d + 1 + before[:, d])
+    return acc / deg
 
 
 def _mix(x):
@@ -1604,20 +1619,10 @@ def _label_maps_np(layout, pm):
         lone &= _gather(layout.lone, np.maximum(lx, 0), np.maximum(ly, 0))
         inb[:, slots] = (negative != 0) | lone
         keys = _gather(pool.keys, x, y)
-        ent = (keys.astype(np.uint64) << np.uint64(32)) | slots.astype(np.uint64)
-        ent.sort(axis=1)
-        k = ent >> np.uint64(32)
-        t = (ent & np.uint64(0xFFFFFFFF)).astype(np.int64)
+        k, t = _rank_entries(keys, slots)
         # Drawn negatives ranked strictly before each entry's key.
-        block = np.take_along_axis(inb, t, axis=1)
-        new = np.ones(k.shape, dtype=np.bool_)
-        new[:, 1:] = k[:, 1:] != k[:, :-1]
-        run = np.maximum.accumulate(np.where(new, np.arange(k.shape[1]), 0), axis=1)
-        drawn = np.take_along_axis(np.cumsum(block, axis=1) - block, run, axis=1)
-        # The positives, in rank order.
-        deg = layout.deg[s]
-        cols = np.nonzero(layout.adjm[s][t])[1].reshape(size, deg)
-        yp = np.take_along_axis(pm, np.take_along_axis(t, cols, axis=1), axis=1)
+        drawn = _drawn_before(k, np.take_along_axis(inb, t, axis=1))
+        cols, yp = _positives(layout, s, t, pm)
         xp = np.broadcast_to(x, yp.shape)
         kp = np.take_along_axis(k, cols, axis=1)
         if pool.ranked:
@@ -1630,11 +1635,7 @@ def _label_maps_np(layout, pm):
         word = (lxp.astype(np.uint64) << np.uint64(32)) | kp
         lone_before = np.searchsorted(layout.gwords, word) - layout.gptr[lxp]
         before = before + np.where(lx >= 0, lone_before, 0)
-        before = before - np.take_along_axis(drawn, cols, axis=1)
-        acc = np.zeros(size)
-        for d in range(deg):
-            acc += (d + 1) / (d + 1 + before[:, d])
-        total += acc / deg
+        total += _mean_precision(before - np.take_along_axis(drawn, cols, axis=1))
     return total / n
 
 
