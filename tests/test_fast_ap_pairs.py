@@ -4,10 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+numba = pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
 from copairs import compute
 from copairs.map import multilabel, average_precision, mean_average_precision
+from copairs.nulls import _numba
 from tests.markers import AP_BACKENDS
 from copairs._backend import backend_module
 
@@ -132,3 +133,40 @@ def test_kernel_ap_stages_give_numpy_pvalues(backend):
             got.append(m.sort_values(sameby).reset_index(drop=True))
         pd.testing.assert_frame_equal(*got)
         assert 0 < got[0]["below_p"].sum() < len(got[0])
+
+
+@pytest.mark.parametrize("null_backend", ["numba", "numpy"])
+def test_null_threads_compute_similarities_on_the_callers_numba_threads(
+    null_backend, monkeypatch
+):
+    """The permutation null's threads launch a Numba AP stage's kernel as the caller set them.
+
+    Numba's thread count is per thread, and the null's pool threads
+    recompute similarities with the kernel of a Numba AP stage, under the
+    NumPy null too, whose draws run no Numba.
+    """
+    if numba.config.NUMBA_NUM_THREADS < 2:
+        pytest.skip("needs 2 Numba threads to tell the caller's 1 from the default")
+    feats = np.random.default_rng(5).standard_normal((96, 8))
+    frames = (
+        (plate_ap(feats, "numba"), "g"),
+        (shared_labels(label_ap(feats, "numba")), "target"),
+    )
+    launches = []
+    launch = _numba._launch
+
+    def recorded(kernel, *args):
+        launches.append((kernel.__name__, numba.get_num_threads()))
+        return launch(kernel, *args)
+
+    monkeypatch.setattr(_numba, "_launch", recorded)
+    before = numba.get_num_threads()
+    numba.set_num_threads(1)
+    try:
+        for ap, sameby in frames:
+            mean_average_precision(ap, [sameby], backend=null_backend, **NULL)
+    finally:
+        numba.set_num_threads(before)
+    sims = [threads for name, threads in launches if name == "_kernel_sims"]
+    assert sims, launches
+    assert {threads for _, threads in launches} == {1}
