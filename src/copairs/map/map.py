@@ -9,7 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 
-from copairs import compute
+from copairs import nulls, compute
+from copairs.nulls.common import check_null_size
+from copairs.nulls.backend import check_method
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     check_hierarchical_by,
@@ -27,6 +29,8 @@ def get_map_pvalue(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    method: str = "fast",
+    backend: str = "auto",
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
@@ -50,7 +54,21 @@ def get_map_pvalue(
     max_workers : int
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
-        Location to save the cache.
+        Location to save the cache (``method="legacy"`` only).
+    method : str
+        Both methods average the members' AP nulls, members with equal pair
+        counts sharing samples, as copairs 0.5.5 did. ``"fast"`` (default)
+        samples them exactly and streams them in bounded memory, without a
+        cache (:func:`copairs.nulls.map_pvalues`), and counts group nulls
+        ``>= mAP``, treating values within the scores' rounding as ties (see
+        :func:`copairs.nulls.tie_thresholds`). ``"legacy"`` materializes the
+        nulls of :func:`copairs.compute.get_null_dists` and counts group nulls
+        ``> mAP``, as copairs 0.5.5 did, which gives too small p-values when
+        the mAP equals an atom of the null (e.g. perfect retrieval).
+    backend : str
+        Backend of the fast method: ``"auto"`` (default), ``"numba"`` or
+        ``"numpy"``. All give identical p-values, so ``"auto"`` picks
+        ``"numba"`` whenever it is installed.
 
     Returns
     -------
@@ -63,9 +81,14 @@ def get_map_pvalue(
         - `indices`: List of indices in the original ap_scores for this group.
 
     """
+    check_method(method, backend)
     # Filter out invalid or incomplete AP scores
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
     ap_scores = ap_scores.reset_index(drop=True).copy()
+    if method == "fast":
+        return _fast_map_pvalue(
+            ap_scores, sameby, null_size, seed, backend, progress_bar
+        )
 
     logger.info("Computing null_dist...")
     # Extract configurations for null distribution generation
@@ -74,7 +97,12 @@ def get_map_pvalue(
 
     # Generate null distributions for each unique configuration
     null_dists = compute.get_null_dists(
-        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
+        null_confs,
+        null_size,
+        seed=seed,
+        cache_dir=cache_dir,
+        progress_bar=progress_bar,
+        method="legacy",
     )
     ap_scores["null_ix"] = rev_ix
 
@@ -128,6 +156,8 @@ def mean_average_precision(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    method: str = "fast",
+    backend: str = "auto",
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -154,7 +184,11 @@ def mean_average_precision(
     max_workers : int
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
-        Location to save the cache.
+        Location to save the cache (``method="legacy"`` only).
+    method : str
+        ``"fast"`` (default) or ``"legacy"`` null, see :func:`get_map_pvalue`.
+    backend : str
+        Backend of the fast method, see :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -181,6 +215,8 @@ def mean_average_precision(
         progress_bar=progress_bar,
         max_workers=max_workers,
         cache_dir=cache_dir,
+        method=method,
+        backend=backend,
     )
 
     # Step 2: Apply multiple testing correction
@@ -203,6 +239,8 @@ def mean_average_precision_hierarchical(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    method: str = "fast",
+    backend: str = "auto",
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -242,7 +280,11 @@ def mean_average_precision_hierarchical(
     max_workers : int
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
-        Location to save the cache.
+        Location to save the cache (``method="legacy"`` only).
+    method : str
+        ``"fast"`` (default) or ``"legacy"`` null, see :func:`get_map_pvalue`.
+    backend : str
+        Backend of the fast method, see :func:`get_map_pvalue`.
 
     Returns
     -------
@@ -273,6 +315,8 @@ def mean_average_precision_hierarchical(
         progress_bar=progress_bar,
         max_workers=max_workers,
         cache_dir=cache_dir,
+        method=method,
+        backend=backend,
     )
 
     # Step 2: Apply hierarchical multiple testing correction
@@ -311,3 +355,61 @@ def silent_thread_map(fn, *iterables, **kwargs):
     chunksize = kwargs.pop("chunksize", 1)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
+
+
+def _fast_map_pvalue(ap_scores, sameby, null_size, seed, backend, progress_bar):
+    """:func:`get_map_pvalue` with ``method="fast"``, on the filtered AP scores."""
+    null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
+    null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
+    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
+        {
+            "average_precision": ["mean", lambda x: list(x.index)],
+            "normalized_average_precision": "mean",
+        }
+    )
+    map_scores.columns = sameby + [
+        "mean_average_precision",
+        "indices",
+        "mean_normalized_average_precision",
+    ]
+    logger.info("Computing p-values...")
+    map_scores["p_value"] = _copied_pvalues(
+        map_scores["mean_average_precision"].to_numpy(),
+        map_scores["indices"].tolist(),
+        rev_ix.ravel(),
+        null_confs,
+        null_size,
+        seed,
+        backend,
+        progress_bar,
+    )
+    return map_scores
+
+
+def _copied_pvalues(
+    scores, groups, rev_ix, null_confs, null_size, seed, backend, progress_bar
+):
+    """P-values against the mean of the members' AP nulls (:func:`nulls.map_pvalues`).
+
+    ``groups`` lists each group's rows; members sharing a configuration share
+    null samples, as in copairs <= 0.5.5.
+    """
+    if not groups:
+        check_null_size(null_size)
+        nulls.resolve_backend(backend)
+        return np.zeros(0, dtype=np.float64)
+    gid = np.repeat(np.arange(len(groups)), [len(ix) for ix in groups])
+    rows = np.concatenate(groups).astype(np.int64)
+    keys, conf_cnt = np.unique(gid * len(null_confs) + rev_ix[rows], return_counts=True)
+    ptr = np.searchsorted(keys // len(null_confs), np.arange(len(groups) + 1))
+    return nulls.map_pvalues(
+        scores,
+        ptr,
+        keys % len(null_confs),
+        conf_cnt,
+        null_confs,
+        null_size,
+        seed,
+        backend=backend,
+        progress_bar=progress_bar,
+    )
