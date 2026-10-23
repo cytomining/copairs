@@ -45,16 +45,22 @@ def available_backends() -> list[str]:
     picks among the CPU backends only (see :func:`resolve_backend`).
     """
     backends = _cpu_backends()
-    if importlib.util.find_spec("cupy") is not None and _cuda_usable():
+    if _installed("cupy") and _cuda_usable():
         backends.insert(0, "cuda")
     return backends
 
 
 def _cpu_backends() -> list[str]:
     """``["numba", "numpy"]`` when the Numba backend imports, else ``["numpy"]``."""
-    if importlib.util.find_spec("numba") is not None and _numba_imports():
+    if _installed("numba") and _numba_imports():
         return ["numba", "numpy"]
     return ["numpy"]
+
+
+@cache
+def _installed(package: str) -> bool:
+    """Whether ``package`` is installed, looked up once per process."""
+    return importlib.util.find_spec(package) is not None
 
 
 @cache

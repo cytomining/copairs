@@ -8,6 +8,7 @@ staying on the CPU where only an explicit ``"cuda"`` runs the GPU.
 
 import types
 import warnings
+import importlib.util
 import multiprocessing
 
 import numpy as np
@@ -145,6 +146,32 @@ def test_auto_skips_a_cupy_that_fails_to_import(tmp_path):
         "raises(ImportError, 'simulated broken cupy')\n"
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_installed_backends_looked_up_once(monkeypatch):
+    """Listing and resolving backends looks each optional package up once.
+
+    ``importlib.util.find_spec`` costs about 0.1 ms, on every call before.
+    """
+    looked_up = []
+    find_spec = importlib.util.find_spec
+
+    def counting(name, *args):
+        looked_up.append(name)
+        return find_spec(name, *args)
+
+    caches = [f for f in vars(backend).values() if hasattr(f, "cache_clear")]
+    for cache in caches:
+        cache.cache_clear()
+    monkeypatch.setattr(importlib.util, "find_spec", counting)
+    try:
+        for _ in range(3):
+            nulls.available_backends()
+            nulls.resolve_backend("auto")
+    finally:
+        for cache in caches:
+            cache.cache_clear()
+    assert sorted(looked_up) == ["cupy", "numba"]
 
 
 def test_cpu_steps_take_no_cuda_backend():
