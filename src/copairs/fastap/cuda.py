@@ -4,9 +4,10 @@ Imported only through ``copairs._backend.backend_module("cuda")`` (``pip
 install 'copairs[gpu]'``). It offers the interface of :mod:`copairs.fastap`
 that the AP functions use:
 
-- :func:`similarity_fn` and :func:`pair_similarity` compute pair similarities
-  on the GPU, returning them, or with ``on_device`` a :class:`DeviceSims`
-  that :func:`ap_from_pairs` computes chunk by chunk;
+- :func:`pair_similarity` computes pair similarities on the GPU, and
+  :func:`similarity_fn` leaves them there as :class:`DeviceSims`, which
+  :func:`ap_from_pairs` computes chunk by chunk and ``np.asarray`` copies to
+  the host;
 - :func:`ap_from_pairs` computes AP by counting on the GPU, streaming the
   negative pairs, their similarities and keys within ``budget_bytes``;
 - multilabel APs, the multilabel matcher and normalized AP run on Numba, on the
@@ -136,8 +137,9 @@ class DeviceSims:
     """Similarities of ``pairs``, computed on the GPU only when they are used.
 
     :func:`ap_from_pairs` computes them chunk by chunk with its own pairs,
-    so all of them are never held at once, and :meth:`get` returns them all
-    as a NumPy array. ``source`` is the pairs object they were made for.
+    so all of them are never held at once, and :meth:`get` (or
+    ``np.asarray``, as the multilabel APs on Numba do) returns them all as
+    a NumPy array. ``source`` is the pairs object they were made for.
     """
 
     def __init__(self, sims_of, pairs: np.ndarray, source):
@@ -160,6 +162,12 @@ class DeviceSims:
             chunk = self.pairs[start : start + PAIR_CHUNK]
             self.of(_device_pairs(chunk)).get(out=out[start : start + len(chunk)])
         return out
+
+    def __array__(self, dtype=None, copy=None):
+        """:meth:`get`, for NumPy; a host array is always a new one."""
+        if copy is False:
+            raise ValueError("similarities on the GPU have no host array to share")
+        return self.get().astype(dtype or np.float32, copy=False)
 
 
 def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
@@ -195,13 +203,15 @@ def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
     return similarity
 
 
-def similarity_fn(feats, distance, generic, on_device: bool = False):
+def similarity_fn(feats, distance, generic):
     """:func:`copairs.fastap.similarity_fn` with the GPU kernels.
 
-    With ``on_device``, the kernels' similarities are :class:`DeviceSims`
-    for :func:`ap_from_pairs`; distances without a kernel use ``generic``.
+    The kernels' similarities are :class:`DeviceSims`, left for
+    :func:`ap_from_pairs` to compute; distances without a kernel use
+    ``generic``.
     """
-    return _bind_similarity(feats, pair_similarity(feats, distance, on_device), generic)
+    kernel = pair_similarity(feats, distance, on_device=True)
+    return _bind_similarity(feats, kernel, generic)
 
 
 def _pair_sims(sims, pairs, given):

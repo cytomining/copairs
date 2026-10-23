@@ -407,9 +407,7 @@ def average_precision(
     kernel_backend = None  # the backend whose kernel computes the similarities
     if fastap is not None:
         generic = similarity_fn
-        # On the GPU, fastap.ap_from_pairs computes them, chunk by chunk.
-        on_device = {"on_device": True} if backend == "cuda" else {}
-        similarity_fn = fastap.similarity_fn(feats, distance, generic, **on_device)
+        similarity_fn = fastap.similarity_fn(feats, distance, generic)
         if similarity_fn is not generic:
             kernel_backend = backend
 

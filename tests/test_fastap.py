@@ -573,11 +573,11 @@ def test_cuda_similarities_computed_in_the_ap_count(monkeypatch):
     feats = np.random.default_rng(14).normal(size=(30, 6))
     generic = compute.get_similarity_fn("cosine", progress_bar=False)
     pairs = np.array([[0, 1], [2, 3]])
-    on_device = cuda.similarity_fn(feats, "cosine", generic, on_device=True)
-    sims = on_device(feats, pairs, 1)
+    sims = cuda.similarity_fn(feats, "cosine", generic)(feats, pairs, 1)
     assert isinstance(sims, cuda.DeviceSims) and len(sims) == 2
-    host = cuda.similarity_fn(feats, "cosine", generic)(feats, pairs, 1)
-    np.testing.assert_array_equal(sims.get(), host)
+    host = sims.get()
+    np.testing.assert_array_equal(np.asarray(sims), host)
+    np.testing.assert_allclose(host, generic(feats, pairs, 1), rtol=1e-6)
 
     seen = []
     ap_from_pairs = cuda.ap_from_pairs
@@ -656,7 +656,7 @@ def test_cuda_ap_stage_streams_negatives_within_budget(monkeypatch):
     pos, neg = random_pairs(rng, 40, 10, 5000)
     feats = rng.normal(size=(40, 4))
     generic = compute.get_similarity_fn("cosine", progress_bar=False)
-    similarity = cuda.similarity_fn(feats, "cosine", generic, on_device=True)
+    similarity = cuda.similarity_fn(feats, "cosine", generic)
     cp.allocated.clear()
     pos_sims, neg_sims = similarity(feats, pos, 1), similarity(feats, neg, 1)
     assert not cp.allocated, "no similarities computed before the AP count"
