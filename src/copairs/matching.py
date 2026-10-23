@@ -706,11 +706,20 @@ def _find_pairs_multilabel_numba(fastap, dframe, sameby, diffby, multilabel_col)
     return fast.disjoint_label_pairs(dframe, rest_same, rest_diff, multilabel_col)
 
 
+def _pair_keys(pairs: np.ndarray) -> np.ndarray:
+    """uint64 keys ``i << 32 | j`` of ``(i, j)`` pairs; they sort like the pairs."""
+    pairs = np.asarray(pairs)
+    high = pairs[:, 0].astype(np.uint64) << np.uint64(32)
+    return high | pairs[:, 1].astype(np.uint64)
+
+
+def _key_pairs(keys: np.ndarray) -> np.ndarray:
+    """uint32 ``(i, j)`` pairs of :func:`_pair_keys` keys."""
+    return np.stack(
+        [keys >> np.uint64(32), keys & np.uint64(0xFFFFFFFF)], axis=1
+    ).astype(np.uint32)
+
+
 def _sorted_unique_pairs(pairs: np.ndarray) -> np.ndarray:
     """``np.unique(pairs, axis=0)`` for uint32 ``(i, j)`` pairs, via packed keys."""
-    packed = np.unique(
-        (pairs[:, 0].astype(np.uint64) << np.uint64(32)) | pairs[:, 1].astype(np.uint64)
-    )
-    return np.stack(
-        [packed >> np.uint64(32), packed & np.uint64(0xFFFFFFFF)], axis=1
-    ).astype(np.uint32)
+    return _key_pairs(np.unique(_pair_keys(pairs)))

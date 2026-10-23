@@ -13,7 +13,7 @@ import numba
 import numpy as np
 import pandas as pd
 
-from copairs.matching import find_pairs
+from copairs.matching import _key_pairs, _pair_keys, find_pairs
 from copairs.fastap.ranking import (
     pair_csr,
     rank_keys,
@@ -93,11 +93,10 @@ def multilabel_pairs(dframe, multilabel_col):
 
 
 def _monolabel_keys(dframe, sameby, diffby):
-    """Sorted keys ``i * n + j`` of ``find_pairs(dframe, sameby, diffby)``."""
+    """Sorted :func:`~copairs.matching._pair_keys` of ``find_pairs(dframe, ...)``."""
     # Only the compared columns: DuckDB would convert the label lists too.
     columns = list(dict.fromkeys(sameby + diffby))
-    mono = find_pairs(dframe[columns], sameby, diffby).astype(np.int64)
-    return np.sort(mono[:, 0] * len(dframe) + mono[:, 1])
+    return np.sort(_pair_keys(find_pairs(dframe[columns], sameby, diffby)))
 
 
 def _column_codes(dframe, columns, multilabel_col):
@@ -123,7 +122,7 @@ def _monolabel_mask(dframe, sameby, diffby, multilabel_col, pairs):
     diff = _column_codes(dframe, diffby, multilabel_col)
     if same is None or diff is None:
         mono = _monolabel_keys(dframe, sameby, diffby)
-        return _in_sorted(pairs[:, 0] * len(dframe) + pairs[:, 1], mono)
+        return _in_sorted(_pair_keys(pairs), mono)
     keep = np.ones(len(pairs), dtype=bool)
     for code in same:
         keep &= code[pairs[:, 0]] == code[pairs[:, 1]]
@@ -153,17 +152,18 @@ def shared_label_pairs(dframe, sameby, diffby, multilabel_col):
 
 @numba.njit(cache=True)
 def _all_pairs_except(n, shared):
-    """Pairs ``(i < j)`` of ``range(n)`` whose key ``i * n + j`` is not in ``shared``.
+    """Pairs ``(i < j)`` of ``range(n)`` not in ``shared``.
 
-    ``shared`` is sorted and unique; candidates are generated in key order and
-    merged against it, so no candidate array is materialized.
+    ``shared`` holds sorted unique pairs ``(i < j)``; candidates are generated
+    in the same order and merged against it, so no candidate array is
+    materialized.
     """
     out = np.empty((n * (n - 1) // 2 - len(shared), 2), dtype=np.uint32)
     s = 0
     w = 0
     for i in range(n):
         for j in range(i + 1, n):
-            if s < len(shared) and shared[s] == i * n + j:
+            if s < len(shared) and shared[s, 0] == i and shared[s, 1] == j:
                 s += 1
                 continue
             out[w, 0] = i
@@ -178,13 +178,11 @@ def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col):
     if found is None:
         return None
     _, pairs, _ = found
-    n = len(dframe)
-    shared = np.unique(pairs[:, 0] * n + pairs[:, 1])
+    shared = np.unique(_pair_keys(pairs))
     if not (len(sameby) or len(diffby)):
-        return _all_pairs_except(n, shared)
+        return _all_pairs_except(len(dframe), _key_pairs(shared))
     mono = _monolabel_keys(dframe, sameby, diffby)
-    kept = mono[~_in_sorted(mono, shared)]
-    return np.stack([kept // n, kept % n], axis=1).astype(np.uint32)
+    return _key_pairs(mono[~_in_sorted(mono, shared)])
 
 
 @numba.njit(parallel=True, cache=True)
