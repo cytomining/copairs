@@ -68,6 +68,9 @@ _CHUNK = 2**16
 # Elements of the per-sample arrays of one vectorized call: the group's edge
 # uniforms and one member's positives (2**22 float64 = 32 MiB each).
 _CHUNK_ELEMENTS = 2**22
+# Bytes of the samples joint_pvalues sorts at once: one chunk of each
+# signature of a batch (Numba samples a batch per launch).
+_BATCH_BYTES = 2**26
 
 
 def _make_sampler(philox, uniform, jit=lambda f: f):
@@ -484,13 +487,17 @@ def joint_nulls(
     samples, so ``"auto"`` picks Numba whenever it imports
     (:func:`~copairs.nulls.resolve_backend`).
     """
-    n_sig = len(plan[0]) - 1
-    sigs = range(*(rows or slice(None)).indices(n_sig))
+    sigs = np.arange(len(plan[0]) - 1)[rows or slice(None)]
+    return _joint_nulls(plan, null_size, start, sigs, resolve_backend(backend))
+
+
+def _joint_nulls(plan, null_size, start, sigs, backend):
+    """:func:`joint_nulls` of the signatures ``sigs`` on a resolved backend."""
     out = np.empty((len(sigs), null_size), dtype=np.float64)
-    if resolve_backend(backend) == "numba":
+    if backend == "numba":
         if out.size:
-            sig_ix = np.array(sigs, dtype=np.int64)
-            _import_numba_backend().joint_nulls(*plan, sig_ix, start, out)
+            sigs = np.asarray(sigs, dtype=np.int64)
+            _import_numba_backend().joint_nulls(*plan, sigs, start, out)
         return out
     for r, s in enumerate(sigs):
         for c, size in chunks(null_size, _chunk(plan, s)):
@@ -524,7 +531,8 @@ def joint_pvalues(
     ``(num_pos, num_neg)`` and its positive pairs between local member
     indices. ``p_g = (1 + #{null >= thr_g}) / (null_size + 1)`` with ``thr_g``
     from :func:`~copairs.nulls.tie_thresholds`. Nulls are generated in chunks
-    of samples and not stored, on ``backend`` (see :func:`joint_nulls`).
+    of samples and not stored, on ``backend`` (see :func:`joint_nulls`); the
+    Numba backend samples a chunk of many signatures per launch.
     """
     thr = tie_thresholds(scores)
     sig_ix = np.asarray(sig_ix, dtype=np.int64)
@@ -538,14 +546,22 @@ def joint_pvalues(
     order = np.argsort(sig_ix, kind="stable")
     ptr = np.searchsorted(sig_ix[order], np.arange(len(signatures) + 1))
     counts = np.zeros(len(thr), dtype=np.int64)
-    sigs = range(len(signatures))
-    for s in progress(sigs, len(sigs), progress_bar, "joint mAP null"):
-        groups = order[ptr[s] : ptr[s + 1]]
-        if not len(groups):
-            continue
-        for c, size in chunks(null_size, _CHUNK):
-            null = np.sort(joint_nulls(plan, size, c, slice(s, s + 1), backend)[0])
-            counts[groups] += size - np.searchsorted(null, thr[groups], side="left")
+    used = np.flatnonzero(np.diff(ptr) > 0)
+    # NumPy samples one signature at a time whatever the batch.
+    batch = 1
+    if backend == "numba":
+        batch = max(1, _BATCH_BYTES // (8 * min(null_size, _CHUNK)))
+    work = [
+        (c, size, used[b : b + batch])
+        for c, size in chunks(null_size, _CHUNK)
+        for b in range(0, len(used), batch)
+    ]
+    for c, size, sigs in progress(work, len(work), progress_bar, "joint mAP null"):
+        null = _joint_nulls(plan, size, c, sigs, backend)
+        null.sort(axis=1)
+        for r, s in enumerate(sigs):
+            groups = order[ptr[s] : ptr[s + 1]]
+            counts[groups] += size - np.searchsorted(null[r], thr[groups], side="left")
     return (counts + 1) / (null_size + 1)
 
 

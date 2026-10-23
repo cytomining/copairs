@@ -147,6 +147,38 @@ def test_numba_pvalues_match_numpy():
     np.testing.assert_array_equal(got["numpy"], (hits + 1) / 501)
 
 
+@pytest.mark.parametrize("batch_bytes", [8 * 200 * 2, 8 * 200 * 5, 2**26])
+def test_numba_samples_batches_of_signatures(batch_bytes, monkeypatch):
+    """Numba samples a chunk of a batch of used signatures per launch.
+
+    Batches of 2, 5 or all 11 used signatures (signature 0 has no group)
+    over 3 chunks give the NumPy backend's p-values.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    sigs = random_signatures(np.random.default_rng(8), 12)
+    sig_ix = np.repeat(np.arange(1, len(sigs)), 2)
+    scores = np.random.default_rng(2).random(len(sig_ix)) / 2
+    expected = joint.joint_pvalues(scores, sig_ix, sigs, 500, 4, backend="numpy")
+    launches = []
+    kernel = _numba.joint_nulls
+
+    def recorded(*args):
+        launches.append(args[-3].tolist())  # the signatures
+        kernel(*args)
+
+    monkeypatch.setattr(_numba, "joint_nulls", recorded)
+    monkeypatch.setattr(joint, "_CHUNK", 200)  # chunks of 200, 200 and 100
+    monkeypatch.setattr(joint, "_BATCH_BYTES", batch_bytes)
+    got = joint.joint_pvalues(scores, sig_ix, sigs, 500, 4, backend="numba")
+    np.testing.assert_array_equal(got, expected)
+    batch = batch_bytes // (8 * 200)
+    used = list(range(1, len(sigs)))
+    batches = [used[b : b + batch] for b in range(0, len(used), batch)]
+    assert launches == batches * 3
+
+
 @pytest.mark.parametrize(
     "rows", [slice(None, None, 2), slice(None, None, -1), slice(5, 1, -2), slice(1, 3)]
 )

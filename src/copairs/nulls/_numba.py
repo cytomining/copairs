@@ -203,21 +203,22 @@ def joint_nulls(
     mem_ptr, num_pos, num_neg, edge_ptr, inc_ptr, inc_edge, k0, k1, sigs, start, out
 ):
     """Fill ``out[r, t]`` with joint sample ``start + t`` of signature ``sigs[r]``."""
+    max_edge = max(1, int(np.diff(edge_ptr).max(initial=0)))  # scratch sizes
+    max_pos = max(1, int(num_pos.max(initial=0)))
     _launch(
         _joint_nulls,
         mem_ptr, num_pos, num_neg, edge_ptr, inc_ptr, inc_edge, k0, k1, sigs, start,
-        out,
+        out, max_edge, max_pos,
     )  # fmt: skip
 
 
 @numba.njit(parallel=True, cache=True)
 def _joint_nulls(
-    mem_ptr, num_pos, num_neg, edge_ptr, inc_ptr, inc_edge, k0, k1, sigs, start, out
-):
+    mem_ptr, num_pos, num_neg, edge_ptr, inc_ptr, inc_edge, k0, k1, sigs, start, out,
+    max_edge, max_pos,
+):  # fmt: skip
     n_sig, size = out.shape
     n_tasks = (size + _JOINT_TASK - 1) // _JOINT_TASK
-    max_edge = max(1, np.max(np.diff(edge_ptr)))
-    max_pos = max(1, np.max(num_pos))
     for flat in numba.prange(n_sig * n_tasks):
         r = flat // n_tasks
         t0 = (flat - r * n_tasks) * _JOINT_TASK
