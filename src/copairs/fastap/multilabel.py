@@ -244,6 +244,8 @@ def multilabel_ap(pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, n):
     end_label = np.repeat(label, 2)
     end_keys = np.repeat(rank_keys(pos_sims), 2)
     row_key = end_label * n + ends
+    # One argsort of packed (row, key) words: 0.9 ms instead of lexsort's 7.1 ms
+    # on 78k positive ends (2000 profiles, pr4_bench multi), 11 vs 103 ms at 10x.
     if len(row_key) == 0 or row_key.max() < 2**32:
         order = np.argsort((row_key.astype(np.uint64) << 32) | sortable_keys(end_keys))
     else:
