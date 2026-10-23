@@ -53,6 +53,11 @@ _INSERTION = 128
 # Reference profiles per group pool; a pool keeps its key matrix and each
 # reference's sorted keys, about 2 * MAX_POOL**2 float32 (2 GiB).
 MAX_POOL = 2**14
+# Estimated bytes of the pools alive at once (:func:`_pool_bytes`): threads
+# wait to build a pool until it fits beside the others, so concurrent pools
+# hold at most this much, or one pool if it alone is larger (MAX_POOL
+# references take about 2 GiB unranked).
+POOL_BUDGET = 2**32
 # Pairs per similarity call (and per sorted chunk) while building a pool.
 _PAIR_CHUNK = 2**20
 # Pools up to this size also store each reference's rank of every pool
@@ -830,11 +835,23 @@ def permutation_null(
     return count, identity, pool
 
 
+def _pool_bytes(blocks):
+    """Estimated bytes of the ``_Pool`` of ``blocks``: its key and rank tables."""
+    r = sum(len(b) for b in blocks)
+    rows = sum(len(b) * max(len(b) - 1, 0) for b in blocks)  # sorted rows
+    ranked = 8 * rows + 4 * r * r if r <= RANK_POOL else 0  # words, rank table
+    return 4 * r * r + 4 * rows + ranked
+
+
 class _SharedPools:
     """The pools of a set of groups, each built once and freed after its last group.
 
     Groups ranking the same references share one read-only pool, so threads
-    can run them concurrently.
+    can run them concurrently. A pool is built only when its estimated
+    bytes fit in ``POOL_BUDGET`` beside the pools alive (or none is alive);
+    until then its thread waits for other pools to be freed. Groups must be
+    visited pool by pool: a waiting thread then holds no pool, and every
+    alive pool's remaining groups have started, so its pools are freed.
     """
 
     def __init__(self, layouts, similarity):
@@ -842,8 +859,12 @@ class _SharedPools:
         self.key = [tuple(b.tobytes() for b in layout[2]) for layout in layouts]
         self.left = Counter(self.key)
         self.pools = {}
+        self.bytes = {}
         self.building = {}
         self.lock = threading.Lock()
+        self.freed = threading.Condition(self.lock)
+        self.budget = POOL_BUDGET
+        self.used = 0
 
     def acquire(self, g, blocks):
         """Return group ``g``'s pool (its ``blocks``' references), building it once."""
@@ -852,17 +873,36 @@ class _SharedPools:
             building = self.building.setdefault(key, threading.Lock())
         with building:
             if key not in self.pools:
-                self.pools[key] = _Pool(blocks, self.similarity)
+                need = _pool_bytes(blocks)
+                with self.freed:
+                    while self.used and self.used + need > self.budget:
+                        self.freed.wait()
+                    self.used += need
+                try:
+                    pool = _Pool(blocks, self.similarity)
+                except BaseException:
+                    self._free(need)
+                    raise
+                with self.lock:
+                    self.pools[key], self.bytes[key] = pool, need
             return self.pools[key]
+
+    def _free(self, size):
+        with self.freed:
+            self.used -= size
+            self.freed.notify_all()
 
     def release(self, g):
         """Free group ``g``'s pool if no other group needs it."""
         key = self.key[g]
         with self.lock:
             self.left[key] -= 1
-            if not self.left[key]:
-                self.pools.pop(key, None)
-                self.building.pop(key, None)
+            if self.left[key]:
+                return
+            self.pools.pop(key, None)
+            self.building.pop(key, None)
+            size = self.bytes.pop(key, 0)
+        self._free(size)
 
 
 def permutation_pvalues(
@@ -899,7 +939,9 @@ def permutation_pvalues(
     max_workers : int, optional
         Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s).
         Each group's p-value depends only on its own draws, so results do not
-        depend on it.
+        depend on it. The pools they build at once hold at most
+        ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or one
+        pool if it alone is larger.
     pos_diffby : np.ndarray, optional
         ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
         columns, indexed like the pairs; layouts whose draws could break

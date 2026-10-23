@@ -1,8 +1,10 @@
 """Tests for the label-permutation mAP null (copairs.nulls.permutation)."""
 
 import json
+import time
 import pickle
 import itertools
+import threading
 
 import numpy as np
 import pandas as pd
@@ -444,8 +446,8 @@ def test_interleaved_pools_are_built_once(monkeypatch):
     assert p.tolist() == alone
 
 
-def test_pvalues_do_not_depend_on_workers(monkeypatch):
-    """Groups sharing pools give the same p-values on 1 or 4 threads, or alone."""
+def shared_pool_aps():
+    """APs of 6 groups on 3 plates, two per pool, without the controls."""
     rows = []
     for p in range(3):
         rows += [(f"c{p}_{i}", p) for i in range(6)]
@@ -459,7 +461,44 @@ def test_pvalues_do_not_depend_on_workers(monkeypatch):
         neg_diffby=["g", "ref"],
     )  # fmt: skip
     ap = average_precision(meta, feats, progress_bar=False, **spec)
-    ap = ap[ap["ref"] < 0]
+    return ap[ap["ref"] < 0]
+
+
+def test_pool_memory_is_bounded(monkeypatch):
+    """Under POOL_BUDGET, threads wait to build a pool until others are freed."""
+    ap = shared_pool_aps()
+    args = (["g"], 300, 0.05, 0)
+    expected = mean_average_precision(ap, *args, progress_bar=False, max_workers=1)
+    lock, alive, peak = threading.Lock(), [0], [0]
+
+    class SlowPool(permutation._Pool):
+        def __init__(self, blocks, similarity):
+            with lock:
+                alive[0] += 1
+                peak[0] = max(peak[0], alive[0])
+            time.sleep(0.2)  # let other threads reach their pools
+            super().__init__(blocks, similarity)
+
+    release = permutation._SharedPools.release
+
+    def counted_release(self, g):
+        held = self.key[g] in self.pools
+        release(self, g)
+        if held and self.key[g] not in self.pools:
+            with lock:
+                alive[0] -= 1
+
+    monkeypatch.setattr(permutation, "_Pool", SlowPool)
+    monkeypatch.setattr(permutation._SharedPools, "release", counted_release)
+    monkeypatch.setattr(permutation, "POOL_BUDGET", 1, raising=False)
+    got = mean_average_precision(ap, *args, progress_bar=False, max_workers=4)
+    assert peak[0] == 1 and alive[0] == 0  # one pool at a time, all freed
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+
+
+def test_pvalues_do_not_depend_on_workers(monkeypatch):
+    """Groups sharing pools give the same p-values on 1 or 4 threads, or alone."""
+    ap = shared_pool_aps()
     args = (["g"], 300, 0.05, 0)
     built, workers = [], []
 
