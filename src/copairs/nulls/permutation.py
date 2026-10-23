@@ -463,7 +463,8 @@ class _Layout:
         self.identity = np.arange(n)  # the observed labels' codes
         self.pool = pool
         self.slot_block = block_of
-        self.bm_slot, self.bm_ptr = _segments(block_of, len(pool.blocks))
+        n_block = len(pool.blocks)
+        self.bm_slot, self.bm_ptr = _segments(block_of, n_block)
         self.adjm = adjm = _adjacency_matrix(n, edges)
         self.deg = adjm.sum(axis=1).astype(np.int64)
         targets = np.concatenate([members, pool.refs])
