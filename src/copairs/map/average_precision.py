@@ -129,11 +129,16 @@ class RankPairs:
     similarity : callable
         ``pairs -> similarities`` (NumPy), the function the APs were computed
         with.
+    pos_diffby : np.ndarray or None
+        ``(profiles, columns)`` integer codes of the ``pos_diffby`` columns of
+        each row, which the permutation null checks its draws keep; None
+        when there are none (or unknown, then unchecked).
     """
 
     pos: np.ndarray
     neg: np.ndarray
     similarity: Callable[[np.ndarray], np.ndarray]
+    pos_diffby: np.ndarray | None = None
 
 
 def build_rank_lists(
@@ -370,8 +375,14 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
+    diffby = [pos_diffby] if isinstance(pos_diffby, str) else list(pos_diffby)
     pairs = RankPairs(
-        pos_pairs, neg_pairs, _FeatureSimilarity(feats, distance, batch_size)
+        pos_pairs,
+        neg_pairs,
+        _FeatureSimilarity(feats, distance, batch_size),
+        np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
+        if diffby
+        else None,
     )
     attach_pairs(meta, pairs)
     return (meta, pairs) if return_pairs else meta

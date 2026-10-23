@@ -711,6 +711,92 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     return layouts
 
 
+def check_pos_diffby(layouts, codes):
+    """Raise unless relabelling keeps each group's positive pairs under ``pos_diffby``.
+
+    ``codes[p, c]`` is profile ``p``'s value code in the APs' ``pos_diffby``
+    column ``c``; two profiles are positives only if they differ in every
+    column. A draw puts profiles of a block's pool (its members and
+    references) into the block's slots, so the pairs it keeps are the
+    group's only when, for each pair of slots, whether two drawn profiles
+    differ is fixed by their blocks. Per column that holds within a block
+    whose pool has one value (never differ) or no repeated value (always
+    differ), and across two blocks whose pools have one value each or share
+    none. A column whose profiles never differ for a pair of blocks fixes
+    the pair (never positive) whatever the other columns. Layouts outside
+    these rules raise, so this check is sufficient, not necessary.
+    """
+    codes = np.asarray(codes, dtype=np.int64)
+    n_col = codes.shape[1]
+    ref_uniq = {}
+
+    def refs_stats(refs):  # per column: sorted values, any repeated
+        key = id(refs)
+        if key not in ref_uniq:
+            ref_uniq[key] = (refs, [np.unique(codes[refs, c]) for c in range(n_col)])
+        return ref_uniq[key][1]
+
+    def contains(sorted_vals, x):
+        i = np.minimum(np.searchsorted(sorted_vals, x), max(len(sorted_vals) - 1, 0))
+        return len(sorted_vals) > 0 and bool((sorted_vals[i] == x).any())
+
+    bad = []
+    for g, (members, _, blocks, block_of) in enumerate(layouts):
+        stats = []  # per block, per column: (its one value or None, no repeats,
+        # member values, sorted reference values)
+        for b, refs in enumerate(blocks):
+            mine = codes[members[block_of == b]]
+            col = []
+            for c, u in enumerate(refs_stats(refs)):
+                m = mine[:, c]
+                one = len(u) <= 1 and (m == (u[0] if len(u) else m[0])).all()
+                distinct = (
+                    len(u) == len(refs)
+                    and len(np.unique(m)) == len(m)
+                    and not contains(u, m)
+                )
+                col.append((m[0] if one else None, distinct, m, u))
+            stats.append(col)
+        sizes = np.bincount(block_of, minlength=len(blocks))
+        ok = True
+        for b in range(len(blocks)):
+            for d in range(b, len(blocks)):
+                if b == d and sizes[b] < 2:
+                    continue
+                fixed = []
+                for c in range(n_col):
+                    vb, db, mb, ub = stats[b][c]
+                    vd, dd, md, ud = stats[d][c]
+                    if b == d:
+                        rel = False if vb is not None else (True if db else None)
+                    elif vb is not None and vd is not None:
+                        rel = bool(vb != vd)
+                    elif not (
+                        np.intersect1d(ub, ud).size
+                        or contains(ud, mb)
+                        or contains(ub, md)
+                        or np.isin(mb, md).any()
+                    ):
+                        rel = True
+                    else:
+                        rel = None
+                    fixed.append(rel)
+                ok &= False in fixed or all(fixed)
+        if not ok:
+            bad.append(g)
+    if bad:
+        raise ValueError(
+            f"{len(bad)} group(s) (e.g. group {bad[0]}) rank references whose "
+            "pos_diffby values do not fix which relabelled profiles are "
+            "positives: a draw could pair profiles that share a pos_diffby "
+            "value, or split profiles that do not, unlike the group's "
+            "members. The permutation null keeps the members' positive "
+            "pairs, so it would test the wrong rule. Block references by "
+            "those columns (e.g. neg_sameby), or pass null='joint' or "
+            "null='copied'"
+        )
+
+
 def group_key(seed: int, members) -> tuple[np.uint64, np.uint64]:
     """Philox key of a group's draws: a pure function of ``(seed, members)``."""
     return stream_key(seed, tuple(sorted(int(m) for m in members)))
@@ -782,6 +868,7 @@ class _SharedPools:
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
     null_size, seed, observed=None, progress_bar=False, max_workers=None,
+    pos_diffby=None,
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
 
@@ -813,6 +900,10 @@ def permutation_pvalues(
         Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s).
         Each group's p-value depends only on its own draws, so results do not
         depend on it.
+    pos_diffby : np.ndarray, optional
+        ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
+        columns, indexed like the pairs; layouts whose draws could break
+        that rule raise (:func:`check_pos_diffby`). Not checked when omitted.
 
     Returns
     -------
@@ -826,6 +917,8 @@ def permutation_pvalues(
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
     layouts = group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs)
+    if pos_diffby is not None and np.shape(pos_diffby)[1]:
+        check_pos_diffby(layouts, pos_diffby)
     pools = _SharedPools(layouts, similarity)
 
     def pvalue(g):

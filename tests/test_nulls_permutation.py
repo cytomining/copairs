@@ -346,6 +346,34 @@ def test_rejects_batch_dependent_metrics(distance):
         assert len(mean_average_precision(ap, *args, progress_bar=False, null=null))
 
 
+def test_rejects_pools_that_break_pos_diffby():
+    """Relabelling must keep pos_diffby's pairs; pools that could break them raise."""
+    meta = pd.DataFrame(
+        {"g": ["q"] * 3 + ["c0", "c1"], "plate": ["A", "B", "C", "A", "A"]}
+    )
+    feats = np.random.default_rng(5).standard_normal((len(meta), 4))
+    spec = dict(SPEC, pos_diffby=["plate"])
+    ap = average_precision(meta, feats, progress_bar=False, **spec)
+    args = (["g"], 100, 0.05, 0)
+    with pytest.raises(ValueError, match="pos_diffby.*null='joint'"):
+        mean_average_precision(ap, *args, progress_bar=False)
+    assert len(mean_average_precision(ap, *args, progress_bar=False, null="joint"))
+    # One plate value per block, or a distinct value per profile, keeps the rules.
+    distinct = meta.assign(plate=list("ABCDE"), well=range(5))
+    cases = [(distinct, d) for d in (["plate"], ["plate", "well"], ["well"])]
+    cases.append((meta.assign(plate="A", well=range(5)), ["well"]))
+    plates, reps, ctrls, blocked = LAYOUTS[LAYOUT_IDS.index("plate-blocks-diffby")]
+    frame = layout_meta(plates, reps, ctrls)  # each plate a block
+    x = np.random.default_rng(6).standard_normal((len(frame), 4))
+    ap = average_precision(frame, x, progress_bar=False, **blocked)
+    assert len(mean_average_precision(ap, *args, progress_bar=False))
+    for frame, diffby in cases:
+        ap = average_precision(
+            frame, feats, progress_bar=False, **dict(SPEC, pos_diffby=diffby)
+        )
+        assert len(mean_average_precision(ap, *args, progress_bar=False))
+
+
 def test_group_without_references():
     """Members with positives but no negatives have one relabelling: p = 1."""
     meta = pd.DataFrame(

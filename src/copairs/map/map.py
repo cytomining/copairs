@@ -203,6 +203,7 @@ def get_map_pvalue(
             observed=scores,
             progress_bar=progress_bar,
             max_workers=max_workers,
+            pos_diffby=pairs.pos_diffby,
         )
         return map_scores
 

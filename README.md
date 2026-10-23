@@ -84,6 +84,9 @@ perfect retrieval) counts the atom.
   `"copied"` for them. The null recomputes similarities from the features,
   so distances that estimate their scale from each batch of pairs
   (`seuclidean`, `mahalanobis`) raise under it; use `"joint"` or `"copied"`.
+  Relabelled profiles keep the group's positive pairs, so with `pos_diffby`
+  the references must not change them (e.g. one plate per block of
+  references when `pos_diffby=["plate"]`); layouts where they could raise.
 
   Its smallest p-value is about one over the number of distinct
   relabellings, e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one
