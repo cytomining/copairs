@@ -62,11 +62,11 @@ def get_map_pvalue(
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
-        The `(n_pairs, 2)` positive pairs (row indices of `ap_scores`) used to
-        compute the AP scores, as returned by
-        `find_pairs(meta, sameby=pos_sameby, diffby=pos_diffby)` on the `meta`
-        given to `average_precision`; `ap_scores` must keep the index that
-        `average_precision` returned. When omitted, each group's positives are
+        The `(n_pairs, 2)` positive pairs used to compute the AP scores,
+        indexing the rows of the frame `average_precision` returned (its
+        `return_pairs=True` gives them, as `pairs.pos`); `ap_scores` must keep
+        that frame's index. Pairs whose counts disagree with `n_pos_pairs`
+        raise. When omitted, each group's positives are
         assumed to be its other members, which is the replicate-retrieval case
         (`n_pos_pairs == len(group) - 1`), and a group of one profile gets
         that profile's AP null. Other groups fall back to the copied null with
@@ -188,8 +188,19 @@ def _group_edges(groups, num_pos, profile, pos_pairs):
             else None
             for ix in groups
         ]
-    pos_pairs = np.asarray(pos_pairs)
-    group_of = np.full(int(max(pos_pairs.max(), profile.max())) + 1, -1)
+    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
+    size = int(max(pos_pairs.max(initial=-1), profile.max(initial=-1))) + 1
+    degree = np.bincount(pos_pairs.ravel(), minlength=size)
+    wrong = np.flatnonzero(degree[profile] != num_pos)
+    if len(wrong):
+        m = profile[wrong[0]]
+        raise ValueError(
+            f"profile {m} has {degree[m]} positive pairs in pos_pairs but "
+            f"{num_pos[wrong[0]]} in ap_scores; pos_pairs must index the rows of "
+            "the frame average_precision returned, as "
+            "average_precision(..., return_pairs=True) gives them"
+        )
+    group_of = np.full(size, -1)
     local = np.empty_like(group_of)
     for g, ix in enumerate(groups):
         group_of[profile[ix]] = g

@@ -492,3 +492,30 @@ def test_ap_frames_carry_their_pairs():
     np.testing.assert_array_equal(
         pairs.similarity(pairs.neg), similarity(feats, pairs.neg, 20000)
     )
+
+
+def test_map_pvalue_rejects_misaligned_pos_pairs():
+    """pos_pairs from a meta whose index has gaps no longer index ap_scores."""
+    from copairs.map import get_map_pvalue
+    from copairs.matching import find_pairs
+
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
+    meta = meta.drop(index=[1, 7, 20])  # filtered by the user: index 0, 2, 3, 4, ...
+    feats = rng.standard_normal((len(meta), 10))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    kwargs = dict(progress_bar=False, null="joint")
+    inferred = get_map_pvalue(ap, ["g"], 2000, SEED, **kwargs)
+    explicit = get_map_pvalue(ap, ["g"], 2000, SEED, pairs=pairs, **kwargs)
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    with pytest.raises(ValueError, match="pos_pairs must index"):
+        get_map_pvalue(
+            ap,
+            ["g"],
+            2000,
+            SEED,
+            pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+            **kwargs,
+        )
