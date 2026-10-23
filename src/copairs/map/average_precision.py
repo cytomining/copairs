@@ -64,16 +64,42 @@ def attached_pairs(frame: pd.DataFrame):
     return handle.pairs if isinstance(handle, _AttachedPairs) else None
 
 
+# SciPy metrics whose cdist estimates a scale (variances, covariance) from
+# each batch of pairs, so a pair's similarity depends on the batch it is in.
+BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
+
+
 class _FeatureSimilarity:
     """``pairs -> similarities`` of an AP call's features, as its AP stage computed them."""
 
     def __init__(self, feats, distance, batch_size):
         self.feats = feats
+        self.distance = distance
         self.batch_size = batch_size
         self._fn = compute.get_similarity_fn(distance, progress_bar=False)
 
     def __call__(self, pairs):
         return self._fn(self.feats, np.asarray(pairs), self.batch_size)
+
+
+def check_recomputable(similarity) -> None:
+    """Raise if ``similarity`` cannot recompute its AP stage's similarities.
+
+    The permutation null ranks profiles by similarities it recomputes in its
+    own batches of pairs; a metric that estimates its scale from each batch
+    gives other values there than in the AP stage.
+    """
+    if (
+        isinstance(similarity, _FeatureSimilarity)
+        and isinstance(similarity.distance, str)
+        and similarity.distance in BATCH_DEPENDENT_METRICS
+    ):
+        raise ValueError(
+            f"distance={similarity.distance!r} estimates its scale from each "
+            "batch of pairs, so the permutation null cannot recompute the "
+            "similarities the APs were ranked by. Pass null='joint' or "
+            "null='copied', which use the APs as computed."
+        )
 
 
 @dataclass(frozen=True, eq=False)

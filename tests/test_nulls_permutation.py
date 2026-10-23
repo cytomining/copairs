@@ -330,6 +330,22 @@ def test_dropped_members_say_why_and_what_to_do():
     assert len(mean_average_precision(kept, *args, progress_bar=False))
 
 
+@pytest.mark.parametrize("distance", ["seuclidean", "mahalanobis"])
+def test_rejects_batch_dependent_metrics(distance):
+    """Metrics that fit their scale to each batch cannot be recomputed per pool."""
+    meta = pd.DataFrame({"g": ["q", "q", "c0", "c1"]})
+    feats = np.array([[0.0], [1.0], [10.0], [1000.0]])
+    spec = dict(SPEC, distance=distance)
+    ap = average_precision(meta, feats, progress_bar=False, **spec)
+    args = (["g"], 100, 0.05, 0)
+    with pytest.raises(
+        ValueError, match=f"distance='{distance}'.*each batch.*null='joint'"
+    ):
+        mean_average_precision(ap, *args, progress_bar=False)
+    for null in ("joint", "copied"):
+        assert len(mean_average_precision(ap, *args, progress_bar=False, null=null))
+
+
 def test_group_without_references():
     """Members with positives but no negatives have one relabelling: p = 1."""
     meta = pd.DataFrame(

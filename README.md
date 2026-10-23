@@ -81,7 +81,9 @@ perfect retrieval) counts the atom.
   e.g. 800 MB for 10^8 negative pairs), whichever null is used;
   `ap.attrs.pop("copairs_pairs")` drops them. Frames from
   `map.multilabel.average_precision` carry no pairs: use `"joint"` or
-  `"copied"` for them.
+  `"copied"` for them. The null recomputes similarities from the features,
+  so distances that estimate their scale from each batch of pairs
+  (`seuclidean`, `mahalanobis`) raise under it; use `"joint"` or `"copied"`.
 
   Its smallest p-value is about one over the number of distinct
   relabellings, e.g. C(14, 2) = 91 for 2 replicates among 12 controls on one

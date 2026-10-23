@@ -18,7 +18,11 @@ from copairs.map.hierarchical_fdr import (
     check_hierarchical_by,
     apply_hierarchical_fdr_correction,
 )
-from copairs.map.average_precision import RankPairs, attached_pairs
+from copairs.map.average_precision import (
+    RankPairs,
+    attached_pairs,
+    check_recomputable,
+)
 
 logger = logging.getLogger("copairs")
 
@@ -84,7 +88,9 @@ def get_map_pvalue(
         group's positives must be its other members (for groups of one
         profile with positives in other groups, use ``"joint"``: there it is
         that profile's AP null), and its smallest p-value is about one over
-        its number of distinct relabellings. ``"joint"`` samples
+        its number of distinct relabellings. It recomputes similarities, so
+        APs computed with a distance that estimates its scale per batch
+        (``"seuclidean"``, ``"mahalanobis"``) raise. ``"joint"`` samples
         the members' APs together (`copairs.nulls.joint`): a positive pair
         inside the group is one random number in both members' rank lists,
         and other similarities are independent, which real profiles are not
@@ -134,6 +140,8 @@ def get_map_pvalue(
             "support. Recompute the APs, pass pairs=, or choose null='joint' "
             "or null='copied'."
         )
+    if null == "permutation":
+        check_recomputable(pairs.similarity)
 
     if null == "permutation" or pos_pairs is not None:
         _check_row_index(ap_scores.index)
