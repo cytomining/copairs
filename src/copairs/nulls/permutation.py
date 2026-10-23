@@ -1033,8 +1033,8 @@ def permutation_pvalues(
     progress_bar : bool
         Whether to show a progress bar over groups.
     max_workers : int, optional
-        Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s
-        over the CPUs this process may run on).
+        Threads that run groups concurrently (default: the CPUs this process
+        may run on, at most 32).
         Each group's p-value depends only on its own draws, so results do not
         depend on it. The pools they build at once hold at most
         ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or one
@@ -1066,8 +1066,8 @@ def permutation_pvalues(
     if pos_diffby is not None and np.shape(pos_diffby)[1]:
         check_pos_diffby(layouts, pos_diffby)
 
-    # ThreadPoolExecutor's default, over the CPUs this process may run on.
-    workers = min(32, _numpy_workers() + 4) if max_workers is None else max_workers
+    # A thread per CPU; at most 32, since each holds a chunk's draws.
+    workers = min(32, _numpy_workers()) if max_workers is None else max_workers
     # Groups' draws run on their pool threads when those keep Numba's threads
     # busy, else on Numba's threads.
     parallel = backend == "numba" and (

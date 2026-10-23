@@ -65,15 +65,14 @@ def get_map_pvalue(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Threads that run the permutation null's groups (default defined by
-        `concurrent.futures.ThreadPoolExecutor`), compute the legacy copied
-        null's p-values (default defined by tqdm's `thread_map`), or run the
-        fast copied null's NumPy backend (default: the CPUs this process may
-        run on). The Numba backend's kernels run on Numba's threads, set by
-        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``, except that the
-        permutation null runs each group's draws on its ``max_workers``
-        thread when those threads run as many groups at once as Numba has
-        threads. P-values do not depend on the threads.
+        Threads that run the permutation null's groups or the fast copied
+        null's NumPy backend (default: the CPUs this process may run on, at
+        most 32 for the permutation null), or that compute the legacy copied
+        null's p-values (default: tqdm's `thread_map`'s). Numba's kernels run
+        on Numba's threads (``NUMBA_NUM_THREADS`` or
+        ``numba.set_num_threads``), except that the permutation null runs a
+        group's draws on its own thread when the threads run as many groups
+        at once as Numba has threads. P-values do not depend on the threads.
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples
         (``method="legacy"`` only).
