@@ -9,6 +9,8 @@ import warnings
 import importlib.util
 from functools import cache
 
+from copairs._backend import import_backend
+
 METHODS = ("fast", "legacy")
 BACKENDS = ("auto", "numba", "numpy")
 
@@ -75,13 +77,4 @@ def resolve_backend(backend: str) -> str:
 
 def _import_numba_backend():
     """Return :mod:`copairs.nulls._numba`, or raise an ImportError naming the extra."""
-    try:
-        from copairs.nulls import _numba
-    except ModuleNotFoundError as exc:
-        if exc.name not in ("numba", "llvmlite"):
-            raise
-        raise ImportError(
-            "backend='numba' requires the optional Numba dependency. "
-            "Install it with `pip install 'copairs[numba]'`."
-        ) from exc
-    return _numba
+    return import_backend("copairs.nulls._numba", "numba")

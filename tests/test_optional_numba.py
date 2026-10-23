@@ -81,6 +81,7 @@ def test_multilabel_matching_skips_scipy():
         "backend='numba')",
         "find_pairs_multilabel(None, ['l'], [], 'l', backend='numba')",
         "normalize_ap(0.5, 3, 10, backend='numba')",
+        "nulls.ap_nulls([[2, 5]], 4, 0, backend='numba')",
     ],
 )
 def test_missing_numba_extra_has_actionable_error(call):
@@ -89,7 +90,8 @@ def test_missing_numba_extra_has_actionable_error(call):
         BLOCK_NUMBA.format(
             error="ModuleNotFoundError(\"No module named 'numba'\", name='numba')"
         )
-        + "from copairs.map import average_precision, multilabel\n"
+        + "from copairs import nulls\n"
+        "from copairs.map import average_precision, multilabel\n"
         "from copairs.matching import find_pairs_multilabel\n"
         "from copairs.map.normalization import normalize_ap\n"
         "try:\n"
@@ -110,12 +112,24 @@ def test_missing_numba_extra_has_actionable_error(call):
     ],
     ids=["transitive_missing_module", "incompatible_build"],
 )
-def test_numba_import_failure_is_not_masked(error):
-    """A broken or incompatible Numba installation keeps its original error."""
+@pytest.mark.parametrize(
+    "call",
+    [
+        "average_precision(None, None, [], [], [], [], backend='numba')",
+        "nulls.ap_nulls([[2, 5]], 4, 0, backend='numba')",
+    ],
+    ids=["ap_stage", "nulls"],
+)
+def test_numba_import_failure_is_not_masked(error, call):
+    """A broken or incompatible Numba installation keeps its original error.
+
+    The AP stage and the nulls share one import rule.
+    """
     result = run_isolated(
-        BLOCK_NUMBA.format(error=error) + "from copairs.map import average_precision\n"
+        BLOCK_NUMBA.format(error=error) + "from copairs import nulls\n"
+        "from copairs.map import average_precision\n"
         "try:\n"
-        "    average_precision(None, None, [], [], [], [], backend='numba')\n"
+        f"    {call}\n"
         "except ImportError as exc:\n"
         f"    expected = {error}\n"
         "    assert type(exc) is type(expected), exc\n"
