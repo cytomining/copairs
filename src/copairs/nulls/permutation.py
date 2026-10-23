@@ -19,7 +19,9 @@ Draw ``j`` is defined by the scalar functions :func:`_make_kernels` builds:
 ``draw`` places pool profiles in the group's slots and ``group_map``
 recomputes the group's mAP from integer rank codes, with IEEE divisions and
 additions in a fixed order. :func:`_draws_np` and :func:`_group_maps_np`
-perform the same operations vectorized over draws and give identical mAPs.
+perform the same operations vectorized over draws (``backend="numpy"``), and
+:mod:`copairs.nulls._numba` runs the scalar functions compiled by Numba
+(``backend="numba"``); both give identical mAPs (tested).
 """
 
 import threading
@@ -47,6 +49,7 @@ from copairs.nulls.philox import (
     uniform_pair,
     make_uniform_pair,
 )
+from copairs.nulls.backend import resolve_backend, _import_numba_backend
 
 # A slot sorts up to this many drawn profiles by insertion, more by quicksort.
 _INSERTION = 128
@@ -69,6 +72,8 @@ RANK_POOL = 2**12
 # Elements of the per-slot arrays of one vectorized chunk of draws.
 _CHUNK_ELEMENTS = 2**22
 _FULL_TABLE = 2**20  # largest (code, code) table a layout gathers from
+# Draws per call of the Numba kernel, which holds only their mAPs.
+_NUMBA_CHUNK = 2**16
 
 # Rank code of a NaN key: after every number.
 _NAN = np.uint32(0xFFFFFFFF)
@@ -862,7 +867,7 @@ def group_key(seed: int, members) -> tuple[np.uint64, np.uint64]:
 
 def permutation_null(
     members, edges, blocks, block_of, similarity, null_size, seed, pool=None,
-    out=None,
+    out=None, backend="auto",
 ):  # fmt: skip
     """Run ``null_size`` label permutations of one group.
 
@@ -870,22 +875,36 @@ def permutation_null(
     the observed labels' (``identity``, within
     :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP,
     and the reference pool, reusable by groups ranking the same references.
-    ``out`` receives the draws' mAPs if given.
+    ``out`` receives the draws' mAPs if given. ``backend`` is ``"auto"``
+    (default), ``"numba"`` or ``"numpy"``; all give identical draws and
+    mAPs, so ``"auto"`` picks Numba whenever it imports
+    (:func:`~copairs.nulls.resolve_backend`).
     """
+    backend = resolve_backend(backend)
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
-    layout = _Layout(members, edges, block_of, similarity, pool, int(null_size))
+    # Only the NumPy path gathers from the table that ``draws`` sizes.
+    draws = int(null_size) if backend == "numpy" else 0
+    layout = _Layout(members, edges, block_of, similarity, pool, draws)
     k0, k1 = group_key(seed, members)
     identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
     thr = float(tie_thresholds(identity))
     count = 0
-    chunk = layout.chunk()
+    if backend == "numba":
+        chunk, kernel = _NUMBA_CHUNK, _import_numba_backend().permutation_maps
+    else:
+        chunk, kernel = layout.chunk(), _permutation_maps_np
     for start, size in chunks(int(null_size), chunk):
-        maps = _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
+        maps = kernel(layout, start, size, k0, k1)
         if out is not None:
             out[start : start + size] = maps
         count += int((maps >= thr).sum())
     return count, identity, pool
+
+
+def _permutation_maps_np(layout, start, size, k0, k1):
+    """float64 mAPs of draws ``start, ..., start + size - 1``, vectorized."""
+    return _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
 
 
 def _pool_bytes(blocks):
@@ -962,7 +981,7 @@ class _SharedPools:
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
     null_size, seed, observed=None, progress_bar=False, max_workers=None,
-    pos_diffby=None,
+    pos_diffby=None, backend="auto",
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
 
@@ -995,11 +1014,16 @@ def permutation_pvalues(
         Each group's p-value depends only on its own draws, so results do not
         depend on it. The pools they build at once hold at most
         ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or one
-        pool if it alone is larger.
+        pool if it alone is larger. Under the Numba backend the threads
+        build groups' pools and layouts, and each group's draws run in one
+        kernel at a time on Numba's threads (``NUMBA_NUM_THREADS``).
     pos_diffby : np.ndarray, optional
         ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
         columns, indexed like the pairs; layouts whose draws could break
         that rule raise (:func:`check_pos_diffby`). Not checked when omitted.
+    backend : str
+        ``"auto"`` (default), ``"numba"`` or ``"numpy"``; see
+        :func:`permutation_null`. P-values do not depend on it.
 
     Returns
     -------
@@ -1008,6 +1032,7 @@ def permutation_pvalues(
     """
     null_size = check_null_size(null_size)
     seed = resolve_seed(seed)
+    backend = resolve_backend(backend)
     profile = np.asarray(profile, dtype=np.int64)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
@@ -1020,7 +1045,7 @@ def permutation_pvalues(
         try:
             pool = pools.acquire(g, layouts[g][2])
             count, identity, _ = permutation_null(
-                *layouts[g], similarity, null_size, seed, pool
+                *layouts[g], similarity, null_size, seed, pool, backend=backend
             )
         finally:
             pools.release(g)

@@ -184,3 +184,60 @@ def test_hierarchical_takes_each_null():
         mean_average_precision_hierarchical(
             ap, sameby, hierarchical_by=["g"], null="exact", **kwargs
         )
+
+
+def plate_aps(groups=12, reps=3, ctrls=15, plates=3, seed=0):
+    """APs of ``groups`` with a replicate on each plate, ranked against its controls."""
+    rows = []
+    for p in range(plates):
+        rows += [(f"q{i}", p) for i in range(groups)] + [("ctrl", p)] * ctrls
+    meta = pd.DataFrame(rows, columns=["g", "plate"])
+    meta["ctrl"] = meta["g"] == "ctrl"
+    meta["ref"] = np.where(meta["ctrl"], np.arange(len(meta)), -1)
+    rng = np.random.default_rng(seed)
+    feats = rng.standard_normal((len(meta), 8))
+    signal = meta["g"].isin([f"q{i}" for i in range(0, groups, 3)]).to_numpy()
+    feats[signal] += 0.8
+    ap = average_precision(
+        meta, feats, ["g", "ref"], [], ["plate"], ["ctrl"], progress_bar=False
+    )
+    return ap[~ap["ctrl"]]
+
+
+@pytest.mark.parametrize("null", NULLS)
+def test_backends_give_identical_pvalues(null):
+    """Each null's mAP p-values are bitwise identical on NumPy and Numba."""
+    pytest.importorskip("numba")
+    ap = plate_aps()
+    kwargs = dict(null_size=3000, threshold=0.05, seed=7, progress_bar=False)
+    got = {
+        b: mean_average_precision(ap, ["g"], null=null, backend=b, **kwargs)
+        for b in ("numpy", "numba")
+    }
+    pd.testing.assert_frame_equal(got["numba"], got["numpy"])
+    assert 0 < got["numpy"]["below_p"].sum() < len(got["numpy"])
+
+
+def test_auto_backend_runs_numba_kernels(monkeypatch):
+    """With Numba importable, backend="auto" runs the joint and permutation kernels."""
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    calls = []
+    for name in ("joint_nulls", "permutation_maps"):
+
+        def spy(*args, _real=getattr(_numba, name), _name=name):
+            calls.append(_name)
+            return _real(*args)
+
+        monkeypatch.setattr(_numba, name, spy)
+    ap = plate_aps(groups=4)
+    kwargs = dict(null_size=500, threshold=0.05, seed=0, progress_bar=False)
+    for null in ("joint", "permutation"):
+        auto = mean_average_precision(ap, ["g"], null=null, **kwargs)
+        numpy = mean_average_precision(ap, ["g"], null=null, backend="numpy", **kwargs)
+        pd.testing.assert_frame_equal(auto, numpy)
+    assert set(calls) == {"joint_nulls", "permutation_maps"}
+    calls.clear()
+    mean_average_precision(ap, ["g"], null="permutation", backend="numpy", **kwargs)
+    assert calls == []

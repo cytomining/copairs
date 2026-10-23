@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from scipy import stats
 
-from copairs import compute
+from copairs import nulls, compute
 from copairs.map import average_precision, mean_average_precision
 from copairs.nulls import permutation, tie_thresholds
 
@@ -23,6 +23,7 @@ LAYOUTS = [
     (3, 3, 20, dict(SPEC, neg_sameby=["plate"])),
 ]
 LAYOUT_IDS = ["one-pool", "plate-blocks", "plate-blocks-diffby", "three-plates"]
+BACKENDS = nulls.available_backends()
 
 
 def layout_meta(plates, reps, ctrls):
@@ -70,12 +71,12 @@ def group_of_q(meta, feats, spec):
     return ap["average_precision"].mean(), layout, pairs
 
 
-def draws_of(meta, feats, spec, null_size, seed=0):
+def draws_of(meta, feats, spec, null_size, seed=0, backend="auto"):
     """Observed mAP and the null's draws for group "q"."""
     observed, layout, pairs = group_of_q(meta, feats, spec)
     out = np.empty(null_size)
     count, identity, _ = permutation.permutation_null(
-        *layout, pairs.similarity, null_size, seed, out=out
+        *layout, pairs.similarity, null_size, seed, out=out, backend=backend
     )
     return observed, identity, count, out
 
@@ -154,6 +155,51 @@ def test_vectorized_matches_scalar_draws(
     assert scalar_identity == pytest.approx(observed, abs=1e-12)
 
 
+@pytest.mark.parametrize("ranked", [True, False], ids=["ranked", "search"])
+@pytest.mark.parametrize("ties", [False, True], ids=["distinct", "tied"])
+@pytest.mark.parametrize("plates, reps, ctrls, spec", LAYOUTS, ids=LAYOUT_IDS)
+def test_numba_matches_numpy_draws(
+    plates, reps, ctrls, spec, ties, ranked, monkeypatch
+):
+    """Numba's draws, mAPs and hits equal NumPy's, bit for bit.
+
+    Pools up to RANK_POOL read rank tables, larger ones search sorted rows.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    if not ranked:
+        monkeypatch.setattr(permutation, "RANK_POOL", 0)
+    meta = layout_meta(plates, reps, ctrls)
+    feats = np.random.default_rng(plates + ctrls).standard_normal((len(meta), 6))
+    if ties:  # rounding ties many similarities and zeroes some profiles (NaN)
+        feats = np.round(feats)
+    _, group, pairs = group_of_q(meta, feats, spec)
+    members, edges, blocks, block_of = group
+    pool = permutation._Pool(blocks, pairs.similarity)
+    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    assert pool.ranked == ranked
+    k0, k1 = permutation.group_key(3, members)
+    start = 2**32 - 50  # draws on both sides of the counter's word boundary
+    pm = permutation._draws_np(layout, start, 300, k0, k1)
+    got = np.empty(layout.n, dtype=np.int64)
+    chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
+    for r in range(len(pm)):
+        _numba._draw_nb(start + r, *layout.draw_args(), k0, k1, got, chosen)
+        np.testing.assert_array_equal(got, pm[r])
+    maps = _numba.permutation_maps(layout, start, 300, k0, k1)
+    np.testing.assert_array_equal(maps, permutation._group_maps_np(layout, pm))
+    out = {b: np.empty(2000) for b in ("numpy", "numba")}
+    runs = {
+        b: permutation.permutation_null(
+            *group, pairs.similarity, 2000, 3, pool, out=out[b], backend=b
+        )[:2]
+        for b in out
+    }
+    assert runs["numba"] == runs["numpy"]  # hits and identity
+    np.testing.assert_array_equal(out["numba"], out["numpy"])
+
+
 def scalar_identity_map(layout, pm):
     """MAP of the observed labels from the scalar function."""
     return permutation._group_map(pm, *layout.map_args(), *map_scratch(layout.n))
@@ -175,16 +221,18 @@ def test_hits_match_scalar_draws():
     assert 0 < count < 700
 
 
-def test_draws_do_not_depend_on_chunks(monkeypatch):
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_draws_do_not_depend_on_chunks(backend, monkeypatch):
     """Draw j is the same whatever the chunk sizes of draws and pool tables."""
     meta = layout_meta(2, 2, 6)
     feats = np.random.default_rng(22).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
-    full = draws_of(meta, feats, spec, 1000)
+    full = draws_of(meta, feats, spec, 1000, backend=backend)
     monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 77)
+    monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)
     monkeypatch.setattr(permutation, "_PAIR_CHUNK", 7)
     monkeypatch.setattr(permutation, "_CHUNK_ELEMENTS", 5)
-    chunked = draws_of(meta, feats, spec, 1000)
+    chunked = draws_of(meta, feats, spec, 1000, backend=backend)
     assert full[1:3] == chunked[1:3]
     np.testing.assert_array_equal(full[3], chunked[3])
 
@@ -535,8 +583,12 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
     )
 
 
-def test_pvalues_do_not_depend_on_workers(monkeypatch):
-    """Groups sharing pools give the same p-values on 1 or 4 threads, or alone."""
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
+    """Groups sharing pools give the same p-values on 1 or 4 threads, or alone.
+
+    Under the Numba backend the threads launch its kernel concurrently.
+    """
     ap = shared_pool_aps()
     args = (["g"], 300, 0.05, 0)
     built, workers = [], []
@@ -554,17 +606,17 @@ def test_pvalues_do_not_depend_on_workers(monkeypatch):
     monkeypatch.setattr(permutation, "_Pool", CountedPool)
     monkeypatch.setattr(permutation, "ThreadPoolExecutor", RecordedExecutor)
     p = [
-        mean_average_precision(ap, *args, progress_bar=False, max_workers=w)[
-            "p_value"
-        ].tolist()
+        mean_average_precision(
+            ap, *args, progress_bar=False, max_workers=w, backend=backend
+        )["p_value"].tolist()
         for w in (1, 4)
     ]
     assert built == [2] * 6  # each run builds each of the 3 pools once
     assert workers == [1, 4]
     alone = [
-        mean_average_precision(ap[ap["g"] == g], *args, progress_bar=False)[
-            "p_value"
-        ].item()
+        mean_average_precision(
+            ap[ap["g"] == g], *args, progress_bar=False, backend=backend
+        )["p_value"].item()
         for g in sorted(ap["g"].unique())
     ]
     assert p[0] == p[1] == alone

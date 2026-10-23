@@ -4,13 +4,13 @@
 a counter, so a draw does not depend on which other draws are computed, or in
 which order. :mod:`copairs.nulls.common` holds the helpers the nulls share.
 :mod:`copairs.nulls.joint` and :mod:`copairs.nulls.permutation` are the joint and
-label-permutation mAP nulls; they run on NumPy.
+label-permutation mAP nulls.
 
 :mod:`copairs.nulls.sampler` samples AP nulls exactly, and
 :mod:`copairs.nulls.pvalues` streams AP and mAP p-values against them in
-bounded memory. Backends: ``"numba"`` (optional, ``pip install
-'copairs[numba]'``) and ``"numpy"``, bitwise identical; ``"auto"`` picks Numba
-when it is installed.
+bounded memory. Every null has two backends: ``"numba"`` (optional, ``pip
+install 'copairs[numba]'``; kernels in :mod:`copairs.nulls._numba`) and
+``"numpy"``, bitwise identical; ``"auto"`` picks Numba when it is installed.
 """
 
 from copairs.nulls import joint, permutation

@@ -69,9 +69,10 @@ def get_map_pvalue(
         `concurrent.futures.ThreadPoolExecutor`), compute the legacy copied
         null's p-values (default defined by tqdm's `thread_map`), or run the
         fast copied null's NumPy backend (default: the CPUs this process may
-        run on). The Numba backend uses Numba's threads, set by
-        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``. P-values do not
-        depend on the threads.
+        run on). The Numba backend's kernels run on Numba's threads, set by
+        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``; under the
+        permutation null the ``max_workers`` threads prepare groups while one
+        kernel runs at a time. P-values do not depend on the threads.
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples
         (``method="legacy"`` only).
@@ -87,9 +88,14 @@ def get_map_pvalue(
         equals an atom of the null (e.g. perfect retrieval). Other nulls
         raise under it.
     backend : str
-        Backend of the fast copied null: ``"auto"`` (default), ``"numba"`` or
-        ``"numpy"``. All give identical p-values, so ``"auto"`` picks
-        ``"numba"`` whenever it is installed.
+        Backend of the fast method's nulls: ``"auto"`` (default), ``"numba"``
+        or ``"numpy"``. ``"numba"`` compiles the scalar functions that define
+        each null's draws (the copied null's AP samples, the joint null's
+        samples, the permutation null's relabellings and their mAPs), and
+        ``"numpy"`` computes the same draws vectorized. The two give
+        bitwise-identical draws and p-values (tested), so ``"auto"`` picks
+        ``"numba"`` whenever it is installed and imports. Ignored by
+        ``method="legacy"``.
     pos_pairs : np.ndarray, optional
         The `(n_pairs, 2)` positive pairs used to compute the AP scores,
         indexing the rows of the frame `average_precision` returned (its
@@ -233,6 +239,7 @@ def get_map_pvalue(
             progress_bar=progress_bar,
             max_workers=max_workers,
             pos_diffby=pairs.pos_diffby,
+            backend=backend,
         )
         return map_scores
 
@@ -241,7 +248,7 @@ def get_map_pvalue(
     logger.info("Computing p-values...")
     p_values, fallback = joint.group_pvalues(
         scores, groups, num_pos, num_neg, null_size, seed, profile, pos_pairs,
-        progress_bar=progress_bar,
+        progress_bar=progress_bar, backend=backend,
     )  # fmt: skip
     if fallback:
         warnings.warn(
@@ -391,7 +398,7 @@ def mean_average_precision(
     method : str
         ``"fast"`` (default) or ``"legacy"``, see `get_map_pvalue`.
     backend : str
-        Backend of the fast copied null, see `get_map_pvalue`.
+        Backend of the fast method's nulls, see `get_map_pvalue`.
     pos_pairs : np.ndarray, optional
         Positive pairs used to compute the AP scores, for ``null="joint"``;
         see `get_map_pvalue`. Needed there when a group's positives are not
@@ -505,7 +512,7 @@ def mean_average_precision_hierarchical(
     method : str
         ``"fast"`` (default) or ``"legacy"``, see `get_map_pvalue`.
     backend : str
-        Backend of the fast copied null, see `get_map_pvalue`.
+        Backend of the fast method's nulls, see `get_map_pvalue`.
     pos_pairs : np.ndarray, optional
         Positive pairs used to compute the AP scores, for ``null="joint"``;
         see `get_map_pvalue`. Needed there when a group's positives are not

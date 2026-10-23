@@ -566,8 +566,25 @@ frame = pd.DataFrame({"g": ["a", "a"], "average_precision": [0.5, 0.6],
                       "n_total_pairs": 10})
 m = mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False,
                            null="copied")
+# The default (permutation) and joint nulls of real APs run on NumPy.
+meta = pd.DataFrame({"g": ["q"] * 3 + [f"c{i}" for i in range(8)]})
+feats = np.random.default_rng(0).standard_normal((len(meta), 4))
+ap = copairs.map.average_precision(meta, feats, ["g"], [], [], ["g"],
+                                   progress_bar=False)
+ap = ap[ap["g"] == "q"]
+perm = mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False)
+joint = mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False,
+                               null="joint")
 assert "numba" not in sys.modules
-print(list(p), list(m["p_value"]))
+for null in ("permutation", "joint"):
+    try:
+        mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False,
+                               null=null, backend="numba")
+    except ImportError as exc:
+        assert "copairs[numba]" in str(exc), exc
+    else:
+        raise AssertionError(f"backend='numba' ran the {null} null without numba")
+print(list(p), list(m["p_value"]), list(perm["p_value"]), list(joint["p_value"]))
 """
     )
     assert out.strip()
@@ -624,6 +641,7 @@ def test_import_does_not_load_numba():
     out = run_python(
         "import sys\nimport copairs, copairs.map, copairs.compute, copairs.nulls\n"
         "import copairs.map.multilabel, copairs.nulls.sampler, copairs.nulls.pvalues\n"
+        "import copairs.nulls.joint, copairs.nulls.permutation\n"
         "print('numba' in sys.modules)"
     )
     assert out.strip() == "False"

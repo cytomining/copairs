@@ -57,15 +57,23 @@ code with [Numba](https://numba.pydata.org), an optional dependency:
 ```bash
 pip install copairs[numba]
 ```
-The two backends return bitwise-identical nulls and p-values, so
-`backend="auto"` (default) uses Numba whenever it is installed; if Numba fails
-to import, `"auto"` warns once and uses NumPy.
+In the mAP functions, `backend` applies to each null of the fast method: the
+copied null's AP samples, the joint null's samples, and the permutation
+null's relabellings and their mAPs. For each, the Numba backend compiles the
+scalar functions that define a draw and the NumPy backend computes the same
+draws vectorized. The two backends return bitwise-identical nulls and
+p-values (tested), so `backend="auto"` (default) uses Numba whenever it is
+installed; if Numba fails to import, `"auto"` warns once and uses NumPy. The
+first call of a kernel compiles it (seconds to tens of seconds) and caches
+the compiled code next to copairs' sources, where later processes load it.
 
 Numba starts one thread per host CPU. In a container or job with a CPU quota,
 set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs. The
 NumPy backend samples on one thread per CPU the process may run on (its CPU
 affinity, which follows `taskset` and Slurm allocations but not a CPU quota),
-or on `max_workers` threads where the function takes it. If
+or on `max_workers` threads where the function takes it. The permutation
+null runs groups on `max_workers` threads; under Numba they build the groups'
+similarity tables while one kernel at a time runs draws on Numba's threads. If
 Numba uses its GNU OpenMP threading layer (the default when it cannot load
 TBB), a process forked after copairs ran a Numba kernel stops when it runs one
 itself ("Terminating: fork() called from a process already using GNU

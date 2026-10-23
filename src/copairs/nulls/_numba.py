@@ -1,26 +1,42 @@
-"""Numba kernels of the AP null sampler and p-value counts (optional dependency).
+"""Numba kernels of the nulls and their p-value counts (optional dependency).
 
 Imported only through :func:`copairs.nulls.backend._import_numba_backend`. The
-sampler compiles the scalar reference functions of
-:mod:`copairs.nulls.sampler` unchanged, so its samples are bitwise identical to
-the NumPy backend's.
+AP null sampler, the joint mAP null and the label-permutation mAP null compile
+the scalar reference functions of :mod:`copairs.nulls.sampler`,
+:mod:`copairs.nulls.joint` and :mod:`copairs.nulls.permutation` unchanged, so
+their samples are bitwise identical to the NumPy backend's.
 """
+
+import threading
 
 import numba
 import numpy as np
 
+from copairs.nulls import joint, permutation
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
 
+_philox_nb = numba.njit(inline="always")(philox4x32)
+_uniform_nb = numba.njit(inline="always")(uniform53)
 _gap_loop_nb = numba.njit(cache=True)(gap_loop)
 _ap_sample_nb = numba.njit(cache=True)(
     _make_ap_sample(
-        numba.njit(inline="always")(philox4x32),
-        numba.njit(inline="always")(uniform53),
+        _philox_nb,
+        _uniform_nb,
         _gap_loop_nb,
         numba.njit(cache=True)(_make_gap_guided(_gap_loop_nb, numba.njit)),
     )
 )
+_jit = numba.njit(cache=True)
+_joint_sample_nb, _, _ = joint._make_sampler(_philox_nb, _uniform_nb, _jit)
+_draw_nb, _group_map_nb = permutation._make_kernels(_philox_nb, _uniform_nb, _jit)
+# Samples or draws per parallel task; each task allocates its scratch once.
+_JOINT_TASK = 256
+_PERMUTATION_TASK = 128
+# Held while a parallel kernel that callers may launch from several threads
+# runs: Numba's workqueue threading layer aborts on concurrent launches, and
+# the others would oversubscribe the CPUs.
+_LAUNCH = threading.Lock()
 
 
 @numba.njit(parallel=True, cache=True)
@@ -152,3 +168,65 @@ def group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
         partial[flat] = hits
     for g in range(n_groups):
         counts[g] += partial[g * n_blocks : (g + 1) * n_blocks].sum()
+
+
+@numba.njit(parallel=True, cache=True)
+def joint_nulls(
+    mem_ptr, num_pos, num_neg, edge_ptr, inc_ptr, inc_edge, k0, k1, sigs, start, out
+):
+    """Fill ``out[r, t]`` with joint sample ``start + t`` of signature ``sigs[r]``."""
+    n_sig, size = out.shape
+    n_tasks = (size + _JOINT_TASK - 1) // _JOINT_TASK
+    max_edge = max(1, np.max(np.diff(edge_ptr)))
+    max_pos = max(1, np.max(num_pos))
+    for flat in numba.prange(n_sig * n_tasks):
+        r = flat // n_tasks
+        t0 = (flat - r * n_tasks) * _JOINT_TASK
+        ev = np.empty(max_edge, dtype=np.float64)
+        vals = np.empty(max_pos, dtype=np.float64)
+        for t in range(t0, min(size, t0 + _JOINT_TASK)):
+            out[r, t] = _joint_sample_nb(
+                sigs[r], start + t, mem_ptr, num_pos, num_neg, edge_ptr, inc_ptr,
+                inc_edge, k0, k1, ev, vals,
+            )  # fmt: skip
+
+
+@numba.njit(parallel=True, nogil=True, cache=True)
+def _permutation_maps(
+    n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, slot_block, adjm, deg, kmu,
+    krr, gptr, grow, smr_ptr, smr, srr_ptr, srr, rmu, rcm, rrr, ranked, start, out,
+):  # fmt: skip
+    """Fill ``out[t]`` with the mAP of label-permutation draw ``start + t``."""
+    size = len(out)
+    max_k = max(1, np.max(np.diff(bm_ptr)))
+    n_tasks = (size + _PERMUTATION_TASK - 1) // _PERMUTATION_TASK
+    for task in numba.prange(n_tasks):
+        pm = np.empty(n, dtype=np.int64)
+        chosen = np.empty(max_k, dtype=np.int64)
+        members = np.empty(n, dtype=np.int64)
+        refs = np.empty(n, dtype=np.int64)
+        ent = np.empty(n, dtype=np.uint64)
+        rank = np.empty(n, dtype=np.int32)
+        term = np.empty(n, dtype=np.float64)
+        t0 = task * _PERMUTATION_TASK
+        for t in range(t0, min(size, t0 + _PERMUTATION_TASK)):
+            _draw_nb(
+                start + t, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen
+            )
+            out[t] = _group_map_nb(
+                pm, n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr,
+                srr_ptr, srr, rmu, rcm, rrr, ranked, members, refs, ent, rank, term,
+            )  # fmt: skip
+
+
+def permutation_maps(layout, start, size, k0, k1):
+    """float64 mAPs of draws ``start, ..., start + size - 1`` of ``layout``'s group.
+
+    Threads may call it concurrently (the permutation null runs groups on a
+    thread pool); the kernels run one at a time, each on Numba's threads.
+    """
+    out = np.empty(size, dtype=np.float64)
+    map_args = layout.map_args()[1:]  # after n, which draw_args starts with
+    with _LAUNCH:
+        _permutation_maps(*layout.draw_args(), k0, k1, *map_args, start, out)
+    return out

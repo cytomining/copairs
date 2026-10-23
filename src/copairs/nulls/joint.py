@@ -20,8 +20,10 @@ which use only IEEE additions, subtractions, multiplications, divisions,
 square roots and floors, in a fixed order: logarithms come from a fixed series
 and integer powers from repeated squaring, not from the math library, whose
 last bits can differ between libm, NumPy's SIMD loops and compiled code.
-:func:`joint_nulls` performs the same operations vectorized over samples, so
-both give identical samples, as would the scalar functions compiled.
+:func:`joint_nulls` performs the same operations vectorized over samples
+(``backend="numpy"``), or runs the scalar functions compiled by Numba
+(``backend="numba"``, :mod:`copairs.nulls._numba`); both give identical
+samples (tested).
 """
 
 import math
@@ -46,6 +48,7 @@ from copairs.nulls.philox import (
     uniform_pair,
     make_uniform_pair,
 )
+from copairs.nulls.backend import resolve_backend, _import_numba_backend
 
 # Below this mean, binomials are drawn by inversion; above it by BTRS.
 _INVERSION_MEAN = 10.0
@@ -470,15 +473,25 @@ def joint_plan(signatures, seed: int) -> tuple[np.ndarray, ...]:
     )
 
 
-def joint_nulls(plan, null_size: int, start: int = 0, rows=None) -> np.ndarray:
+def joint_nulls(
+    plan, null_size: int, start: int = 0, rows=None, backend: str = "auto"
+) -> np.ndarray:
     """float64 mAP samples ``start, ..., start + null_size - 1`` of each signature.
 
     ``rows`` is a ``slice`` of the plan's signatures (default all); the result
-    has one row per signature it selects, in its order.
+    has one row per signature it selects, in its order. ``backend`` is
+    ``"auto"`` (default), ``"numba"`` or ``"numpy"``; all return identical
+    samples, so ``"auto"`` picks Numba whenever it imports
+    (:func:`~copairs.nulls.resolve_backend`).
     """
     n_sig = len(plan[0]) - 1
     sigs = range(*(rows or slice(None)).indices(n_sig))
     out = np.empty((len(sigs), null_size), dtype=np.float64)
+    if resolve_backend(backend) == "numba":
+        if out.size:
+            sig_ix = np.array(sigs, dtype=np.int64)
+            _import_numba_backend().joint_nulls(*plan, sig_ix, start, out)
+        return out
     for r, s in enumerate(sigs):
         for c, size in chunks(null_size, _chunk(plan, s)):
             out[r, c : c + size] = _joint_null_np(plan, s, start + c, size)
@@ -502,6 +515,7 @@ def joint_pvalues(
     null_size: int,
     seed: int | None,
     progress_bar: bool = False,
+    backend: str = "auto",
 ) -> np.ndarray:
     """P-value of each group's mAP against the joint null of its signature.
 
@@ -510,7 +524,7 @@ def joint_pvalues(
     ``(num_pos, num_neg)`` and its positive pairs between local member
     indices. ``p_g = (1 + #{null >= thr_g}) / (null_size + 1)`` with ``thr_g``
     from :func:`~copairs.nulls.tie_thresholds`. Nulls are generated in chunks
-    of samples and not stored.
+    of samples and not stored, on ``backend`` (see :func:`joint_nulls`).
     """
     thr = tie_thresholds(scores)
     sig_ix = np.asarray(sig_ix, dtype=np.int64)
@@ -519,6 +533,7 @@ def joint_pvalues(
     if len(sig_ix) and (sig_ix.min() < 0 or sig_ix.max() >= len(signatures)):
         raise ValueError(f"sig_ix must index the {len(signatures)} signatures")
     null_size = check_null_size(null_size)
+    backend = resolve_backend(backend)
     plan = joint_plan(signatures, resolve_seed(seed))
     order = np.argsort(sig_ix, kind="stable")
     ptr = np.searchsorted(sig_ix[order], np.arange(len(signatures) + 1))
@@ -529,7 +544,7 @@ def joint_pvalues(
         if not len(groups):
             continue
         for c, size in chunks(null_size, _CHUNK):
-            null = np.sort(joint_nulls(plan, size, c, slice(s, s + 1))[0])
+            null = np.sort(joint_nulls(plan, size, c, slice(s, s + 1), backend)[0])
             counts[groups] += size - np.searchsorted(null, thr[groups], side="left")
     return (counts + 1) / (null_size + 1)
 
@@ -572,10 +587,12 @@ def group_pvalues(
     profile: np.ndarray | None = None,
     pos_pairs: np.ndarray | None = None,
     progress_bar: bool = False,
+    backend: str = "auto",
 ) -> tuple[np.ndarray, list[int]]:
     """P-value of each group's mAP ``scores`` under the joint null.
 
-    Groups share the null of their signature (:func:`group_signatures`).
+    Groups share the null of their signature (:func:`group_signatures`),
+    sampled on ``backend`` (see :func:`joint_nulls`).
     Returns ``(p_values, fallback)``: ``fallback`` lists the groups without a
     signature, whose p-values are NaN.
     """
@@ -591,5 +608,6 @@ def group_pvalues(
         null_size,
         seed,
         progress_bar=progress_bar,
+        backend=backend,
     )
     return p_values, [g for g, sig in enumerate(signatures) if sig is None]

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from copairs import compute
+from copairs import nulls, compute
 from copairs.nulls import joint, common, permutation
 
 COMPLETE4 = [(i, j) for i in range(4) for j in range(i + 1, 4)]
@@ -20,6 +20,7 @@ SIGNATURES = [
     ([(40, 5000), (40, 3000)], [(0, 1)]),
     ([(5, 20_000)] * 3, [(0, 1), (0, 2), (1, 2)]),
 ]
+BACKENDS = nulls.available_backends()
 
 
 def null_of(members, edges, size, seed=0, start=0):
@@ -80,11 +81,70 @@ def scalar_nulls(plan, size, start):
     )
 
 
-def test_vectorized_matches_scalar_draws():
-    """The NumPy sampler returns the scalar sampler's samples, bit for bit."""
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_vectorized_matches_scalar_draws(backend):
+    """Each backend returns the scalar sampler's samples, bit for bit."""
     plan = joint.joint_plan([joint.canonical_signature(*sig) for sig in SIGNATURES], 7)
-    got = joint.joint_nulls(plan, 300, start=2**33 - 100)
+    got = joint.joint_nulls(plan, 300, start=2**33 - 100, backend=backend)
     np.testing.assert_array_equal(got, scalar_nulls(plan, 300, 2**33 - 100))
+
+
+def random_signatures(rng, count):
+    """Signatures of 1-6 members with random pair counts and edge sets."""
+    sigs = set()
+    while len(sigs) < count:
+        n = int(rng.integers(1, 7))
+        edges = [
+            (i, j) for i in range(n) for j in range(i + 1, n) if rng.random() < 0.6
+        ]
+        degree = np.bincount(np.ravel(edges), minlength=n) if edges else np.zeros(n)
+        members = [
+            (int(d + rng.integers(0 if d else 1, 60)), int(rng.integers(0, 5000)))
+            for d in degree
+        ]
+        sigs.add(joint.canonical_signature(members, edges))
+    return sorted(sigs)
+
+
+def test_numba_matches_numpy_draws():
+    """Numba's sample of every (signature, j) is NumPy's, bit for bit.
+
+    The signatures cover both binomial branches (inversion and BTRS), insertion
+    and quick sorts, and counters on both sides of the 32-bit word boundary.
+    """
+    pytest.importorskip("numba")
+    sigs = sorted(
+        {joint.canonical_signature(*sig) for sig in SIGNATURES}
+        | set(random_signatures(np.random.default_rng(3), 40))
+    )
+    plan = joint.joint_plan(sigs, 2**64 - 5)
+    start = 2**32 - 1000
+    numpy = joint.joint_nulls(plan, 3000, start, backend="numpy")
+    numba = joint.joint_nulls(plan, 3000, start, backend="numba")
+    assert numba.shape == (len(sigs), 3000)
+    np.testing.assert_array_equal(numba, numpy)
+    rows = slice(len(sigs) - 2, 3, -5)  # any slice of signatures
+    np.testing.assert_array_equal(
+        joint.joint_nulls(plan, 3000, start, rows, backend="numba"), numpy[rows]
+    )
+
+
+def test_numba_pvalues_match_numpy():
+    """Joint p-values are identical on both backends, ties included."""
+    pytest.importorskip("numba")
+    sigs = random_signatures(np.random.default_rng(8), 12)
+    null = joint.joint_nulls(joint.joint_plan(sigs, 4), 500, backend="numpy")
+    rng = np.random.default_rng(1)
+    sig_ix = np.repeat(np.arange(len(sigs)), 4)
+    scores = null[sig_ix, rng.integers(0, 500, len(sig_ix))]  # null atoms
+    scores[1::2] = rng.random(len(sig_ix) // 2)  # anywhere in [0, 1)
+    got = {
+        b: joint.joint_pvalues(scores, sig_ix, sigs, 500, 4, backend=b)
+        for b in ("numpy", "numba")
+    }
+    np.testing.assert_array_equal(got["numba"], got["numpy"])
+    hits = (null[sig_ix] >= common.tie_thresholds(scores)[:, None]).sum(axis=1)
+    np.testing.assert_array_equal(got["numpy"], (hits + 1) / 501)
 
 
 @pytest.mark.parametrize(
@@ -118,9 +178,12 @@ def test_chunks_bound_the_per_sample_arrays(monkeypatch):
 
     monkeypatch.setattr(joint, "_joint_null_np", spy)
     monkeypatch.setattr(joint, "_CHUNK_ELEMENTS", 2**9, raising=False)
-    np.testing.assert_array_equal(joint.joint_nulls(plan, 500, start=11), expected)
+    got = joint.joint_nulls(plan, 500, start=11, backend="numpy")
+    np.testing.assert_array_equal(got, expected)
     assert max(sizes) <= 2**9
-    p = joint.joint_pvalues(np.full(3, 0.3), np.arange(3), sigs, 500, 5)
+    p = joint.joint_pvalues(
+        np.full(3, 0.3), np.arange(3), sigs, 500, 5, backend="numpy"
+    )
     assert max(sizes) <= 2**9 and 0 < p.min() and p.max() <= 1
 
 
