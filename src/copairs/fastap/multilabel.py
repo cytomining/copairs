@@ -150,20 +150,21 @@ def shared_label_pairs(dframe, sameby, diffby, multilabel_col):
     return pairs.astype(np.uint32), keys[present], counts[present]
 
 
-@numba.njit(cache=True)
-def _all_pairs_except(n, shared):
-    """Pairs ``(i < j)`` of ``range(n)`` not in ``shared``.
+@numba.njit(parallel=True, cache=True)
+def _all_pairs_except(n, shared_ptr, shared_j, offsets):
+    """Pairs ``(i < j)`` of ``range(n)`` except the shared pairs, by row in parallel.
 
-    ``shared`` holds sorted unique pairs ``(i < j)``; candidates are generated
-    in the same order and merged against it, so no candidate array is
-    materialized.
+    Row ``i``'s shared pairs are ``(i, shared_j[s])`` for ``s`` in
+    ``shared_ptr[i]:shared_ptr[i + 1]``, sorted by ``j``; its candidates are
+    generated in the same order and merged against them, so no candidate
+    array is materialized. Its output starts at ``offsets[i]``.
     """
-    out = np.empty((n * (n - 1) // 2 - len(shared), 2), dtype=np.uint32)
-    s = 0
-    w = 0
-    for i in range(n):
+    out = np.empty((offsets[n], 2), dtype=np.uint32)
+    for row in numba.prange(n):
+        i = np.int64(row)  # a signed index: n - 1 - i must not wrap
+        s, end, w = shared_ptr[i], shared_ptr[i + 1], offsets[i]
         for j in range(i + 1, n):
-            if s < len(shared) and shared[s, 0] == i and shared[s, 1] == j:
+            if s < end and shared_j[s] == j:
                 s += 1
                 continue
             out[w, 0] = i
@@ -180,7 +181,14 @@ def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col):
     _, pairs, _ = found
     shared = np.unique(_pair_keys(pairs))
     if not (len(sameby) or len(diffby)):
-        return _all_pairs_except(len(dframe), _key_pairs(shared))
+        n = len(dframe)
+        # Row i's shared keys are those in [i << 32, (i + 1) << 32).
+        ptr = np.searchsorted(
+            shared, np.arange(n + 1, dtype=np.uint64) << np.uint64(32)
+        )
+        offsets = np.zeros(n + 1, dtype=np.int64)
+        np.cumsum((n - 1 - np.arange(n)) - np.diff(ptr), out=offsets[1:])
+        return _all_pairs_except(n, ptr, _key_pairs(shared)[:, 1], offsets)
     mono = _monolabel_keys(dframe, sameby, diffby)
     return _key_pairs(mono[~_in_sorted(mono, shared)])
 
