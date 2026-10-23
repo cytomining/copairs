@@ -37,7 +37,14 @@ from copairs.nulls.common import (
     tie_thresholds,
     check_null_size,
 )
-from copairs.nulls.philox import M32, S32, uniform53, philox4x32
+from copairs.nulls.philox import (
+    M32,
+    S32,
+    uniform53,
+    philox4x32,
+    uniform_pair,
+    make_uniform_pair,
+)
 
 # Below this mean, binomials are drawn by inversion; above it by BTRS.
 _INVERSION_MEAN = 10.0
@@ -60,12 +67,8 @@ def _make_sampler(philox, uniform, jit=lambda f: f):
     ``jit`` compiles each part (e.g. ``numba.njit``) or leaves it Python.
     Returns ``(joint_sample, binomial, log)``.
     """
-
-    @jit
-    def pair(c0, c1, block, stream, k0, k1):
-        """Two uniforms of block ``block`` of stream ``stream`` of sample ``(c0, c1)``."""
-        w0, w1, w2, w3 = philox(c0, c1, np.uint64(block), np.uint64(stream), k0, k1)
-        return uniform(w0, w1), uniform(w2, w3)
+    # Two uniforms of block ``block`` of stream ``stream`` of sample ``(c0, c1)``.
+    pair = make_uniform_pair(philox, uniform, jit)
 
     @jit
     def log(x):
@@ -234,13 +237,6 @@ def _make_sampler(philox, uniform, jit=lambda f: f):
 joint_sample, binomial, _log = _make_sampler(philox4x32, uniform53)
 
 
-def _pair_np(c0, c1, block, stream, k0, k1):
-    """:func:`pair` of :func:`_make_sampler` over arrays of samples and blocks."""
-    block = np.asarray(block).astype(np.uint64)
-    w0, w1, w2, w3 = philox4x32(c0, c1, block, np.uint64(stream), k0, k1)
-    return uniform53(w0, w1), uniform53(w2, w3)
-
-
 def _log_np(x):
     """:func:`_log` elementwise, with the same operations in the same order."""
     x = np.asarray(x, dtype=np.float64)
@@ -297,7 +293,7 @@ def _binomial_np(n, p, c0, c1, block, stream, k0, k1):
     inv = np.flatnonzero(live & (n * q < _INVERSION_MEAN))
     if inv.size:
         ni, qi = n[inv], q[inv]
-        u, _ = _pair_np(c0[inv], c1[inv], block[inv], stream, k0, k1)
+        u, _ = uniform_pair(c0[inv], c1[inv], block[inv], stream, k0, k1)
         block[inv] += 1
         s = qi / (1.0 - qi)
         a = (ni + 1) * s
@@ -332,7 +328,7 @@ def _btrs_np(n, q, c0, c1, block, ix, stream, k0, k1):
     out = np.zeros(n.shape, dtype=np.int64)
     run = np.arange(n.size)
     while run.size:
-        u, v = _pair_np(c0[run], c1[run], block[ix[run]], stream, k0, k1)
+        u, v = uniform_pair(c0[run], c1[run], block[ix[run]], stream, k0, k1)
         block[ix[run]] += 1
         u = u - 0.5
         us = 0.5 - np.abs(u)
@@ -395,7 +391,7 @@ def _joint_null_np(plan, s, start, size):
     n_edge = edge_ptr[s + 1] - edge_ptr[s]
     ev = np.empty((size, n_edge))
     for e in range(0, n_edge, 2):
-        u0, u1 = _pair_np(c0, c1, e // 2, 0, key0, key1)
+        u0, u1 = uniform_pair(c0, c1, e // 2, 0, key0, key1)
         ev[:, e] = u0
         if e + 1 < n_edge:
             ev[:, e + 1] = u1
@@ -408,7 +404,7 @@ def _joint_null_np(plan, s, start, size):
         vals[:, :shared] = ev[:, inc_edge[inc_ptr[i] : inc_ptr[i + 1]]]
         stream = 1 + 2 * (i - m0)
         for t in range(shared, p, 2):
-            u0, u1 = _pair_np(c0, c1, (t - shared) // 2, stream, key0, key1)
+            u0, u1 = uniform_pair(c0, c1, (t - shared) // 2, stream, key0, key1)
             vals[:, t] = u0
             if t + 1 < p:
                 vals[:, t + 1] = u1

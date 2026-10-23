@@ -34,7 +34,14 @@ from copairs.nulls.common import (
     check_null_size,
     check_pair_counts,
 )
-from copairs.nulls.philox import M32, S32, uniform53, philox4x32
+from copairs.nulls.philox import (
+    M32,
+    S32,
+    uniform53,
+    philox4x32,
+    uniform_pair,
+    make_uniform_pair,
+)
 
 # A slot sorts up to this many drawn profiles by insertion, more by quicksort.
 _INSERTION = 128
@@ -176,13 +183,15 @@ def _make_kernels(philox, uniform, jit=lambda f: f):
             total += acc / deg[s]
         return total / n
 
+    uniform_pair = make_uniform_pair(philox, uniform, jit)
+
     @jit
     def next_uniform(c0, c1, blk, spare, k0, k1):
         """Next uniform of draw ``(c0, c1)``'s stream: ``(u, blk, spare)``."""
         if spare >= 0.0:
             return spare, blk, -1.0
-        w0, w1, w2, w3 = philox(c0, c1, np.uint64(blk), np.uint64(0), k0, k1)
-        return uniform(w0, w1), blk + 1, uniform(w2, w3)
+        u, spare = uniform_pair(c0, c1, blk, 0, k0, k1)
+        return u, blk + 1, spare
 
     @jit
     def draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen):
@@ -439,9 +448,7 @@ def _uniforms_np(c0, c1, count, k0, k1):
     """Return the first ``count`` uniforms of each draw's stream, as ``next_uniform``."""
     out = np.empty((len(c0), count + count % 2))
     for blk in range((count + 1) // 2):
-        w0, w1, w2, w3 = philox4x32(c0, c1, np.uint64(blk), np.uint64(0), k0, k1)
-        out[:, 2 * blk] = uniform53(w0, w1)
-        out[:, 2 * blk + 1] = uniform53(w2, w3)
+        out[:, 2 * blk], out[:, 2 * blk + 1] = uniform_pair(c0, c1, blk, 0, k0, k1)
     return out
 
 
