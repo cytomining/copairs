@@ -347,13 +347,9 @@ class _HostCuda:
 
     def __init__(self):
         self.calls = 0
-        self.cp = np
 
     def plan_on_device(self, plan):
         return plan
-
-    def host(self, x):
-        return np.asarray(x)
 
     def ap_nulls(self, plan, start, size, dtype):
         self.calls += 1
