@@ -11,14 +11,14 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.nulls import joint, tie_thresholds
+from copairs.nulls import joint, permutation, tie_thresholds
 from copairs.methods import check_null
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     check_hierarchical_by,
     apply_hierarchical_fdr_correction,
 )
-from copairs.map.average_precision import RankPairs
+from copairs.map.average_precision import RankPairs, attached_pairs
 
 logger = logging.getLogger("copairs")
 
@@ -72,11 +72,22 @@ def get_map_pvalue(
         that profile's AP null. Other groups fall back to the copied null with
         a warning. Joint null only; taken from ``pairs`` when given.
     null : str
-        Null of the group mAP. ``"joint"`` (default) samples the members' APs
-        together (`copairs.nulls.joint`): a positive pair inside the group is
-        one random number in both members' rank lists, so the null narrows as
-        replicates are added. ``"copied"`` is the null of copairs <= 0.5.5:
-        each member's AP null is sampled per `(n_pos_pairs, n_total_pairs)`
+        Null of the group mAP. ``"permutation"`` relabels profiles
+        (`copairs.nulls.permutation`): in each block of members ranked against
+        the same references (e.g. a plate's replicates and controls), any of
+        the block's profiles could have carried the group's label, and each
+        draw recomputes the group's mAP from the observed similarities. Each
+        group's positives must be its other members (for groups of one
+        profile with positives in other groups, use ``"joint"``: there it is
+        that profile's AP null), and its smallest p-value is about one over
+        its number of distinct relabellings. ``"joint"`` (default) samples
+        the members' APs together (`copairs.nulls.joint`): a positive pair
+        inside the group is one random number in both members' rank lists,
+        and other similarities are independent, which real profiles are not
+        (members share references, and some profiles are close to many
+        others), so it can give too small p-values for groups of many
+        replicates. ``"copied"`` is the null of copairs <= 0.5.5: each
+        member's AP null is sampled per `(n_pos_pairs, n_total_pairs)`
         configuration and the group's null averages them, so members with
         equal pair counts share one draw and the null does not narrow as
         replicates are added.
@@ -84,7 +95,12 @@ def get_map_pvalue(
         The pairs the AP scores were computed with, as
         ``average_precision(..., return_pairs=True)`` returns them; their
         indices are rows of that call's frame, so ``ap_scores`` must keep its
-        index. The joint null takes its positive pairs from them.
+        index. The permutation null needs them and, when not given, takes
+        them from ``ap_scores.attrs["copairs_pairs"]``, where
+        `average_precision` attaches them; frames that lost them (built,
+        reloaded, pickled, or concatenated from several AP calls) need
+        ``pairs=`` or another null. The joint null takes its positive pairs
+        from ``pairs`` when given, and ignores attached pairs.
 
     Returns
     -------
@@ -102,6 +118,20 @@ def get_map_pvalue(
         raise ValueError("pos_pairs is used by the joint null only")
     if null == "joint" and pos_pairs is None and pairs is not None:
         pos_pairs = pairs.pos
+    if null == "permutation" and pairs is None:
+        # Only the permutation null reads attached pairs: the joint null
+        # infers its edges without them.
+        pairs = attached_pairs(ap_scores)
+        if pairs is None:
+            raise ValueError(
+                "null='permutation' needs the pairs the APs were computed from. "
+                "average_precision attaches them to the frame it returns, and "
+                "these AP scores have none: they were built, loaded from disk, "
+                "pickled or concatenated from several AP calls, or come from "
+                "multilabel.average_precision, which this null does not support. "
+                "Recompute the APs, pass pairs=, or choose null='joint' or "
+                "null='copied'."
+            )
 
     # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
@@ -132,6 +162,23 @@ def get_map_pvalue(
 
     if null == "copied":
         map_scores["p_value"] = _copied_pvalues(scores, groups, ap_scores, **copied)
+        return map_scores
+
+    if null == "permutation":
+        logger.info("Computing p-values...")
+        map_scores["p_value"] = permutation.permutation_pvalues(
+            groups,
+            profile,
+            ap_scores["n_pos_pairs"].to_numpy(),
+            ap_scores["n_total_pairs"].to_numpy(),
+            pairs.pos,
+            pairs.neg,
+            pairs.similarity,
+            null_size,
+            seed,
+            observed=scores,
+            progress_bar=progress_bar,
+        )
         return map_scores
 
     num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
@@ -302,11 +349,11 @@ def mean_average_precision(
         Positive pairs used to compute the AP scores; see `get_map_pvalue`.
         Needed when a group's positives are not its other members.
     null : str
-        Null of the group mAP, ``"joint"`` (default) or ``"copied"``; see
-        `get_map_pvalue`.
+        Null of the group mAP: ``"permutation"``, ``"joint"`` (default) or
+        ``"copied"``; see `get_map_pvalue`.
     pairs : RankPairs, optional
-        Pairs of the AP scores, from ``average_precision(...,
-        return_pairs=True)``; see `get_map_pvalue`.
+        Pairs of the AP scores, needed by ``null="permutation"`` and attached
+        to AP frames; see `get_map_pvalue`.
 
     Returns
     -------
@@ -405,11 +452,11 @@ def mean_average_precision_hierarchical(
         Positive pairs used to compute the AP scores; see `get_map_pvalue`.
         Needed when a group's positives are not its other members.
     null : str
-        Null of the group mAP, ``"joint"`` (default) or ``"copied"``; see
-        `get_map_pvalue`.
+        Null of the group mAP: ``"permutation"``, ``"joint"`` (default) or
+        ``"copied"``; see `get_map_pvalue`.
     pairs : RankPairs, optional
-        Pairs of the AP scores, from ``average_precision(...,
-        return_pairs=True)``; see `get_map_pvalue`.
+        Pairs of the AP scores, needed by ``null="permutation"`` and attached
+        to AP frames; see `get_map_pvalue`.
 
     Returns
     -------

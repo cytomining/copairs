@@ -1,6 +1,6 @@
 """The implementation choices shared by copairs' public functions."""
 
-NULLS = ("joint", "copied")
+NULLS = ("permutation", "joint", "copied")
 
 
 def check_null(null: str) -> str:
