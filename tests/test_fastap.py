@@ -94,6 +94,16 @@ def test_ap_from_pairs_histogram_chunks(backend):
         np.testing.assert_array_equal(z, s)
 
 
+@pytest.mark.parametrize("n", [None, 0, 3])
+@pytest.mark.parametrize("empty", [[], np.empty((0, 2), dtype=np.uint32)])
+def test_ap_from_pairs_without_pairs(n, empty):
+    """No pairs give empty results, also with no profiles to size histograms by."""
+    paired_ix, ap, null_confs = fastap.ap_from_pairs(empty, empty, [], [], n=n)
+    assert paired_ix.shape == (0,) and paired_ix.dtype == np.int64
+    assert ap.shape == (0,) and ap.dtype == np.float64
+    assert null_confs.shape == (0, 2) and null_confs.dtype == np.uint32
+
+
 @pytest.mark.parametrize("backend", AP_BACKENDS)
 def test_ap_from_pairs_accepts_series_similarities(backend):
     """Pandas similarities are converted to arrays."""
