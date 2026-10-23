@@ -158,12 +158,16 @@ def test_fastap_does_not_import_nulls():
 
 @pytest.mark.parametrize("backend", ["auto", "gpu", "Numba", "CUDA", None])
 def test_unknown_backend_raises(backend):
-    """Backends other than numpy, numba and cuda raise before any work."""
+    """Unknown backends raise before any work.
+
+    The AP functions take numpy, numba and cuda; find_pairs_multilabel and
+    normalize_ap, which run on the CPU, numpy and numba.
+    """
     with pytest.raises(ValueError, match="'numpy', 'numba' or 'cuda'"):
         average_precision(None, None, [], [], [], [], backend=backend)
     with pytest.raises(ValueError, match="'numpy', 'numba' or 'cuda'"):
         multilabel.average_precision(None, None, [], [], [], [], "l", backend=backend)
-    with pytest.raises(ValueError, match="'numpy', 'numba' or 'cuda'"):
+    with pytest.raises(ValueError, match="either 'numpy' or 'numba'"):
         find_pairs_multilabel(None, ["l"], [], "l", backend=backend)
-    with pytest.raises(ValueError, match="'numpy', 'numba' or 'cuda'"):
+    with pytest.raises(ValueError, match="either 'numpy' or 'numba'"):
         normalize_ap(np.array([0.5]), 3, 10, backend=backend)
