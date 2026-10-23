@@ -608,12 +608,11 @@ def get_null_dists(
 
 
 def _without_positives(confs: np.ndarray) -> np.ndarray:
-    """Mask of configurations with no positives, whose AP is undefined.
+    """Mask of the ``(n, 2)`` configurations with no positives (undefined AP).
 
     The legacy method gives them NaN nulls and p-values of 1; sample ``j`` of
     any other configuration does not depend on them.
     """
-    confs = np.asarray(confs).reshape(-1, 2)
     return (confs[:, 0] == 0) & (confs[:, 1] >= 0)
 
 
