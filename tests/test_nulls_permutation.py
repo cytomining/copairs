@@ -1,5 +1,6 @@
 """Tests for the label-permutation mAP null (copairs.nulls.permutation)."""
 
+import os
 import json
 import time
 import pickle
@@ -16,6 +17,7 @@ from copairs import nulls, compute
 from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import permutation, tie_thresholds
 from tests.helpers import ML_SPEC, label_meta
+from tests.test_nulls import run_python
 from copairs.nulls.common import stream_key
 
 SPEC = dict(pos_sameby=["g"], pos_diffby=[], neg_sameby=[], neg_diffby=["g"])
@@ -27,6 +29,26 @@ LAYOUTS = [
 ]
 LAYOUT_IDS = ["one-pool", "plate-blocks", "plate-blocks-diffby", "three-plates"]
 BACKENDS = nulls.available_backends()
+
+
+@pytest.fixture
+def numba_threads():
+    """Return a setter of this thread's Numba threads, restored after the test.
+
+    It skips the test where Numba has fewer threads (``NUMBA_NUM_THREADS``).
+    """
+    before = []
+
+    def set_threads(n):
+        numba = pytest.importorskip("numba")
+        if n > numba.config.NUMBA_NUM_THREADS:
+            pytest.skip(f"needs {n} Numba threads")
+        before.append(numba.get_num_threads())
+        numba.set_num_threads(n)
+
+    yield set_threads
+    if before:
+        pytest.importorskip("numba").set_num_threads(before[0])
 
 
 def layout_meta(plates, reps, ctrls):
@@ -648,7 +670,7 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
+def test_pvalues_do_not_depend_on_workers(backend, monkeypatch, numba_threads):
     """Groups sharing pools give the same p-values on 1 or 4 threads, or alone.
 
     Under the Numba backend, given 2 Numba threads, one thread runs each
@@ -666,9 +688,9 @@ def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
             super().__init__(blocks, *args)
 
     class RecordedExecutor(permutation.ThreadPoolExecutor):
-        def __init__(self, max_workers):
+        def __init__(self, max_workers, **kwargs):
             workers.append(max_workers)
-            super().__init__(max_workers)
+            super().__init__(max_workers, **kwargs)
 
     monkeypatch.setattr(permutation, "_Pool", CountedPool)
     monkeypatch.setattr(permutation, "ThreadPoolExecutor", RecordedExecutor)
@@ -685,7 +707,7 @@ def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
             launched.append(kernel is _numba._permutation_maps_parallel)
             return launch(kernel, *args)
 
-        monkeypatch.setattr(_numba, "threads", lambda: 2)
+        numba_threads(2)
         monkeypatch.setattr(_numba, "permutation_maps", recorded)
         monkeypatch.setattr(_numba, "_launch", recorded_launch)
     p, kernels = [], []
@@ -762,7 +784,7 @@ def test_split_draws_do_not_change_pvalues(stop_after, backend, monkeypatch):
 @pytest.mark.parametrize(
     "parallel", [False, True], ids=["pool-threads", "numba-threads"]
 )
-def test_large_groups_spread_their_numba_draws(parallel, monkeypatch):
+def test_large_groups_spread_their_numba_draws(parallel, monkeypatch, numba_threads):
     """On pool threads, a large group's Numba draws run as several tasks.
 
     The tasks are as large as NumPy's chunks (2**22 // 30**2 = 4660 draws
@@ -771,8 +793,6 @@ def test_large_groups_spread_their_numba_draws(parallel, monkeypatch):
     _NUMBA_CHUNK either way and run in such tasks. P-values match NumPy's.
     """
     pytest.importorskip("numba")
-    from copairs.nulls import _numba
-
     labels = ["big"] * 30 + ["s1"] * 3 + ["s2"] * 3 + [f"c{i}" for i in range(40)]
     meta = pd.DataFrame({"g": labels})
     feats = np.random.default_rng(16).standard_normal((len(meta), 5))
@@ -788,7 +808,7 @@ def test_large_groups_spread_their_numba_draws(parallel, monkeypatch):
 
     monkeypatch.setattr(permutation._Run, "maps_of", counted)
     # 3 groups on 4 threads run on their own if Numba has 2 threads.
-    monkeypatch.setattr(_numba, "threads", lambda: 8 if parallel else 2)
+    numba_threads(4 if parallel else 2)
     got = mean_average_precision(*args, backend="numba", **kwargs)
     assert got["p_value"].tolist() == expected["p_value"].tolist()
     assert calls == {30: 1 if parallel else 3, 3: 2}
@@ -801,6 +821,76 @@ def test_large_groups_spread_their_numba_draws(parallel, monkeypatch):
     got = mean_average_precision(*args, backend="numba", **kwargs)
     assert got["p_value"].tolist() == expected["p_value"].tolist()
     assert calls == {30: 7 if parallel else 8, 3: 14}
+
+
+# The permutation null's pool threads and the threads of its parallel
+# kernels, on a host of 64 CPUs with NUMBA_NUM_THREADS=36: by default, and
+# on one pool thread after the caller's numba.set_num_threads(2).
+_POOL_THREADS = """
+import json
+import numba
+import numpy as np
+import pandas as pd
+from copairs.map import average_precision, mean_average_precision
+from copairs.nulls import _numba, permutation
+
+labels = [f"q{i}" for i in range(40) for _ in range(3)] + [f"c{i}" for i in range(20)]
+meta = pd.DataFrame({"g": labels})
+feats = np.random.default_rng(0).standard_normal((len(meta), 5))
+ap = average_precision(
+    meta, feats, ["g"], [], [], ["g"], progress_bar=False
+)
+ap = ap[ap["n_pos_pairs"] > 0]
+workers, launches = [], []
+
+
+class Recorded(permutation.ThreadPoolExecutor):
+    def __init__(self, max_workers, **kwargs):
+        workers.append(max_workers)
+        super().__init__(max_workers, **kwargs)
+
+
+launch = _numba._launch
+
+
+def recorded(kernel, *args):
+    launches.append(numba.get_num_threads())  # of the launching thread
+    return launch(kernel, *args)
+
+
+permutation.ThreadPoolExecutor = Recorded
+permutation._numpy_workers = lambda: 64
+_numba._launch = recorded
+out = {}
+for name, threads, max_workers in (("default", None, None), ("set", 2, 1)):
+    if threads is not None:
+        numba.set_num_threads(threads)
+    workers.clear()
+    launches.clear()
+    mean_average_precision(
+        ap, ["g"], 1000, 0.05, 0, progress_bar=False, max_workers=max_workers,
+        backend="numba",
+    )
+    out[name] = [workers[:], sorted(set(launches))]
+print(json.dumps(out))
+"""
+
+
+def test_pool_threads_follow_numba_threads():
+    """Under Numba the permutation null's threads follow Numba's thread count.
+
+    By default it runs a pool thread per Numba thread, not per CPU (at most
+    32, as NumPy's), so on a host of more than 32 CPUs, groups as many as
+    Numba's threads run their draws on their pool threads. Numba's thread
+    count is per thread, and the pool threads launch the parallel kernels
+    with the caller's (``numba.set_num_threads``).
+    """
+    pytest.importorskip("numba")
+    out = json.loads(
+        run_python(_POOL_THREADS, env={**os.environ, "NUMBA_NUM_THREADS": "36"})
+    )
+    # [pool threads], [Numba threads of the parallel launches]
+    assert out == {"default": [[36], []], "set": [[1], [2]]}
 
 
 PLATE_SPEC = dict(ML_SPEC, neg_sameby=["plate"])
@@ -1179,7 +1269,9 @@ def test_labels_with_one_holder_set_draw_independently():
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_label_pools_are_shared_and_workers_do_not_matter(backend, monkeypatch):
+def test_label_pools_are_shared_and_workers_do_not_matter(
+    backend, monkeypatch, numba_threads
+):
     """Labels on the same components share one pool; threads do not change p-values.
 
     Under the Numba backend, given 2 Numba threads, one thread runs each
@@ -1211,7 +1303,7 @@ def test_label_pools_are_shared_and_workers_do_not_matter(backend, monkeypatch):
             launched.append(kernel is _numba._label_maps_parallel)
             return launch(kernel, *args)
 
-        monkeypatch.setattr(_numba, "threads", lambda: 2)
+        numba_threads(2)
         monkeypatch.setattr(_numba, "label_maps", recorded)
         monkeypatch.setattr(_numba, "_launch", recorded_launch)
     p, kernels = [], []
@@ -1355,7 +1447,9 @@ def test_split_rounds_count_in_draw_order():
 
 @pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("stop_after", [None, 3])
-def test_draw_tasks_in_flight_are_bounded(stop_after, backend, monkeypatch):
+def test_draw_tasks_in_flight_are_bounded(
+    stop_after, backend, monkeypatch, numba_threads
+):
     """Groups split into many tasks keep few in flight, with the same p-values.
 
     Tasks of 7 draws split each group's 3000 draws (or stop_after's rounds
@@ -1386,9 +1480,7 @@ def test_draw_tasks_in_flight_are_bounded(stop_after, backend, monkeypatch):
     monkeypatch.setattr(permutation, "ThreadPoolExecutor", CountingExecutor)
     monkeypatch.setattr(permutation, "_draw_chunk", lambda n: 7)
     if backend == "numba":
-        from copairs.nulls import _numba
-
-        monkeypatch.setattr(_numba, "threads", lambda: 1)  # draws on pool threads
+        numba_threads(1)  # draws on pool threads
     got = mean_average_precision(*args, backend=backend, **kwargs)
     assert got["p_value"].tolist() == expected["p_value"].tolist()
     assert 2 < peak[0] <= permutation._TASKS_PER_WORKER * 2

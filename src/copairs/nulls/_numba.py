@@ -69,8 +69,17 @@ def _launch(kernel, *args):
 
 
 def threads() -> int:
-    """Return the threads Numba's parallel kernels run on (``NUMBA_NUM_THREADS``)."""
+    """Return the threads the calling thread's parallel kernels run on.
+
+    ``NUMBA_NUM_THREADS``, unless ``numba.set_num_threads`` changed it, which
+    holds for the thread that called it only.
+    """
     return numba.get_num_threads()
+
+
+def set_threads(n: int) -> None:
+    """Run the calling thread's parallel kernels on ``n`` threads (see :func:`threads`)."""
+    numba.set_num_threads(n)
 
 
 def ap_nulls(num_pos, total, k0, k1, start, out):

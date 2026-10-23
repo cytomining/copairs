@@ -1345,15 +1345,22 @@ def _run_groups(
     resolved ``backend``, its Numba draws on Numba's threads if
     ``parallel``.
     """
-    # A thread per CPU; at most 32, since each holds a chunk's draws.
-    workers = min(32, _numpy_workers()) if max_workers is None else max_workers
-    # Groups' draws run on their pool threads when those keep Numba's threads
-    # busy, else on Numba's threads.
-    parallel = backend == "numba" and (
-        min(len(keys), workers) < _import_numba_backend().threads()
-    )
+    pool = {}
+    if backend == "numba":
+        numba_backend = _import_numba_backend()
+        threads = numba_backend.threads()
+        # A thread per Numba thread. Groups' draws run on their pool threads
+        # when those keep Numba's threads busy, else on Numba's threads,
+        # which the pool threads set as the caller has (it is per thread).
+        workers = threads if max_workers is None else max_workers
+        parallel = min(len(keys), workers) < threads
+        pool = dict(initializer=numba_backend.set_threads, initargs=(threads,))
+    else:
+        # A thread per CPU; at most 32, since each holds a chunk's draws.
+        workers = min(32, _numpy_workers()) if max_workers is None else max_workers
+        parallel = False
     pvals = np.empty(len(keys), dtype=np.float64)
-    with ThreadPoolExecutor(max_workers=workers) as ex:
+    with ThreadPoolExecutor(max_workers=workers, **pool) as ex:
         try:
             # Pools ranking overlapping profiles slice one key table.
             table = _key_table(list(refs.values()), similarity, ex.map)

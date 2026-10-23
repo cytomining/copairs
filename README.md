@@ -76,9 +76,11 @@ NumPy backend samples on one thread per CPU the process may run on (its CPU
 affinity, which follows `taskset` and Slurm allocations but not a CPU quota),
 or on `max_workers` threads where the function takes it. The permutation
 null runs groups on `max_workers` threads (by default one per CPU, at most
-32). Under Numba each of them runs its group's draws itself when there are at
-least as many groups and threads as Numba threads; otherwise the draws run on
-Numba's threads, one group at a time. If Numba uses its GNU OpenMP threading
+32, and under Numba one per Numba thread), which share a large group's
+draws. Under Numba these threads run the draws themselves when they run as
+many groups at once as Numba has threads; otherwise the draws run on Numba's
+threads, one group at a time, as many of them as the calling thread has
+(`numba.set_num_threads` is per thread). If Numba uses its GNU OpenMP threading
 layer (the default when it cannot load TBB), a process forked after copairs
 ran a Numba kernel stops when it runs one itself ("Terminating: fork() called
 from a process already using GNU OpenMP"). Use the `spawn` or `forkserver`

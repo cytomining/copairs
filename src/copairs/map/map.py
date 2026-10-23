@@ -69,12 +69,13 @@ def get_map_pvalue(
     max_workers : int
         Threads that run the permutation null's draws or the fast copied
         null's NumPy backend (default: the CPUs this process may run on, at
-        most 32 for the permutation null), or that compute the legacy copied
-        null's p-values (default: tqdm's `thread_map`'s). Numba's kernels run
-        on Numba's threads (``NUMBA_NUM_THREADS`` or
-        ``numba.set_num_threads``), except that the permutation null runs a
-        group's draws on its own thread when the threads run as many groups
-        at once as Numba has threads. P-values do not depend on the threads.
+        most 32 for the permutation null, which under Numba runs one per
+        Numba thread), or that compute the legacy copied null's p-values
+        (default: tqdm's `thread_map`'s). Numba's kernels run on Numba's
+        threads (``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``), except
+        that the permutation null's threads run the draws themselves, sharing
+        a large group's, when they run as many groups at once as Numba has
+        threads. P-values do not depend on the threads.
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples
         (``method="legacy"`` only).
