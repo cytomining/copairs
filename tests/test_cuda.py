@@ -244,6 +244,7 @@ def cuda_runtime(monkeypatch):
     for cache in caches:
         cache.cache_clear()
     monkeypatch.setattr(_cuda, "_initialised_in", None)
+    monkeypatch.setattr(_cuda, "_reported", set())
     yield _cuda
     monkeypatch.undo()
     for cache in caches:
@@ -262,13 +263,34 @@ def test_cuda_unavailable_when_kernels_cannot_compile(cuda_runtime, monkeypatch)
 
     monkeypatch.setattr(cuda_runtime.cp, "RawKernel", broken)
     monkeypatch.setattr(cuda_runtime.cp.cuda.runtime, "getDeviceCount", lambda: 1)
-    with pytest.warns(RuntimeWarning, match="fail to compile.*NVRTC not found"):
+    with pytest.warns(RuntimeWarning, match="fail to compile.*NVRTC not found") as seen:
         assert "cuda" not in nulls.available_backends()
+    assert [w.filename for w in seen] == [__file__]  # the warning points here
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # probed once per process: no second warning
         assert nulls.resolve_backend("auto") != "cuda"
         with pytest.raises(RuntimeError, match=r"fail to compile.*copairs\[gpu\]"):
             nulls.ap_nulls(CONFS, 4, seed=0, backend="cuda")
+
+
+@needs_cupy
+def test_cuda_compile_failure_reported_once(cuda_runtime, monkeypatch):
+    """An explicit "cuda" on a GPU whose kernels fail to compile only raises.
+
+    The RuntimeError names the failure; neither it nor a later listing of
+    the backends warns about the same failure again.
+    """
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("NVRTC not found")
+
+    monkeypatch.setattr(cuda_runtime.cp, "RawKernel", broken)
+    monkeypatch.setattr(cuda_runtime.cp.cuda.runtime, "getDeviceCount", lambda: 1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(RuntimeError, match=r"fail to compile.*NVRTC not found"):
+            nulls.ap_nulls(CONFS, 4, seed=0, backend="cuda")
+        assert "cuda" not in nulls.available_backends()
 
 
 @needs_cupy

@@ -10,6 +10,7 @@ requested or :func:`copairs.nulls.available_backends` checks for a GPU
 import os
 import warnings
 import functools
+from typing import NamedTuple
 
 import cupy as cp
 import numpy as np
@@ -61,14 +62,30 @@ def usable() -> bool:
     Probed once per process. A child forked after its parent's probe found a
     device (initialising CUDA) cannot use CUDA, so it reports no usable GPU
     without calling CUDA, where a kernel load would fail as a compile failure.
+    A visible GPU whose kernels fail to compile is a misconfiguration: the
+    first call warns, at the caller of
+    :func:`copairs.nulls.available_backends`, unless :func:`require` has
+    raised for it already.
     """
-    return _probe(os.getpid()) is None
+    pid = os.getpid()
+    probe = _probe(pid)
+    if probe.broken and pid not in _reported:
+        _reported.add(pid)
+        warnings.warn(
+            f"a CUDA device is visible, but {probe.reason}; the CUDA backend "
+            "is unavailable",
+            RuntimeWarning,
+            stacklevel=4,  # usable < _cuda_usable < available_backends < caller
+        )
+    return probe.reason is None
 
 
 def require() -> None:
     """Raise RuntimeError, naming the extra, unless :func:`usable`."""
-    reason = _probe(os.getpid())
+    pid = os.getpid()
+    reason = _probe(pid).reason
     if reason is not None:
+        _reported.add(pid)
         raise RuntimeError(
             f"backend='cuda' needs a CUDA GPU that CuPy can compile kernels "
             f"for, and found none ({reason}). Install the GPU extra with "
@@ -77,24 +94,37 @@ def require() -> None:
         )
 
 
+class _Probe(NamedTuple):
+    """Outcome of the CUDA probe in one process.
+
+    ``reason`` says why the backend is unusable (None when it is usable),
+    ``broken`` whether a visible GPU's kernels fail to compile.
+    """
+
+    reason: str | None = None
+    broken: bool = False
+
+
 # The process whose probe found a CUDA device, which initialises CUDA there.
 _initialised_in: int | None = None
+# Processes told that their visible GPU's kernels fail to compile.
+_reported: set[int] = set()
 
 
 @functools.cache
-def _probe(pid: int) -> str | None:
-    """None when the CUDA backend is usable in process ``pid``, else why not."""
+def _probe(pid: int) -> _Probe:
+    """Whether the CUDA backend is usable in process ``pid``, and why not."""
     global _initialised_in
     if _initialised_in not in (None, pid):
         # Forked after CUDA was initialised: CUDA cannot run here.
-        return f"forked from process {_initialised_in}, which initialised CUDA"
+        return _Probe(f"forked from process {_initialised_in}, which initialised CUDA")
     try:
         if cp.cuda.runtime.getDeviceCount() == 0:
-            return "no CUDA device"
+            return _Probe("no CUDA device")
     except (RuntimeError, ImportError, OSError) as exc:
         # No driver, an insufficient one, or CUDA libraries that fail to load:
         # no GPU, so backend="auto" uses the CPU without a warning.
-        return f"{type(exc).__name__}: {exc}"
+        return _Probe(f"{type(exc).__name__}: {exc}")
     _initialised_in = pid
     try:
         # A visible GPU is not enough: without NVRTC (e.g. CuPy without its
@@ -106,15 +136,8 @@ def _probe(pid: int) -> str | None:
         OSError,
         cp.cuda.compiler.CompileException,
     ) as exc:
-        reason = f"kernels fail to compile: {type(exc).__name__}: {exc}"
-        warnings.warn(
-            f"a CUDA device is visible but copairs' kernels fail to compile "
-            f"({type(exc).__name__}: {exc}); the CUDA backend is unavailable",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return reason
-    return None
+        return _Probe(f"kernels fail to compile ({type(exc).__name__}: {exc})", True)
+    return _Probe()
 
 
 @functools.cache
