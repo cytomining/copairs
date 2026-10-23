@@ -235,7 +235,12 @@ def average_precision(
 
 
 def p_values(
-    dframe: pd.DataFrame, null_size: int, seed: int, progress_bar: bool = True
+    dframe: pd.DataFrame,
+    null_size: int,
+    seed: int,
+    progress_bar: bool = True,
+    method: str = "fast",
+    backend: str = "auto",
 ) -> np.ndarray:
     """Compute p-values for average precision scores based on a null distribution.
 
@@ -257,6 +262,12 @@ def p_values(
         Random seed for reproducibility of the null distribution.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    method : str
+        ``"fast"`` (default) or ``"legacy"`` null sampler, see
+        :func:`copairs.compute.p_values`.
+    backend : str
+        Backend of the fast method: ``"auto"`` (default), ``"numba"`` or
+        ``"numpy"``, all with identical results.
 
     Returns
     -------
@@ -275,7 +286,9 @@ def p_values(
     null_confs = dframe.loc[mask, ["n_pos_pairs", "n_total_pairs"]].values
 
     # Compute p-values for profiles with valid configurations using the null distribution
-    pvals[mask] = compute.p_values(scores, null_confs, null_size, seed, progress_bar)
+    pvals[mask] = compute.p_values(
+        scores, null_confs, null_size, seed, progress_bar, method, backend
+    )
 
     # Return the array of p-values, including NaN for invalid profiles
     return pvals
