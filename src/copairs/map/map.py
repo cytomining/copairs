@@ -156,7 +156,6 @@ def get_map_pvalue(
         raise ValueError("pos_pairs is used by the joint null only")
     if null != "permutation" and stop_after is not None:
         raise ValueError("stop_after is used by the permutation null only")
-    stop_after = permutation.check_stop_after(stop_after)
     if null != "copied" and pos_pairs is None and pairs is None:
         pairs = attached_pairs(ap_scores)
     if null == "joint" and pos_pairs is None and pairs is not None:

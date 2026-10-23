@@ -1063,9 +1063,16 @@ def test_stop_after_arguments():
             mean_average_precision(
                 ap, *args, progress_bar=False, null=null, stop_after=10
             )
+    meta = label_meta()
+    feats = np.random.default_rng(15).standard_normal((len(meta), 5))
+    labelled = multilabel_ap(meta, feats)
     for bad in (0, -1, 2.5):
         with pytest.raises(ValueError, match="positive integer"):
             mean_average_precision(ap, *args, progress_bar=False, stop_after=bad)
+        with pytest.raises(ValueError, match="positive integer"):
+            mean_average_precision(
+                labelled, ["target"], *args[1:], progress_bar=False, stop_after=bad
+            )
     default = mean_average_precision(ap, *args, progress_bar=False)
     explicit = mean_average_precision(ap, *args, progress_bar=False, stop_after=None)
     assert default["p_value"].tolist() == explicit["p_value"].tolist()
