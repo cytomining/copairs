@@ -567,16 +567,14 @@ def find_pairs_multilabel(
         ``copairs[numba]``) enumerates pairs through an inverted label index
         when the input allows it (a DataFrame with a default index, list cells
         without missing or repeated labels, one label type), and uses SQL
-        otherwise. Both find the same pairs; ``"numba"`` orders them
-        differently (see Returns).
+        otherwise. Both find the same pairs, possibly in a different order.
 
     Returns
     -------
     np.ndarray
         Array of pairs of indices with matching or non-matching values in the specified columns.
         With ``multilabel_col`` in ``sameby``, also the labels and the number of
-        pairs of each label, pairs grouped by label. With ``multilabel_col`` in
-        ``diffby`` and ``backend="numba"``, pairs ``(i < j)`` are sorted and unique.
+        pairs of each label, pairs grouped by label.
 
     Notes
     -----
@@ -670,8 +668,6 @@ def find_pairs_multilabel(
             result = np.array(
                 [index_d[k] for k in ("index", "index_1")], dtype=np.uint32
             ).T
-            if fastap is not None:  # sorted, like the inverted-index matcher
-                result = _sorted_unique_pairs(result)
 
     return result
 
@@ -720,6 +716,12 @@ def _key_pairs(keys: np.ndarray) -> np.ndarray:
     ).astype(np.uint32)
 
 
-def _sorted_unique_pairs(pairs: np.ndarray) -> np.ndarray:
-    """``np.unique(pairs, axis=0)`` for uint32 ``(i, j)`` pairs, via packed keys."""
-    return _key_pairs(np.unique(_pair_keys(pairs)))
+def _unique_pairs(pairs: np.ndarray) -> np.ndarray:
+    """``np.unique(pairs, axis=0)`` for uint32 ``(i, j)`` pairs, via packed keys.
+
+    Pairs that are already sorted and unique are returned as they are.
+    """
+    keys = _pair_keys(pairs)
+    if (keys[1:] > keys[:-1]).all():
+        return pairs
+    return _key_pairs(np.unique(keys))

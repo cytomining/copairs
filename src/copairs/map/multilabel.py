@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.matching import UnpairedException, find_pairs_multilabel
+from copairs.matching import UnpairedException, _unique_pairs, find_pairs_multilabel
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
@@ -133,9 +133,8 @@ def average_precision(
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find any negative pairs.")
 
-    if backend == "numpy":  # the numba matchers return sorted unique pairs
-        logger.info("Dropping dups in negative pairs...")
-        neg_pairs = np.unique(neg_pairs, axis=0)
+    logger.info("Dropping dups in negative pairs...")
+    neg_pairs = _unique_pairs(neg_pairs)
 
     logger.info("Computing positive similarities...")
     pos_sims = distance_fn(feats, pos_pairs, batch_size)

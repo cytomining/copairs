@@ -125,15 +125,6 @@ def test_array_label_cells_with_other_columns():
     np.testing.assert_array_equal(got, index_pairs(dframe, *args))
 
 
-def test_sorted_unique_pairs_match_numpy():
-    """The SQL fallback's dedup under Numba equals np.unique(axis=0)."""
-    pairs = sql_pairs(label_frame(1), [], ["labels"], "labels")
-    pairs = np.concatenate([pairs[::-1], pairs[:50]])  # unsorted, with duplicates
-    np.testing.assert_array_equal(
-        matching._sorted_unique_pairs(pairs), np.unique(pairs, axis=0)
-    )
-
-
 @pytest.mark.parametrize(
     "labels,index",
     [
@@ -216,9 +207,6 @@ def test_multilabel_ap_with_sql_fallback(distance):
         matching._find_pairs_multilabel_numba(fastap, dframe, [], ["labels"], "labels")
         is None
     )
-    pairs = index_pairs(dframe, ["plate"], ["labels"], "labels")
-    keys = pairs[:, 0].astype(np.int64) * len(dframe) + pairs[:, 1]
-    assert (np.diff(keys) > 0).all()  # sorted and unique, as from the index
     kwargs = dict(
         CONSISTENCY,
         neg_sameby=["plate"],
