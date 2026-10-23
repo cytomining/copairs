@@ -28,6 +28,45 @@ def null_of(members, edges, size, seed=0, start=0):
     return joint.joint_nulls(plan, size, start)[0]
 
 
+def random_map(members, edges, null_size, seed):
+    """#151's joint sampler, the reference the module reproduces in distribution.
+
+    Draws a group's edge uniforms and each member's private positives, then drops
+    the member's negatives into the gaps between its sorted positives with one
+    multinomial draw.
+    """
+    rng = np.random.default_rng(seed)
+    edges = sorted({(min(i, j), max(i, j)) for i, j in edges})
+    shared = rng.random((null_size, len(edges)))
+    total = np.zeros(null_size)
+    for i, (num_pos, num_neg) in enumerate(members):
+        mine = [e for e, pair in enumerate(edges) if i in pair]
+        private = rng.random((null_size, num_pos - len(mine)))
+        vals = -np.sort(-np.concatenate([shared[:, mine], private], axis=1), axis=1)
+        ends = np.ones((null_size, 1)), np.zeros((null_size, 1))
+        gaps = -np.diff(np.concatenate([ends[0], vals, ends[1]], axis=1), axis=1)
+        above = np.cumsum(rng.multinomial(num_neg, gaps), axis=1)[:, :-1]
+        t = np.arange(1, num_pos + 1)
+        total += (t / (t + above)).sum(axis=1) / num_pos
+    return total / len(members)
+
+
+def explicit_map_null(members, edges, null_size, seed):
+    """Draw every similarity explicitly and sort each full list, as a reference for `random_map`."""
+    rng = np.random.default_rng(seed)
+    shared = rng.random((null_size, len(edges)))
+    total = np.zeros(null_size)
+    for i, (num_pos, num_neg) in enumerate(members):
+        mine = [e for e, pair in enumerate(edges) if i in pair]
+        private = rng.random((null_size, num_pos - len(mine) + num_neg))
+        vals = np.concatenate([shared[:, mine], private], axis=1)
+        labels = np.r_[np.ones(num_pos), np.zeros(num_neg)]
+        rel = labels[np.argsort(-vals, axis=1)]
+        precision = np.cumsum(rel, axis=1) / np.arange(1, num_pos + num_neg + 1)
+        total += (precision * rel).sum(axis=1) / num_pos
+    return total / len(members)
+
+
 def scalar_nulls(plan, size, start):
     """Return every signature's samples from the scalar sampler, one at a time."""
     width = max(int(np.max(plan[1])), int(np.max(np.diff(plan[3]))), 1)
@@ -104,10 +143,18 @@ def test_singleton_is_the_ap_null(conf):
 
 @pytest.mark.parametrize("members, edges", SIGNATURES[:3] + [([(2, 4)] * 2, [(0, 1)])])
 def test_matches_numpy_reference(members, edges):
-    """The sampler has the law of compute.random_map (#151's sampler)."""
+    """The sampler has the law of `random_map` (#151's sampler)."""
     got = null_of(members, edges, 100_000)
-    ref = compute.random_map(members, edges, 100_000, seed=4)
+    ref = random_map(members, edges, 100_000, seed=4)
     assert stats.ks_2samp(got, ref).pvalue > 1e-3
+
+
+@pytest.mark.parametrize("members, edges", SIGNATURES[:3])
+def test_reference_matches_explicit_simulation(members, edges):
+    """`random_map`'s gaps reproduce drawing every similarity explicitly."""
+    fast = random_map(members, edges, 50_000, seed=3)
+    slow = explicit_map_null(members, edges, 50_000, seed=4)
+    assert stats.ks_2samp(fast, slow).pvalue > 1e-3
 
 
 def test_replicate_moments():

@@ -4,8 +4,9 @@ Under the null every pair's similarity is an independent uniform. A positive
 pair between two members of a group (an edge) is one uniform that sits in both
 members' rank lists; everything else a member ranks is private to it. Each
 member's marginal is the AP null of its configuration, but members sharing
-edges move together (see :func:`copairs.compute.random_map`, the reference this
-module reproduces in distribution).
+edges move together. The tests keep #151's sampler, which draws from
+``numpy.random.Generator``, as the reference this module reproduces in
+distribution.
 
 A sample draws the group's edge uniforms, then for each member its private
 positives and, walking down its sorted positives, the number of its negatives
