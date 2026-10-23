@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs.methods import check_null
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     check_hierarchical_by,
@@ -29,15 +30,13 @@ def get_map_pvalue(
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
+    null: str = "joint",
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
     This function groups AP scores by the specified columns, computes the mean
     Average Precision (mAP) for each group, and calculates p-values by comparing
-    against a null distribution sampled jointly over the group's members
-    (`compute.random_map`): every positive pair inside the group is one random
-    number shared by both members' rank lists, so the null has the right width
-    for the number of replicates.
+    against the null distribution of the group's mAP chosen by `null`.
 
     Parameters
     ----------
@@ -55,7 +54,7 @@ def get_map_pvalue(
     max_workers : int
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
-        Location to save the cache (only used by the legacy fallback below).
+        Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
         The `(n_pairs, 2)` positive pairs (row indices of `ap_scores`) used to
         compute the AP scores, as returned by
@@ -64,7 +63,16 @@ def get_map_pvalue(
         `average_precision` returned. When omitted, each group's positives are
         assumed to be its other members, which is the replicate-retrieval case
         (`n_pos_pairs == len(group) - 1`). Groups where that does not hold fall
-        back to copairs' previous null with a warning.
+        back to the copied null with a warning. Joint null only.
+    null : str
+        Null of the group mAP. ``"joint"`` (default) samples the members' APs
+        together (`compute.random_map`): a positive pair inside the group is
+        one random number in both members' rank lists, so the null narrows as
+        replicates are added. ``"copied"`` is the null of copairs <= 0.5.5:
+        each member's AP null is sampled per `(n_pos_pairs, n_total_pairs)`
+        configuration and the group's null averages them, so members with
+        equal pair counts share one draw and the null does not narrow as
+        replicates are added.
 
     Returns
     -------
@@ -77,12 +85,14 @@ def get_map_pvalue(
         - `indices`: List of indices in the original ap_scores for this group.
 
     """
+    null = check_null(null)
+    if null != "joint" and pos_pairs is not None:
+        raise ValueError("pos_pairs is used by the joint null only")
+
     # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
     profile = ap_scores.index.to_numpy()
     ap_scores = ap_scores.reset_index(drop=True).copy()
-    num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
-    num_neg = ap_scores["n_total_pairs"].to_numpy().astype(np.int64) - num_pos
 
     # Group by the specified metadata column(s) and calculate mean AP
     map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
@@ -97,30 +107,22 @@ def get_map_pvalue(
         "mean_normalized_average_precision",
     ]
     groups = map_scores["indices"].tolist()
+    scores = map_scores["mean_average_precision"].to_numpy()
+    copied = dict(
+        null_size=null_size,
+        seed=seed,
+        cache_dir=cache_dir,
+        progress_bar=progress_bar,
+        max_workers=max_workers,
+    )
 
-    # Positive pairs inside each group, as local (i, j) index pairs
-    if pos_pairs is None:
-        edges_of = [
-            [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
-            if (num_pos[ix] == len(ix) - 1).all()
-            else None
-            for ix in groups
-        ]
-    else:
-        pos_pairs = np.asarray(pos_pairs)
-        group_of = np.full(int(max(pos_pairs.max(), profile.max())) + 1, -1)
-        local = np.empty_like(group_of)
-        for g, ix in enumerate(groups):
-            group_of[profile[ix]] = g
-            local[profile[ix]] = np.arange(len(ix))
-        ga, gb = group_of[pos_pairs[:, 0]], group_of[pos_pairs[:, 1]]
-        inside = (ga >= 0) & (ga == gb)
-        edges_of = [[] for _ in groups]
-        for g, a, b in zip(
-            ga[inside], local[pos_pairs[inside, 0]], local[pos_pairs[inside, 1]]
-        ):
-            edges_of[g].append((int(a), int(b)))
+    if null == "copied":
+        map_scores["p_value"] = _copied_pvalues(scores, groups, ap_scores, **copied)
+        return map_scores
 
+    num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
+    num_neg = ap_scores["n_total_pairs"].to_numpy().astype(np.int64) - num_pos
+    edges_of = _group_edges(groups, num_pos, profile, pos_pairs)
     signatures = [
         None
         if edges is None
@@ -140,49 +142,100 @@ def get_map_pvalue(
     if unique:
         compute.parallel_map(par_func, np.arange(len(unique)), progress_bar)
 
-    legacy = [i for i, sig in enumerate(signatures) if sig is None]
-    if legacy:
-        warnings.warn(
-            f"{len(legacy)} group(s) have positives that are not their other members; "
-            "pass pos_pairs to sample their mAP null jointly. Falling back to the "
-            "previous null, which copies one draw across members with equal pair counts.",
-            stacklevel=2,
-        )
-        null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
-        null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
-        null_dists = compute.get_null_dists(
-            null_confs,
-            null_size,
-            seed=seed,
-            cache_dir=cache_dir,
-            progress_bar=progress_bar,
-        )
-
-    # Function to calculate the p-value for a mAP score based on the null distribution
     def get_p_value(k):
-        map_score, indices = map_scores["mean_average_precision"].iat[k], groups[k]
-        if signatures[k] is None:
-            null_dist = null_dists[rev_ix[indices]].mean(axis=0)
-            num = (null_dist > map_score).sum()
-        else:
-            null_dist = null_of[signatures[k]]
-            num = null_size - np.searchsorted(null_dist, map_score - 1e-9, side="left")
+        null_dist = null_of[signatures[k]]
+        num = null_size - np.searchsorted(null_dist, scores[k] - 1e-9, side="left")
         return (num + 1) / (null_size + 1)  # Add 1 for stability
 
     logger.info("Computing p-values...")
+    joint = [k for k, sig in enumerate(signatures) if sig is not None]
+    p_values = np.empty(len(groups), dtype=np.float64)
+    p_values[joint] = _thread_map(get_p_value, joint, progress_bar, max_workers)
+
+    fallback = [k for k, sig in enumerate(signatures) if sig is None]
+    if fallback:
+        warnings.warn(
+            f"{len(fallback)} group(s) have positives that are not their other "
+            "members; pass pos_pairs to sample their mAP null jointly. Falling "
+            "back to the copied null, which copies one draw across members with "
+            "equal pair counts.",
+            stacklevel=2,
+        )
+        p_values[fallback] = _copied_pvalues(
+            scores[fallback], [groups[k] for k in fallback], ap_scores, **copied
+        )
+    map_scores["p_value"] = p_values
+    return map_scores
+
+
+def _group_edges(groups, num_pos, profile, pos_pairs):
+    """Positive pairs inside each group, as local ``(i, j)`` member pairs.
+
+    Without ``pos_pairs``, a group whose members each have ``len(group) - 1``
+    positives is taken to be a replicate group (all its pairs are positives),
+    and other groups get None.
+    """
+    if pos_pairs is None:
+        return [
+            [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
+            if (num_pos[ix] == len(ix) - 1).all()
+            else None
+            for ix in groups
+        ]
+    pos_pairs = np.asarray(pos_pairs)
+    group_of = np.full(int(max(pos_pairs.max(), profile.max())) + 1, -1)
+    local = np.empty_like(group_of)
+    for g, ix in enumerate(groups):
+        group_of[profile[ix]] = g
+        local[profile[ix]] = np.arange(len(ix))
+    ga, gb = group_of[pos_pairs[:, 0]], group_of[pos_pairs[:, 1]]
+    inside = (ga >= 0) & (ga == gb)
+    edges_of = [[] for _ in groups]
+    for g, a, b in zip(
+        ga[inside], local[pos_pairs[inside, 0]], local[pos_pairs[inside, 1]]
+    ):
+        edges_of[g].append((int(a), int(b)))
+    return edges_of
+
+
+def _copied_pvalues(
+    scores, groups, ap_scores, null_size, seed, cache_dir, progress_bar, max_workers
+):
+    """P-values against the mean of the members' AP nulls, as in copairs <= 0.5.5.
+
+    ``groups`` lists each group's rows of ``ap_scores``. Each configuration's
+    AP null comes from :func:`compute.get_null_dists`, so members with equal
+    pair counts share samples.
+    """
+    if not groups:
+        return np.zeros(0, dtype=np.float64)
+    rows = np.unique(np.concatenate(groups))
+    null_confs = ap_scores.loc[rows, ["n_pos_pairs", "n_total_pairs"]].values
+    null_confs, conf_ix = np.unique(null_confs, axis=0, return_inverse=True)
+    rev_ix = np.full(len(ap_scores), -1, dtype=np.int64)
+    rev_ix[rows] = conf_ix.ravel()
+
+    logger.info("Computing null_dist...")
+    null_dists = compute.get_null_dists(
+        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
+    )
+
+    def get_p_value(k):
+        null_dist = null_dists[rev_ix[groups[k]]].mean(axis=0)
+        num = (null_dist > scores[k]).sum()
+        return (num + 1) / (null_size + 1)  # Add 1 for stability
+
+    logger.info("Computing p-values...")
+    return _thread_map(get_p_value, range(len(groups)), progress_bar, max_workers)
+
+
+def _thread_map(fn, items, progress_bar, max_workers):
+    """``[fn(item) for item in items]`` on a thread pool."""
     if progress_bar:
         from tqdm.contrib.concurrent import thread_map
 
-        p_values = thread_map(
-            get_p_value, range(len(groups)), leave=False, max_workers=max_workers
-        )
-    else:
-        p_values = silent_thread_map(
-            get_p_value, range(len(groups)), max_workers=max_workers
-        )
-    map_scores["p_value"] = p_values
-
-    return map_scores
+        return thread_map(fn, items, leave=False, max_workers=max_workers)
+    return silent_thread_map(fn, items, max_workers=max_workers)
 
 
 def mean_average_precision(
@@ -195,6 +248,7 @@ def mean_average_precision(
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
+    null: str = "joint",
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -221,10 +275,13 @@ def mean_average_precision(
     max_workers : int
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
-        Location to save the cache.
+        Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
         Positive pairs used to compute the AP scores; see `get_map_pvalue`.
         Needed when a group's positives are not its other members.
+    null : str
+        Null of the group mAP, ``"joint"`` (default) or ``"copied"``; see
+        `get_map_pvalue`.
 
     Returns
     -------
@@ -252,6 +309,7 @@ def mean_average_precision(
         max_workers=max_workers,
         cache_dir=cache_dir,
         pos_pairs=pos_pairs,
+        null=null,
     )
 
     # Step 2: Apply multiple testing correction
@@ -275,6 +333,7 @@ def mean_average_precision_hierarchical(
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
+    null: str = "joint",
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -314,10 +373,13 @@ def mean_average_precision_hierarchical(
     max_workers : int
         Number of workers used. Default defined by tqdm's `thread_map`.
     cache_dir : str or Path
-        Location to save the cache.
+        Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
         Positive pairs used to compute the AP scores; see `get_map_pvalue`.
         Needed when a group's positives are not its other members.
+    null : str
+        Null of the group mAP, ``"joint"`` (default) or ``"copied"``; see
+        `get_map_pvalue`.
 
     Returns
     -------
@@ -349,6 +411,7 @@ def mean_average_precision_hierarchical(
         max_workers=max_workers,
         cache_dir=cache_dir,
         pos_pairs=pos_pairs,
+        null=null,
     )
 
     # Step 2: Apply hierarchical multiple testing correction
