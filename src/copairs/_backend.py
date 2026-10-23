@@ -8,19 +8,22 @@ import importlib
 from types import ModuleType
 
 # Optional backends: the packages they import, by display name, and their extra.
-# The CUDA AP stage also runs Numba kernels, so the gpu extra includes Numba.
+# llvmlite is Numba's compiler, which the extras install with it. The CUDA AP
+# stage also runs Numba kernels, so the gpu extra includes Numba.
+_NUMBA = {"numba": "Numba", "llvmlite": "Numba"}
 _OPTIONAL = {
-    "numba": ({"numba": "Numba"}, "numba"),
-    "cuda": ({"cupy": "CuPy", "numba": "Numba"}, "gpu"),
+    "numba": (_NUMBA, "numba"),
+    "cuda": ({"cupy": "CuPy", **_NUMBA}, "gpu"),
 }
 
 
 def import_backend(module: str, backend: str) -> ModuleType:
     """Import ``module``, which needs the optional dependencies of ``backend``.
 
-    Only a missing dependency itself becomes the ImportError that names the
-    extra to install. Other import failures, including a dependency's own
-    missing modules, are raised unchanged.
+    Only a missing dependency itself, or Numba's llvmlite, becomes the
+    ImportError that names the extra to install. Other import failures,
+    including other modules a dependency fails to import, are raised
+    unchanged.
     """
     packages, extra = _OPTIONAL[backend]
     try:

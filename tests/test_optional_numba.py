@@ -84,13 +84,15 @@ def test_multilabel_matching_skips_scipy():
         "nulls.ap_nulls([[2, 5]], 4, 0, backend='numba')",
     ],
 )
-def test_missing_numba_extra_has_actionable_error(call):
-    """Selecting Numba without the extra reports the installation command."""
+@pytest.mark.parametrize("missing", ["numba", "llvmlite"])
+def test_missing_numba_extra_has_actionable_error(call, missing):
+    """Selecting Numba without the extra reports the installation command.
+
+    So does a Numba whose compiler, llvmlite, is missing: the extra installs it.
+    """
+    error = f"ModuleNotFoundError(\"No module named '{missing}'\", name='{missing}')"
     result = run_isolated(
-        BLOCK_NUMBA.format(
-            error="ModuleNotFoundError(\"No module named 'numba'\", name='numba')"
-        )
-        + "from copairs import nulls\n"
+        BLOCK_NUMBA.format(error=error) + "from copairs import nulls\n"
         "from copairs.map import average_precision, multilabel\n"
         "from copairs.matching import find_pairs_multilabel\n"
         "from copairs.map.normalization import normalize_ap\n"
@@ -107,7 +109,7 @@ def test_missing_numba_extra_has_actionable_error(call):
 @pytest.mark.parametrize(
     "error",
     [
-        "ModuleNotFoundError(\"No module named 'llvmlite'\", name='llvmlite')",
+        "ModuleNotFoundError(\"No module named '_ctypes'\", name='_ctypes')",
         "ImportError('incompatible numba build')",
     ],
     ids=["transitive_missing_module", "incompatible_build"],
@@ -123,7 +125,10 @@ def test_missing_numba_extra_has_actionable_error(call):
 def test_numba_import_failure_is_not_masked(error, call):
     """A broken or incompatible Numba installation keeps its original error.
 
-    The AP stage and the nulls share one import rule.
+    Only a missing numba or llvmlite names the extra; a module that Numba's
+    dependencies fail to import (here CPython's ``_ctypes``, which llvmlite
+    loads) is not fixed by installing it. The AP stage and the nulls share
+    one import rule.
     """
     result = run_isolated(
         BLOCK_NUMBA.format(error=error) + "from copairs import nulls\n"

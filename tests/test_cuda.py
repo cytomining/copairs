@@ -70,7 +70,7 @@ AP_CALLS = [
     "multilabel.average_precision(LABELS, np.eye(4), ['l'], ['p'], [], ['l'], 'l',"
     " backend='cuda')",
 ]
-if importlib.util.find_spec("numba"):
+if all(importlib.util.find_spec(name) for name in ("numba", "llvmlite")):
     from copairs import fastap
 
     AP_CALLS.append(
@@ -188,10 +188,14 @@ def test_cpu_steps_take_no_cuda_backend():
 
 
 @needs_cupy
-def test_cuda_ap_stage_without_numba_names_the_extra():
+@pytest.mark.parametrize(
+    "missing", [("numba", "llvmlite"), ("llvmlite",)], ids=["numba", "llvmlite"]
+)
+def test_cuda_ap_stage_without_numba_names_the_extra(missing):
     """The CUDA AP stage runs some steps on Numba, so without it "cuda" names the extra.
 
-    The probe is stubbed to find a usable GPU, so the Numba import is what fails.
+    So does a Numba without its compiler, llvmlite. The probe is stubbed to
+    find a usable GPU, so the Numba import is what fails.
     """
     check = (
         "from copairs import _cuda\n"
@@ -199,7 +203,7 @@ def test_cuda_ap_stage_without_numba_names_the_extra():
         "assert len(AP_CALLS) == 2\n"
         "raises(ImportError, 'Numba', \"pip install 'copairs[gpu]'\", calls=AP_CALLS)\n"
     )
-    result = run_isolated(without_modules("numba", "llvmlite") + _SETUP + check)
+    result = run_isolated(without_modules(*missing) + _SETUP + check)
     assert result.returncode == 0, result.stderr
 
 
