@@ -5,7 +5,13 @@ import pandas as pd
 import pytest
 
 from copairs import compute
-from copairs.map import get_map_pvalue, mean_average_precision
+from copairs.map import (
+    get_map_pvalue,
+    average_precision,
+    mean_average_precision,
+    mean_average_precision_hierarchical,
+)
+from copairs.methods import NULLS
 
 
 def ap_frame(rows):
@@ -95,4 +101,35 @@ def test_unknown_null():
     with pytest.raises(ValueError, match="joint null only"):
         mean_average_precision(
             frame, ["g"], null="copied", pos_pairs=np.array([[0, 1]]), **kwargs
+        )
+
+
+def test_hierarchical_takes_each_null():
+    """The hierarchical entry point validates null= and passes it to the p-values."""
+    rows = [(g, d) for g in "abc" for d in (1, 2) for _ in range(3)] + [("ctrl", 0)] * 8
+    meta = pd.DataFrame(rows, columns=["g", "dose"])
+    meta["ref"] = np.where(meta["g"] == "ctrl", meta.index, -1)
+    feats = np.random.default_rng(5).standard_normal((len(meta), 6))
+    feats[meta["g"].eq("a").to_numpy()] += 2.0
+    keys = ["g", "dose", "ref"]
+    ap = average_precision(meta, feats, keys, [], [], keys, progress_bar=False)
+    ap = ap[ap["g"] != "ctrl"]
+    kwargs = dict(null_size=300, threshold=0.05, seed=0, progress_bar=False)
+    sameby = ["g", "dose"]
+    p = {}
+    for null in NULLS:
+        flat = mean_average_precision(ap, sameby, null=null, **kwargs)
+        hier = mean_average_precision_hierarchical(
+            ap, sameby, hierarchical_by=["g"], null=null, **kwargs
+        )
+        assert hier["p_value"].tolist() == flat["p_value"].tolist()
+        p[null] = flat["p_value"].tolist()
+    assert p["permutation"] != p["joint"] != p["copied"]
+    default = mean_average_precision_hierarchical(
+        ap, sameby, hierarchical_by=["g"], **kwargs
+    )
+    assert default["p_value"].tolist() == p["permutation"]
+    with pytest.raises(ValueError, match="unknown null"):
+        mean_average_precision_hierarchical(
+            ap, sameby, hierarchical_by=["g"], null="exact", **kwargs
         )
