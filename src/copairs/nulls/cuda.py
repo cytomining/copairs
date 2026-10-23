@@ -345,7 +345,7 @@ class GroupCounter:
         return self._counts.get().astype(np.int64)
 
 
-_COUNT_GE = _cuda.PRELUDE + r"""
+_COUNT_KERNELS = r"""
 // Bin ptr[s] + s + q counts the samples of null row rows[s] with exactly q thresholds
 // of segment s <= the sample (thresholds sorted, NaN last; ptr[0] == 0).
 extern "C" __global__ void exceed_hist(const double* null, long long size, long long n_seg,
@@ -375,6 +375,7 @@ extern "C" __global__ void suffix_add(const long long* ptr, long long n_seg,
     }
 }
 """
+_COUNT_GE = _cuda.PRELUDE + _COUNT_KERNELS
 
 # GPU bytes of count_ge per bin of a batch: the bin, and the threshold and count
 # of its score (a segment's extra bin pays for its row and offset), plus the

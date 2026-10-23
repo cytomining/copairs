@@ -44,7 +44,7 @@ PAIR_CHUNK = 1 << 24
 # float32 similarity and its float32 key.
 _NEGATIVE_BYTES = 16
 
-_SOURCE = _cuda.PRELUDE + r"""
+_PAIR_KERNELS = r"""
 // Compiled with --fmad=false (copairs._cuda.OPTIONS): the counting kernels round as
 // the CPU does. The similarity sums, which match the CPU's only to rounding anyway,
 // ask for fused multiply-adds with fma().
@@ -141,6 +141,7 @@ extern "C" __global__ void ap_from_hist(const long long* ptr, const unsigned lon
     }
 }
 """
+_SOURCE = _cuda.PRELUDE + _PAIR_KERNELS
 
 
 def _kernel(name: str):
@@ -331,7 +332,7 @@ def ap_from_pairs(
 # kernel gets 48 KiB without opting in. Larger draws run on Numba.
 MAX_DRAW_QUERIES = 48 * 1024 // 8
 
-_DRAW_SOURCE = _cuda.PRELUDE + r"""
+_DRAW_KERNEL = r"""
 // NumPy order of float32 keys: NaN after every number, and ties with NaN.
 __device__ __forceinline__ bool key_lt(float a, float b) {
     return !isnan(a) && (isnan(b) || a < b);
@@ -398,6 +399,7 @@ extern "C" __global__ void draw_ap(const float* sims, int k, int m, long long n_
     }
 }
 """
+_DRAW_SOURCE = _cuda.PRELUDE + _DRAW_KERNEL
 
 
 def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.ndarray:
