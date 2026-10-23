@@ -107,8 +107,10 @@ class _FeatureSimilarity:
 
     def _kernel_sims(self, pairs):
         """Return the kernel's similarities of ``pairs``, built by the first call."""
+        # Looked up on every call: under "cuda" this checks the GPU (and that
+        # this process was not forked from one that used it) before a launch.
+        kernels = backend_module(self.kernel_backend)
         if self._kernel is None:
-            kernels = backend_module(self.kernel_backend)
             self._kernel = kernels.pair_similarity(self.feats, self.distance)
         return self._kernel(pairs)
 

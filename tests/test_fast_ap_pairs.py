@@ -9,7 +9,7 @@ numba = pytest.importorskip("numba", reason="Numba optional extra is unavailable
 from copairs import compute
 from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import _numba
-from tests.markers import AP_BACKENDS
+from tests.markers import AP_BACKENDS, needs_gpu
 from copairs._backend import backend_module
 
 NULL = dict(
@@ -170,3 +170,23 @@ def test_null_threads_compute_similarities_on_the_callers_numba_threads(
     sims = [threads for name, threads in launches if name == "_kernel_sims"]
     assert sims, launches
     assert {threads for _, threads in launches} == {1}
+
+
+@needs_gpu
+def test_pairs_check_the_gpu_before_every_kernel_call(monkeypatch):
+    """The CUDA kernel, once built, still runs the GPU check before each call.
+
+    The check is the fork guard: a child forked after its parent's null
+    built the kernel raises its RuntimeError instead of launching on CUDA
+    it cannot use.
+    """
+    feats = np.random.default_rng(6).standard_normal((96, 8)).astype(np.float32)
+    _, pairs = plate_ap(feats, "cuda", return_pairs=True)
+    pairs.similarity(pairs.neg[:4])  # builds the kernel
+
+    def forked():
+        raise RuntimeError("forked")
+
+    monkeypatch.setattr("copairs._cuda.require", forked)  # imports CuPy
+    with pytest.raises(RuntimeError, match="forked"):
+        pairs.similarity(pairs.neg[:4])
