@@ -464,9 +464,9 @@ def test_pvalues_tiny_budget_streams_lazily():
 def test_numpy_pvalues_memory_within_budget(which, budget, monkeypatch):
     """Peak memory of the NumPy p-values stays within 2.5x budget_bytes.
 
-    The chunk of null samples, the sampler's temporaries (summed over its 16
-    threads here, at the larger budget) and the counts' each fit the budget,
-    and a chunk is freed before the next is sampled. Sampling a whole chunk at
+    The chunk of null samples, the sampler's temporaries (summed over its
+    threads: 4 of the 16 offered fit the larger budget) and the counts' each
+    fit the budget, and a chunk is freed before the next is sampled. Sampling a whole chunk at
     once peaked at 31x (AP) and 9.7x (mAP).
     """
     monkeypatch.setattr(sampler, "_numpy_workers", lambda: 16)
