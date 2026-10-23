@@ -158,6 +158,20 @@ def test_pair_similarity_without_kernel():
         fastap.PairSimilarity(feats, "jaccard")
 
 
+def test_similarity_fn_is_bound_to_its_feats():
+    """The kernel replacement scores the feats it was built for, no others."""
+    rng = np.random.default_rng(3)
+    feats = rng.normal(size=(20, 5))
+    pairs = np.array([[0, 1], [2, 3]])
+    generic = compute.get_similarity_fn("cosine", progress_bar=False)
+    fn = fastap.similarity_fn(feats, "cosine", generic)
+    assert fn is not generic
+    np.testing.assert_allclose(fn(feats, pairs, 1), generic(feats, pairs, 1), rtol=1e-6)
+    for other in (feats.copy(), feats[::-1], rng.normal(size=(20, 5))):
+        with pytest.raises(ValueError, match="built for"):
+            fn(other, pairs, 1)
+
+
 @pytest.mark.parametrize("metric", ["euclidean", "manhattan", "chebyshev"])
 def test_pair_similarity_nonfinite_features(metric):
     """Inf - inf differences give NaN similarities, as in the generic functions."""

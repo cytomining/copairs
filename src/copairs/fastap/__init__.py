@@ -35,14 +35,20 @@ def similarity_fn(feats: np.ndarray, distance, generic: Callable) -> Callable:
 
     ``generic`` is ``copairs.compute.get_similarity_fn(distance)``, called as
     ``generic(feats, pairs, batch_size)``. The replacement takes the same
-    arguments, but the features it uses are the ``feats`` given here, which
-    the kernel normalizes once.
+    arguments but is bound to the ``feats`` given here, which the kernel
+    normalizes once: passing any other object raises ValueError. It scores
+    all pairs at once, so ``batch_size`` does not apply.
     """
     kernel = pair_similarity(feats, distance)
     if kernel is None:
         return generic
 
-    def similarity(_feats, pairs, _batch_size):
+    def similarity(other_feats, pairs, _batch_size):
+        if other_feats is not feats:
+            raise ValueError(
+                "this similarity function was built for other features; "
+                "build one with similarity_fn(feats, ...) for these"
+            )
         return kernel(pairs)
 
     return similarity
