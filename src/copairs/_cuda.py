@@ -20,6 +20,22 @@ OPTIONS = ("--fmad=false", "-std=c++14")
 BLOCK = 256
 
 _PROBE = 'extern "C" __global__ void probe(int* x) { if (x) *x = 1; }'
+
+# Device functions shared by copairs' kernel sources, which start with it.
+PRELUDE = r"""
+// First index in sorted vals[lo:hi] after key (NumPy order, NaN last); mirrors
+// copairs.fastap.ranking.upper_bound.
+template <typename T, typename I>
+__device__ __forceinline__ I upper_bound(const T* vals, I lo, I hi, T key) {
+    bool key_nan = isnan(key);
+    while (lo < hi) {
+        I mid = (lo + hi) >> 1;
+        T v = vals[mid];
+        if (key_nan || (!isnan(v) && v <= key)) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+"""
 _INSTALL = "pip install 'copairs[gpu]'"
 
 

@@ -44,15 +44,10 @@ PAIR_CHUNK = 1 << 24
 # float32 similarity and its float32 key.
 _NEGATIVE_BYTES = 16
 
-_SOURCE = r"""
+_SOURCE = _cuda.PRELUDE + r"""
 // Compiled with --fmad=false (copairs._cuda.OPTIONS): the counting kernels round as
 // the CPU does. The similarity sums, which match the CPU's only to rounding anyway,
 // ask for fused multiply-adds with fma().
-// NumPy ordering: NaN sorts after every number and ties with NaN.
-__device__ __forceinline__ bool le(float v, float key) {
-    return isnan(key) || (!isnan(v) && v <= key);
-}
-
 template <typename T>
 __device__ void dot_pairs(const T* x, long long d, const unsigned int* pairs, long long n,
                           float* out) {
@@ -125,12 +120,7 @@ extern "C" __global__ void negative_hist(const unsigned int* neg_pairs, const fl
          e += (long long)gridDim.x * blockDim.x) {
         long long i = neg_pairs[e];
         float key = keys[e >> 1];
-        long long lo = ptr[i], hi = ptr[i + 1];
-        while (lo < hi) {
-            long long mid = (lo + hi) >> 1;
-            if (le(vals[mid], key)) lo = mid + 1; else hi = mid;
-        }
-        atomicAdd(hist + lo + i, 1ull);
+        atomicAdd(hist + upper_bound(vals, ptr[i], ptr[i + 1], key) + i, 1ull);
     }
 }
 
@@ -341,13 +331,10 @@ def ap_from_pairs(
 # kernel gets 48 KiB without opting in. Larger draws run on Numba.
 MAX_DRAW_QUERIES = 48 * 1024 // 8
 
-_DRAW_SOURCE = r"""
+_DRAW_SOURCE = _cuda.PRELUDE + r"""
 // NumPy order of float32 keys: NaN after every number, and ties with NaN.
 __device__ __forceinline__ bool key_lt(float a, float b) {
     return !isnan(a) && (isnan(b) || a < b);
-}
-__device__ __forceinline__ bool key_le(float v, float key) {
-    return isnan(key) || (!isnan(v) && v <= key);
 }
 
 // AP of each (draw, query) row of sims (n_rows, k + m), ranked by the float32 key
@@ -394,13 +381,8 @@ extern "C" __global__ void draw_ap(const float* sims, int k, int m, long long n_
             }
         }
         for (int e = threadIdx.x; e < m; e += blockDim.x) {
-            float key = 1.0f - s[k + e];
-            int lo = 0, hi = k - 1;  // positives ranked ahead of this negative
-            while (lo < hi) {
-                int mid = (lo + hi) >> 1;
-                if (key_le(pos[mid], key)) lo = mid + 1; else hi = mid;
-            }
-            atomicAdd(hist + lo, 1u);
+            // bin: the positives ranked ahead of this negative
+            atomicAdd(hist + upper_bound(pos, 0, k - 1, 1.0f - s[k + e]), 1u);
         }
         __syncthreads();
         if (threadIdx.x == 0) {

@@ -345,7 +345,7 @@ class GroupCounter:
         return self._counts.get().astype(np.int64)
 
 
-_COUNT_GE = r"""
+_COUNT_GE = _cuda.PRELUDE + r"""
 // Bin ptr[s] + s + q counts the samples of null row rows[s] with exactly q thresholds
 // of segment s <= the sample (thresholds sorted, NaN last; ptr[0] == 0).
 extern "C" __global__ void exceed_hist(const double* null, long long size, long long n_seg,
@@ -357,13 +357,7 @@ extern "C" __global__ void exceed_hist(const double* null, long long size, long 
         long long lo = ptr[s], hi = ptr[s + 1];
         if (hi == lo) continue;
         double x = null[rows[s] * size + (flat - s * size)];
-        long long a = lo, b = hi;
-        while (a < b) {
-            long long mid = (a + b) >> 1;
-            double v = thr[mid];
-            if (isnan(x) || (!isnan(v) && v <= x)) a = mid + 1; else b = mid;
-        }
-        atomicAdd(hist + (a + s), 1ull);
+        atomicAdd(hist + (upper_bound(thr, lo, hi, x) + s), 1ull);
     }
 }
 
