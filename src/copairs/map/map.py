@@ -85,6 +85,14 @@ def get_map_pvalue(
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
+    # Average the APs in float64 and round the means to the APs' dtype: ties
+    # carry the APs' rounding, and pandas averages float32 APs to float32 or
+    # float64 depending on its version and the group keys. The reported mAP
+    # is then the score the nulls count ties against, under any pandas.
+    ap_dtype = ap_scores["average_precision"].to_numpy().dtype
+    score_dtype = ap_dtype if ap_dtype.kind == "f" else np.dtype(np.float64)
+    ap_scores["average_precision"] = ap_scores["average_precision"].astype(np.float64)
+
     # Group by the specified metadata column(s) and calculate mean AP
     map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
         {
@@ -97,6 +105,9 @@ def get_map_pvalue(
         "indices",
         "mean_normalized_average_precision",
     ]
+    map_scores["mean_average_precision"] = map_scores["mean_average_precision"].astype(
+        score_dtype
+    )
     map_scores["p_value"] = _copied_pvalues(
         map_scores["mean_average_precision"].to_numpy(),
         map_scores["indices"].tolist(),
