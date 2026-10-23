@@ -5,7 +5,6 @@ ones (:mod:`copairs.fastap.cuda`) where CuPy compiles kernels for a GPU.
 """
 
 import tracemalloc
-import importlib.util
 
 import numpy as np
 import pandas as pd
@@ -13,18 +12,12 @@ import pytest
 
 pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
-from copairs import nulls, fastap, compute
+from copairs import fastap, compute
 from copairs.map import average_precision
 from tests.helpers import fake_gpu, run_isolated, simulate_random_dframe
+from tests.markers import AP_BACKENDS, needs_gpu, needs_cupy
 from copairs._backend import backend_module
 from copairs.map.average_precision import build_rank_lists
-
-GPU = "cuda" in nulls.available_backends()
-needs_gpu = pytest.mark.skipif(not GPU, reason="needs CuPy and a usable CUDA GPU")
-needs_cupy = pytest.mark.skipif(
-    importlib.util.find_spec("cupy") is None, reason="CuPy is not installed"
-)
-AP_BACKENDS = ["numba", pytest.param("cuda", marks=needs_gpu)]
 
 
 def random_pairs(rng, n_profiles, n_pos, n_neg):

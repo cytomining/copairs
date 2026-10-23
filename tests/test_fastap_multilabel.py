@@ -6,15 +6,11 @@ import pytest
 
 pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
-from copairs import nulls, fastap, compute, matching
+from copairs import fastap, compute, matching
 from copairs.map import multilabel
+from tests.markers import AP_BACKENDS
 
 N_LABELS = 12
-
-GPU = "cuda" in nulls.available_backends()
-needs_gpu = pytest.mark.skipif(not GPU, reason="needs CuPy and a usable CUDA GPU")
-# "cuda" computes similarities on the GPU and the rest as "numba" does.
-AP_BACKENDS = ["numba", pytest.param("cuda", marks=needs_gpu)]
 
 
 def label_frame(seed=0, n=120, empty=True):

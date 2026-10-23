@@ -8,7 +8,6 @@ staying on the CPU where only an explicit ``"cuda"`` runs the GPU.
 
 import types
 import warnings
-import importlib.util
 import multiprocessing
 
 import numpy as np
@@ -24,12 +23,7 @@ from tests.helpers import (
     without_modules,
     brute_map_pvalues,
 )
-
-HAS_CUPY = importlib.util.find_spec("cupy") is not None
-HAS_NUMBA = importlib.util.find_spec("numba") is not None
-GPU = "cuda" in nulls.available_backends()
-needs_cupy = pytest.mark.skipif(not HAS_CUPY, reason="CuPy is not installed")
-needs_gpu = pytest.mark.skipif(not GPU, reason="needs CuPy and a usable CUDA GPU")
+from tests.markers import GPU, HAS_NUMBA, needs_gpu, needs_cupy
 
 CONFS = np.array(
     [[1, 1], [1, 7], [2, 2], [3, 10], [5, 20], [9, 49], [40, 45], [99, 1099], [3, 1000]]
