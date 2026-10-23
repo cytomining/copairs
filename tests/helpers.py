@@ -6,6 +6,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
+from copairs import nulls
 from copairs.matching import ColumnList
 
 SEED = 0
@@ -77,3 +78,69 @@ def create_dframe(n_options, n_rows):
     dframe = pd.DataFrame((product(colc, colp, colw)), columns=list("cpw"))
     dframe = dframe.sample(n_rows, random_state=SEED).reset_index(drop=True)
     return dframe
+
+
+def ap_frame(rows):
+    """Build an ``ap_scores`` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
+    frame = pd.DataFrame(
+        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
+    )
+    frame["normalized_average_precision"] = 0.0
+    return frame
+
+
+def query_meta(others: int = 0) -> pd.DataFrame:
+    """Four replicates of group "query" among 30 one-profile controls.
+
+    ``others`` profiles of group "other" follow the controls.
+    """
+    groups = ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * others
+    return pd.DataFrame({"g": groups})
+
+
+def brute_ap_pvalues(scores, conf_ix, confs, null_size, seed):
+    """Count null values >= each score over the materialized nulls."""
+    null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
+    num = (null[conf_ix] >= nulls.tie_thresholds(scores)[:, None]).sum(axis=1)
+    return (num + 1) / (null_size + 1)
+
+
+def brute_group_nulls(ptr, conf_ix, conf_cnt, confs, null_size, seed):
+    """Materialized mAP nulls: each group's mean of its members' AP nulls.
+
+    Group ``g`` has ``conf_cnt[e]`` members with configuration
+    ``confs[conf_ix[e]]`` for ``e`` in ``ptr[g]:ptr[g + 1]``; members sharing a
+    configuration share null samples.
+    """
+    null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
+    group_null = np.empty((len(ptr) - 1, null_size))
+    for g in range(len(ptr) - 1):
+        acc = np.zeros(null_size)
+        for e in range(ptr[g], ptr[g + 1]):
+            acc += conf_cnt[e] * null[conf_ix[e]]
+        group_null[g] = acc / np.sum(conf_cnt[ptr[g] : ptr[g + 1]])
+    return group_null
+
+
+def brute_map_pvalues(map_scores, ptr, conf_ix, conf_cnt, confs, null_size, seed):
+    """Count group null values >= each mAP over :func:`brute_group_nulls`."""
+    group_null = brute_group_nulls(ptr, conf_ix, conf_cnt, confs, null_size, seed)
+    num = (group_null >= nulls.tie_thresholds(map_scores)[:, None]).sum(axis=1)
+    return (num + 1) / (null_size + 1)
+
+
+# Multilabel APs' usual rules: positives share a label, negatives share none.
+ML_SPEC = dict(
+    pos_sameby=["target"], pos_diffby=[], neg_sameby=[], neg_diffby=["target"]
+)
+
+
+def label_meta() -> pd.DataFrame:
+    """Compounds with overlapping targets; c1 and c8 share two of them.
+
+    Each compound also has a label of its own, so none is left without one
+    when a label moves away; such labels make no pairs.
+    """
+    targets = [["A"], ["A", "B"], ["B"], ["A", "C"], ["C"], ["B", "C"], ["D"]]
+    targets += [["D", "A"], ["A", "B"]]
+    return pd.DataFrame({"target": [t + [f"own{i}"] for i, t in enumerate(targets)]})
