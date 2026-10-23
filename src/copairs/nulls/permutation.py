@@ -39,7 +39,7 @@ from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import numpy as np
-from scipy.sparse import coo_matrix
+from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
 from copairs.nulls.common import (
@@ -1457,11 +1457,11 @@ def _make_label_kernels(philox, uniform, jit=lambda f: f):
 _draw_pool, _label_group_map = _make_label_kernels(philox4x32, uniform53)
 
 
-def _components(n_prof, pairs):
-    """Component of each profile in the graph of ``pairs``: its smallest profile."""
-    graph = coo_matrix(
-        (np.ones(len(pairs), dtype=np.int8), (pairs[:, 0], pairs[:, 1])),
-        shape=(n_prof, n_prof),
+def _components(ptr, partners):
+    """Component of each profile in the CSR graph ``(ptr, partners)``: its smallest profile."""
+    n_prof = len(ptr) - 1
+    graph = csr_matrix(
+        (np.ones(len(partners), dtype=np.int8), partners, ptr), shape=(n_prof, n_prof)
     )
     _, labels = connected_components(graph, directed=False)
     _, smallest = np.unique(labels, return_index=True)
@@ -1469,12 +1469,15 @@ def _components(n_prof, pairs):
 
 
 def _adjacency(n_prof, pairs):
-    """CSR ``(ptr, partners)`` of each profile's partners in ``pairs``."""
+    """CSR ``(ptr, partners)`` of each profile's partners in ``pairs``.
+
+    Partners keep the pairs' integer type (uint32 for an AP call's pairs).
+    """
     x = np.concatenate([pairs[:, 0], pairs[:, 1]])
     y = np.concatenate([pairs[:, 1], pairs[:, 0]])
     ptr = np.zeros(n_prof + 1, dtype=np.int64)
     np.cumsum(np.bincount(x, minlength=n_prof), out=ptr[1:])
-    return ptr, y[np.argsort(x, kind="stable")].astype(np.int64)
+    return ptr, y[np.argsort(x, kind="stable")]
 
 
 def _ranges(lo, hi):
@@ -1721,16 +1724,16 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     # Positive pairs of AP rows as pairs of profiles, with their labels.
     pos_rows = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
     pos, pos_key = profile_of[pos_rows], row_key[pos_rows[:, 0]]
-    neg = np.asarray(pairs.neg, dtype=np.int64).reshape(-1, 2)
+    neg = np.asarray(pairs.neg).reshape(-1, 2)  # no int64 copy
     lone = np.asarray(pairs.lone, dtype=np.int64).reshape(-1, 2)
     n_prof = 1 + max(
         int(profile.max(initial=-1)),
         int(pos.max(initial=-1)),
-        int(neg.max(initial=-1)),
+        int(neg.max()) if len(neg) else -1,
         int(lone.max(initial=-1)),
     )
     nbr_ptr, nbr = _adjacency(n_prof, neg)
-    comp = _components(n_prof, neg)
+    comp = _components(nbr_ptr, nbr)
     order = np.argsort(comp, kind="stable")
     roots, starts = np.unique(comp[order], return_index=True)
     ends = np.append(starts[1:], len(order))
