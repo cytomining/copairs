@@ -70,10 +70,10 @@ def _launch(kernel, *args):
     Callers may launch from several threads. Numba's workqueue threading
     layer, its fallback without TBB or OpenMP, aborts the process on
     concurrent launches, and the OpenMP layer would start a team of threads
-    per launching thread.
+    per launching thread. Returns what ``kernel`` returns.
     """
     with _LAUNCH:
-        kernel(*args)
+        return kernel(*args)
 
 
 def threads() -> int:

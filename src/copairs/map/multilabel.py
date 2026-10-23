@@ -133,8 +133,12 @@ def average_precision(
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
     distance_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    kernel_backend = None  # the backend whose kernel computes the similarities
     if fastap is not None:
-        distance_fn = fastap.similarity_fn(feats, distance, distance_fn)
+        generic = distance_fn
+        distance_fn = fastap.similarity_fn(feats, distance, generic)
+        if distance_fn is not generic:
+            kernel_backend = backend
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 
@@ -238,7 +242,7 @@ def average_precision(
     pairs = LabelPairs(
         pos_rows,
         np.asarray(neg_pairs),
-        _FeatureSimilarity(feats, distance, batch_size),
+        _FeatureSimilarity(feats, distance, batch_size, kernel_backend),
         _diffby_codes(meta, diffby),
         profile=profile,
         row_key=row_key,

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs._backend import cpu_backend, backend_module
+from copairs._backend import cpu_backend, backend_module, import_backend
 from copairs.matching import UnpairedException, find_pairs
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
@@ -73,18 +73,29 @@ BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
 class _FeatureSimilarity:
     """``pairs -> similarities`` of an AP call's features, as its AP stage computed them.
 
-    Batches of ``batch_size`` pairs go through the same pairwise function as
-    in :func:`copairs.compute.get_similarity_fn`, one after another in the
-    calling thread: the nulls call it from their own worker threads.
+    With ``kernel_backend``, the backend (``"numba"`` or ``"cuda"``) whose
+    kernel computed the AP stage's similarities, the same kernel: built on
+    first use, with its own copy of the features (on the GPU under
+    ``"cuda"``), and kept with this object. The nulls call it from their
+    worker threads, so its launches run one at a time, as their parallel
+    kernels' do (:func:`copairs.nulls._numba._launch`). Otherwise batches
+    of ``batch_size`` pairs go through the same pairwise function as in
+    :func:`copairs.compute.get_similarity_fn`, one after another in the
+    calling thread.
     """
 
-    def __init__(self, feats, distance, batch_size):
+    def __init__(self, feats, distance, batch_size, kernel_backend=None):
         self.feats = feats
         self.distance = distance
         self.batch_size = batch_size
+        self.kernel_backend = kernel_backend
         self._fn = compute.pairwise_similarity_fn(distance)
+        self._kernel = None
 
     def __call__(self, pairs):
+        if self.kernel_backend is not None:
+            nulls = import_backend("copairs.nulls._numba", self.kernel_backend)
+            return nulls._launch(self._kernel_sims, pairs)
         pairs = np.asarray(pairs)
         out = np.empty(len(pairs), dtype=np.float32)
         for lo in range(0, len(pairs), self.batch_size):
@@ -93,6 +104,13 @@ class _FeatureSimilarity:
                 self.feats[batch[:, 0]], self.feats[batch[:, 1]]
             )
         return out
+
+    def _kernel_sims(self, pairs):
+        """Return the kernel's similarities of ``pairs``, built by the first call."""
+        if self._kernel is None:
+            kernels = backend_module(self.kernel_backend)
+            self._kernel = kernels.pair_similarity(self.feats, self.distance)
+        return self._kernel(pairs)
 
 
 def check_recomputable(similarity) -> None:
@@ -345,7 +363,10 @@ def average_precision(
         the dropped members as positives. They keep ``feats`` and every
         positive and negative
         pair (8 bytes per pair) alive with the frame, whichever null is used;
-        drop them with ``frame.attrs.pop("copairs_pairs")``.
+        drop them with ``frame.attrs.pop("copairs_pairs")``. The permutation
+        null recomputes similarities with the AP stage's kernel when it had
+        one, which then keeps its copy of ``feats`` (on the GPU for
+        ``"cuda"``) with them.
 
     Returns
     -------
@@ -383,12 +404,14 @@ def average_precision(
 
     # Get the distance function for similarity calculations (e.g., cosine)
     similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    kernel_backend = None  # the backend whose kernel computes the similarities
     if fastap is not None:
+        generic = similarity_fn
         # On the GPU, fastap.ap_from_pairs computes them, chunk by chunk.
         on_device = {"on_device": True} if backend == "cuda" else {}
-        similarity_fn = fastap.similarity_fn(
-            feats, distance, similarity_fn, **on_device
-        )
+        similarity_fn = fastap.similarity_fn(feats, distance, generic, **on_device)
+        if similarity_fn is not generic:
+            kernel_backend = backend
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
@@ -454,7 +477,7 @@ def average_precision(
     pairs = RankPairs(
         pos_pairs,
         neg_pairs,
-        _FeatureSimilarity(feats, distance, batch_size),
+        _FeatureSimilarity(feats, distance, batch_size, kernel_backend),
         _diffby_codes(meta, pos_diffby),
     )
     attach_pairs(meta, pairs)
