@@ -52,31 +52,77 @@ _HIST_BYTES = 2**28
 
 
 def count_ge(null, thr, ptr, counts):
-    """:func:`copairs.nulls.pvalues._count_ge_host` in parallel over blocks of samples."""
-    bins = int(ptr[-1] - ptr[0]) + null.shape[0]
-    max_blocks = min(4 * numba.get_num_threads(), max(1, _HIST_BYTES // (8 * bins)))
-    _count_ge_kernel(np.ascontiguousarray(null), thr, ptr, counts, max_blocks)
+    """:func:`copairs.nulls.pvalues._count_ge_host` in parallel over blocks of samples.
+
+    A segment's histogram has a bin per score, so the scores are counted in
+    batches of at most ``_HIST_BYTES`` of bins, splitting a configuration's
+    sorted scores where they alone would exceed it. Each piece of a segment
+    counts its own scores exactly, so the counts do not depend on the batches.
+    """
+    null = np.ascontiguousarray(null)
+    ptr = np.asarray(ptr, dtype=np.int64)
+    rows = np.arange(len(ptr) - 1, dtype=np.int64)
+    max_bins = max(2, _HIST_BYTES // 8)
+    batches = [(0, len(rows))]
+    if ptr[-1] - ptr[0] + len(rows) > max_bins:
+        rows, ptr = _split_segments(rows, ptr, max_bins - 1)
+        batches = _batches(ptr, max_bins)
+    for first, end in batches:
+        bins = int(ptr[end] - ptr[first]) + end - first
+        max_blocks = min(4 * numba.get_num_threads(), max(1, _HIST_BYTES // (8 * bins)))
+        _count_ge_kernel(
+            null, rows[first:end], thr, ptr[first : end + 1], counts, max_blocks
+        )
+
+
+def _batches(ptr, max_bins):
+    """Consecutive segments ``[first, end)`` with at most ``max_bins`` bins each.
+
+    A segment has a bin per score plus one; each must fit ``max_bins`` alone.
+    """
+    out, first = [], 0
+    for end in range(1, len(ptr)):
+        if ptr[end] - ptr[first] + end - first > max_bins:
+            out.append((first, end - 1))
+            first = end - 1
+    out.append((first, len(ptr) - 1))
+    return out
+
+
+def _split_segments(rows, ptr, max_scores):
+    """Split each segment ``ptr[s]:ptr[s + 1]`` into pieces of ``max_scores`` or fewer."""
+    lengths = np.diff(ptr)
+    pieces = np.maximum(1, -(-lengths // max_scores))
+    piece_rows = np.repeat(rows, pieces)
+    first = np.repeat(np.cumsum(pieces) - pieces, pieces)
+    starts = (
+        np.repeat(ptr[:-1], pieces) + (np.arange(len(piece_rows)) - first) * max_scores
+    )
+    return piece_rows, np.append(starts, ptr[-1])
 
 
 @numba.njit(parallel=True, cache=True)
-def _count_ge_kernel(null, thr, ptr, counts, max_blocks):
-    n_conf, size = null.shape
+def _count_ge_kernel(null, rows, thr, ptr, counts, max_blocks):
+    """Count segment ``s``'s scores ``thr[ptr[s]:ptr[s + 1]]`` on ``null[rows[s]]``."""
+    n_seg = len(rows)
+    size = null.shape[1]
     n_blocks = max(1, min((size + (1 << 16) - 1) >> 16, max_blocks))
     block = (size + n_blocks - 1) // n_blocks
     base = ptr[0]
-    partial = np.zeros((n_blocks, ptr[n_conf] - base + n_conf), dtype=np.int64)
-    for task in numba.prange(n_conf * n_blocks):
-        c = task // n_blocks
-        b = task - c * n_blocks
-        lo, hi = ptr[c], ptr[c + 1]
+    partial = np.zeros((n_blocks, ptr[n_seg] - base + n_seg), dtype=np.int64)
+    for task in numba.prange(n_seg * n_blocks):
+        s = task // n_blocks
+        b = task - s * n_blocks
+        lo, hi = ptr[s], ptr[s + 1]
         if hi == lo:
             continue
-        off = c - base
+        off = s - base
+        r = rows[s]
         for t in range(b * block, min(size, (b + 1) * block)):
-            partial[b, off + upper_bound(thr, lo, hi, null[c, t])] += 1
-    for c in numba.prange(n_conf):
-        lo, hi = ptr[c], ptr[c + 1]
-        off = lo - base + c
+            partial[b, off + upper_bound(thr, lo, hi, null[r, t])] += 1
+    for s in numba.prange(n_seg):
+        lo, hi = ptr[s], ptr[s + 1]
+        off = lo - base + s
         run = 0
         for q in range(hi - lo - 1, -1, -1):
             for b in range(n_blocks):

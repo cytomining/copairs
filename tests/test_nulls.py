@@ -625,3 +625,42 @@ def test_import_does_not_load_numba():
         "print('numba' in sys.modules)"
     )
     assert out.strip() == "False"
+
+
+@pytest.mark.parametrize("hist_bytes", [16, 64, 800, 2**28])
+def test_numba_count_histograms_within_bound(hist_bytes, monkeypatch):
+    """Numba's count_ge keeps each histogram within _HIST_BYTES, counts unchanged.
+
+    A histogram has a bin per score, so scores are batched, and a
+    configuration's scores split, until each batch fits.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    rng = np.random.default_rng(3)
+    lengths = [0, 1, 37, 200, 3]
+    null = rng.integers(0, 50, size=(len(lengths), 3000)) / 50
+    null[1, :5] = np.nan
+    pad = 4  # a batch of configurations starts past the first scores
+    ptr = pad + np.concatenate([[0], np.cumsum(lengths)])
+    thr = rng.integers(0, 50, size=ptr[-1]) / 50
+    for c in range(len(lengths)):
+        thr[ptr[c] : ptr[c + 1]].sort()
+    expected = np.zeros(len(thr), dtype=np.int64)
+    pvalues._count_ge_host(null, thr, ptr, expected)
+
+    calls = []
+    kernel = _numba._count_ge_kernel
+
+    def recorded(*args):
+        ptr, max_blocks = args[-3], args[-1]  # bins: a segment's scores plus one
+        calls.append((int(ptr[-1] - ptr[0]) + len(ptr) - 1, max_blocks))
+        kernel(*args)
+
+    monkeypatch.setattr(_numba, "_HIST_BYTES", hist_bytes)
+    monkeypatch.setattr(_numba, "_count_ge_kernel", recorded)
+    counts = np.zeros(len(thr), dtype=np.int64)
+    _numba.count_ge(null, thr, ptr, counts)
+    np.testing.assert_array_equal(counts, expected)
+    assert all(8 * bins * max_blocks <= hist_bytes for bins, max_blocks in calls)
+    assert (len(calls) > 1) == (hist_bytes < 8 * (sum(lengths) + len(lengths)))
