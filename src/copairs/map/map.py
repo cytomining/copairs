@@ -188,29 +188,11 @@ def get_map_pvalue(
 
     num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
     num_neg = ap_scores["n_total_pairs"].to_numpy().astype(np.int64) - num_pos
-    edges_of = _group_edges(groups, num_pos, profile, pos_pairs)
-    signatures = [
-        None
-        if edges is None
-        else joint.canonical_signature(zip(num_pos[ix], num_neg[ix]), edges)
-        for ix, edges in zip(groups, edges_of)
-    ]
-    unique = sorted(set(sig for sig in signatures if sig is not None))
-    index = {sig: k for k, sig in enumerate(unique)}
-    sampled = [g for g, sig in enumerate(signatures) if sig is not None]
-
     logger.info("Computing p-values...")
-    p_values = np.empty(len(groups), dtype=np.float64)
-    p_values[sampled] = joint.joint_pvalues(
-        scores[sampled],
-        [index[signatures[g]] for g in sampled],
-        unique,
-        null_size,
-        seed,
+    p_values, fallback = joint.group_pvalues(
+        scores, groups, num_pos, num_neg, null_size, seed, profile, pos_pairs,
         progress_bar=progress_bar,
-    )
-
-    fallback = [k for k, sig in enumerate(signatures) if sig is None]
+    )  # fmt: skip
     if fallback:
         warnings.warn(
             f"{len(fallback)} group(s) have positives that are not their other "
@@ -224,47 +206,6 @@ def get_map_pvalue(
         )
     map_scores["p_value"] = p_values
     return map_scores
-
-
-def _group_edges(groups, num_pos, profile, pos_pairs):
-    """Positive pairs inside each group, as local ``(i, j)`` member pairs.
-
-    Without ``pos_pairs``, a group whose members each have ``len(group) - 1``
-    positives is taken to be a replicate group (all its pairs are positives),
-    a group of one profile has no pairs inside it, and other groups get None.
-    """
-    if pos_pairs is None:
-        return [
-            [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
-            if len(ix) == 1 or (num_pos[ix] == len(ix) - 1).all()
-            else None
-            for ix in groups
-        ]
-    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
-    size = int(max(pos_pairs.max(initial=-1), profile.max(initial=-1))) + 1
-    degree = np.bincount(pos_pairs.ravel(), minlength=size)
-    wrong = np.flatnonzero(degree[profile] != num_pos)
-    if len(wrong):
-        m = profile[wrong[0]]
-        raise ValueError(
-            f"profile {m} has {degree[m]} positive pairs in pos_pairs but "
-            f"{num_pos[wrong[0]]} in ap_scores; pos_pairs must index the rows of "
-            "the frame average_precision returned, as "
-            "average_precision(..., return_pairs=True) gives them"
-        )
-    group_of = np.full(size, -1)
-    local = np.empty_like(group_of)
-    for g, ix in enumerate(groups):
-        group_of[profile[ix]] = g
-        local[profile[ix]] = np.arange(len(ix))
-    ga, gb = group_of[pos_pairs[:, 0]], group_of[pos_pairs[:, 1]]
-    inside = (ga >= 0) & (ga == gb)
-    edges_of = [[] for _ in groups]
-    for g, a, b in zip(
-        ga[inside], local[pos_pairs[inside, 0]], local[pos_pairs[inside, 1]]
-    ):
-        edges_of[g].append((int(a), int(b)))
-    return edges_of
 
 
 def _copied_pvalues(

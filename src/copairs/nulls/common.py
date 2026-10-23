@@ -68,3 +68,67 @@ def progress(items, total: int, enabled: bool, desc: str):
     from tqdm.autonotebook import tqdm
 
     return tqdm(items, total=total, desc=desc, leave=False)
+
+
+def check_pair_counts(count, member, expected, kind: str) -> None:
+    """Raise unless profile ``member[i]`` has ``expected[i]`` pairs in ``count``.
+
+    ``count`` is indexed by profile; ``kind`` names the pairs ("positive").
+    """
+    wrong = np.flatnonzero(count[member] != expected)
+    if len(wrong):
+        m = member[wrong[0]]
+        raise ValueError(
+            f"profile {m} has {count[m]} {kind} pairs but {expected[wrong[0]]} in "
+            "the AP table; the pairs must index the rows of the frame "
+            "average_precision returned, as average_precision(..., "
+            "return_pairs=True) gives them, and the AP scores must keep that "
+            "frame's index (no reset_index)"
+        )
+
+
+def group_edges(groups, profile, num_pos, pos_pairs):
+    """Positive pairs inside each group, as local member pairs.
+
+    Parameters
+    ----------
+    groups : list of np.ndarray
+        Each group's rows of the AP table.
+    profile : np.ndarray
+        Profile index (row of the pairs' frame) of each AP row.
+    num_pos : np.ndarray
+        ``n_pos_pairs`` of each AP row; a member whose positive pairs in
+        ``pos_pairs`` differ from it raises (:func:`check_pair_counts`).
+    pos_pairs : np.ndarray
+        The ``(n, 2)`` positive pairs the APs were computed from.
+
+    Returns
+    -------
+    edges : list of np.ndarray
+        Per group, an ``(k, 2)`` int64 array of the local member indices of
+        its positive pairs that join two of its members, in ``pos_pairs``
+        order.
+    leaves : np.ndarray
+        Per group, whether a positive pair joins one of its members to a
+        profile outside it.
+    """
+    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
+    profile = np.asarray(profile, dtype=np.int64)
+    size = 1 + max(int(profile.max(initial=-1)), int(pos_pairs.max(initial=-1)))
+    rows = np.concatenate(groups) if len(groups) else np.zeros(0, dtype=np.int64)
+    degree = np.bincount(pos_pairs.ravel(), minlength=size)
+    check_pair_counts(degree, profile[rows], np.asarray(num_pos)[rows], "positive")
+    group_of = np.full(size, -1, dtype=np.int64)
+    local = np.zeros(size, dtype=np.int64)
+    for g, ix in enumerate(groups):
+        group_of[profile[ix]] = g
+        local[profile[ix]] = np.arange(len(ix))
+    ga, gb = group_of[pos_pairs[:, 0]], group_of[pos_pairs[:, 1]]
+    inside = (ga >= 0) & (ga == gb)
+    leaves = np.zeros(len(groups), dtype=np.bool_)
+    leaves[ga[~inside & (ga >= 0)]] = True
+    leaves[gb[~inside & (gb >= 0)]] = True
+    order = np.argsort(ga[inside], kind="stable")
+    ptr = np.searchsorted(ga[inside][order], np.arange(len(groups) + 1))
+    edges = local[pos_pairs[inside][order]]
+    return [edges[ptr[g] : ptr[g + 1]] for g in range(len(groups))], leaves

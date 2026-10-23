@@ -546,7 +546,7 @@ def test_map_pvalue_rejects_misaligned_pos_pairs():
     inferred = get_map_pvalue(ap, ["g"], 2000, SEED, **kwargs)
     explicit = get_map_pvalue(ap, ["g"], 2000, SEED, pairs=pairs, **kwargs)
     assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
-    with pytest.raises(ValueError, match="pos_pairs must index"):
+    with pytest.raises(ValueError, match="must index the rows"):
         get_map_pvalue(
             ap,
             ["g"],

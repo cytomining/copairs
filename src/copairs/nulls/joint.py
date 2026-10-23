@@ -29,7 +29,13 @@ import hashlib
 
 import numpy as np
 
-from copairs.nulls.common import progress, resolve_seed, tie_thresholds, check_null_size
+from copairs.nulls.common import (
+    progress,
+    group_edges,
+    resolve_seed,
+    tie_thresholds,
+    check_null_size,
+)
 from copairs.nulls.philox import M32, S32, uniform53, philox4x32
 
 # Below this mean, binomials are drawn by inversion; above it by BTRS.
@@ -529,3 +535,64 @@ def joint_pvalues(
             null = np.sort(_joint_null_np(plan, s, c, size))
             counts[groups] += size - np.searchsorted(null, thr[groups], side="left")
     return (counts + 1) / (null_size + 1)
+
+
+def group_signatures(groups, num_pos, num_neg, profile=None, pos_pairs=None):
+    """Canonical signature of each group, or None where it cannot be inferred.
+
+    ``groups`` lists each group's rows of the AP table and ``num_pos``,
+    ``num_neg`` its rows' pair counts. With ``pos_pairs`` (indexing the
+    profiles ``profile`` of the AP rows), a group's edges are its positive
+    pairs inside it (:func:`copairs.nulls.common.group_edges`). Without them,
+    a group whose members each have ``len(group) - 1`` positives is taken to
+    be a replicate group (all its pairs are edges), a group of one profile
+    has no edges, and other groups get None.
+    """
+    if pos_pairs is None:
+        edges_of = [
+            [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
+            if len(ix) == 1 or (num_pos[ix] == len(ix) - 1).all()
+            else None
+            for ix in groups
+        ]
+    else:
+        edges_of, _ = group_edges(groups, profile, num_pos, pos_pairs)
+    return [
+        None
+        if edges is None
+        else canonical_signature(zip(num_pos[ix], num_neg[ix]), edges)
+        for ix, edges in zip(groups, edges_of)
+    ]
+
+
+def group_pvalues(
+    scores: np.ndarray,
+    groups,
+    num_pos: np.ndarray,
+    num_neg: np.ndarray,
+    null_size: int,
+    seed: int | None,
+    profile: np.ndarray | None = None,
+    pos_pairs: np.ndarray | None = None,
+    progress_bar: bool = False,
+) -> tuple[np.ndarray, list[int]]:
+    """P-value of each group's mAP ``scores`` under the joint null.
+
+    Groups share the null of their signature (:func:`group_signatures`).
+    Returns ``(p_values, fallback)``: ``fallback`` lists the groups without a
+    signature, whose p-values are NaN.
+    """
+    signatures = group_signatures(groups, num_pos, num_neg, profile, pos_pairs)
+    unique = sorted(set(sig for sig in signatures if sig is not None))
+    index = {sig: k for k, sig in enumerate(unique)}
+    sampled = [g for g, sig in enumerate(signatures) if sig is not None]
+    p_values = np.full(len(groups), np.nan)
+    p_values[sampled] = joint_pvalues(
+        scores[sampled],
+        [index[signatures[g]] for g in sampled],
+        unique,
+        null_size,
+        seed,
+        progress_bar=progress_bar,
+    )
+    return p_values, [g for g, sig in enumerate(signatures) if sig is None]

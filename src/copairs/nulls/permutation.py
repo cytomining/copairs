@@ -26,7 +26,14 @@ import hashlib
 
 import numpy as np
 
-from copairs.nulls.common import TIE_TOL, progress, resolve_seed, check_null_size
+from copairs.nulls.common import (
+    TIE_TOL,
+    progress,
+    group_edges,
+    resolve_seed,
+    check_null_size,
+    check_pair_counts,
+)
 from copairs.nulls.philox import M32, S32, uniform53, philox4x32
 
 # A slot sorts up to this many drawn profiles by insertion, more by quicksort.
@@ -574,19 +581,18 @@ def _mix(x):
     return x ^ (x >> np.uint64(31))
 
 
-def _scan_pairs(pairs, group_of, positive, n_prof, bad):
-    """Count each member's pairs, hash its partner set, flag broken groups.
+def _scan_negatives(pairs, group_of, n_groups, n_prof):
+    """Count each member's negative pairs, hash its references, flag broken groups.
 
-    A positive must join two members of one group; a negative must not join
-    members of one group. Returns ``(count, h1, h2)``: each member's pairs
-    and two order-independent hashes of its partners (a set, since pairs are
-    unique).
+    A negative must not join two members of one group. Returns ``(count, h1,
+    h2, inside)``: each profile's negative pairs, two order-independent
+    hashes of its partners (a set, since pairs are unique), and whether each
+    group has a negative pair inside it.
     """
     a, b = pairs[:, 0], pairs[:, 1]
     ga, gb = group_of[a], group_of[b]
-    broken = ((ga >= 0) & (ga == gb)) != positive
-    bad[ga[broken & (ga >= 0)]] = True
-    bad[gb[broken & (gb >= 0)]] = True
+    inside = np.zeros(n_groups, dtype=np.bool_)
+    inside[ga[(ga >= 0) & (ga == gb)]] = True
     x, y = np.concatenate([a, b]), np.concatenate([b, a]).astype(np.uint64)
     keep = group_of[x] >= 0
     x, y = x[keep], y[keep]
@@ -595,7 +601,7 @@ def _scan_pairs(pairs, group_of, positive, n_prof, bad):
     h2 = np.zeros(n_prof, dtype=np.uint64)
     np.add.at(h1, x, _mix(y + np.uint64(1)))
     np.add.at(h2, x, _mix(y ^ np.uint64(0x9E3779B97F4A7C15)))
-    return count, h1, h2
+    return count, h1, h2, inside
 
 
 def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
@@ -618,24 +624,11 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
         raise ValueError("the permutation null needs each profile in one group")
     for g, ix in enumerate(groups):
         group_of[profile[ix]] = g
-    bad = np.zeros(len(groups), dtype=np.bool_)
-    counts, hashes = [], []
-    for pairs, positive in ((pos_pairs, True), (neg_pairs, False)):
-        count, h1, h2 = _scan_pairs(pairs, group_of, positive, n_prof, bad)
-        counts.append(count)
-        hashes.append((h1, h2))
+    edges_of, leaves = group_edges(groups, profile, num_pos, pos_pairs)
     member = profile[rows]
-    expected = (num_pos[rows], num_neg[rows])
-    for count, want, kind in zip(counts, expected, ("positive", "negative")):
-        wrong = np.flatnonzero(count[member] != want)
-        if len(wrong):
-            m = member[wrong[0]]
-            raise ValueError(
-                f"profile {m} has {count[m]} {kind} pairs but {want[wrong[0]]} in "
-                "the AP table; pass the pairs average_precision(..., "
-                "return_pairs=True) returned with the frame it returned, and keep "
-                "that frame's index (no reset_index)"
-            )
+    count, h1, h2, inside = _scan_negatives(neg_pairs, group_of, len(groups), n_prof)
+    check_pair_counts(count, member, num_neg[rows], "negative")
+    bad = leaves | inside
     if bad.any():
         raise ValueError(
             f"{int(bad.sum())} group(s) have positives outside the group or "
@@ -646,8 +639,7 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
             "profile's AP null"
         )
     # One representative per distinct negative set; gather only their lists.
-    h1, h2 = hashes[1]
-    fingerprint = np.stack([counts[1][member], h1[member], h2[member]], axis=1)
+    fingerprint = np.stack([count[member], h1[member], h2[member]], axis=1)
     _, rep_ix, block_id = np.unique(
         fingerprint.astype(np.uint64), axis=0, return_index=True, return_inverse=True
     )
@@ -662,21 +654,10 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     refs = y[keep][order]
     ptr = np.searchsorted(rep[keep][order], np.arange(len(rep_ix) + 1))
     ref_sets = [np.sort(refs[ptr[k] : ptr[k + 1]]) for k in range(len(rep_ix))]
-    pos_group = group_of[pos_pairs[:, 0]]
-    inside = pos_group >= 0
-    edge_group = pos_group[inside]
-    edge_order = np.argsort(edge_group, kind="stable")
-    edge_ptr = np.searchsorted(edge_group[edge_order], np.arange(len(groups) + 1))
-    edge_pairs = pos_pairs[inside][edge_order]
     layouts = []
     offset = 0
     for g, ix in enumerate(groups):
         members = profile[ix]
-        local = {int(m): i for i, m in enumerate(members)}
-        edges = [
-            (local[int(a)], local[int(b)])
-            for a, b in edge_pairs[edge_ptr[g] : edge_ptr[g + 1]]
-        ]
         ids = block_id[offset : offset + len(ix)]
         offset += len(ix)
         uniq, block_of = np.unique(ids, return_inverse=True)
@@ -688,7 +669,8 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
                 "members of a group rank overlapping but different references; "
                 "the permutation null needs each block of members to share them"
             )
-        layouts.append((members, edges, blocks, block_of.ravel().astype(np.int64)))
+        block_of = block_of.ravel().astype(np.int64)
+        layouts.append((members, edges_of[g], blocks, block_of))
     return layouts
 
 

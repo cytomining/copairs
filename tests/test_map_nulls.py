@@ -1,5 +1,7 @@
 """Tests for the choice of mAP null in copairs' mAP functions."""
 
+import dataclasses
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -90,6 +92,20 @@ def test_float32_scores_count_ties(null, tmp_path):
         scores, ["g"], 1000, 0.05, 0, progress_bar=False, null=null, cache_dir=tmp_path
     )
     assert got["p_value"].iloc[0] == 1.0
+
+
+def test_nulls_share_the_pair_count_check():
+    """Positive pairs that miss the AP table's counts raise alike under both nulls."""
+    meta = pd.DataFrame({"g": ["q"] * 4 + [f"c{i}" for i in range(30)]})
+    feats = np.random.default_rng(0).standard_normal((len(meta), 10))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    short = dataclasses.replace(pairs, pos=pairs.pos[1:])
+    kwargs = dict(null_size=10, threshold=0.05, seed=0, progress_bar=False)
+    for null in ("joint", "permutation"):
+        with pytest.raises(ValueError, match="2 positive pairs but 3 in the AP table"):
+            mean_average_precision(ap, ["g"], null=null, pairs=short, **kwargs)
 
 
 def test_unknown_null():
