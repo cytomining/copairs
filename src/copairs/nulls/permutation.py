@@ -410,14 +410,16 @@ class _Layout:
             ).astype(np.int64)
             for s in range(n)
         ]
-        # Each code's sorted reference codes: rmu's and rcm's rows, for searches.
-        self.rows = np.concatenate([self.smr, pool.srr])
-        self.row_lo = np.concatenate(
-            [self.smr_ptr[:-1], len(self.smr) + pool.srr_ptr[:-1]]
-        )
-        self.row_hi = np.concatenate(
-            [self.smr_ptr[1:], len(self.smr) + pool.srr_ptr[1:]]
-        )
+        # Each code's sorted reference codes, for searches where no rank
+        # tables replace them.
+        if not pool.ranked:
+            self.rows = np.concatenate([self.smr, pool.srr])
+            self.row_lo = np.concatenate(
+                [self.smr_ptr[:-1], len(self.smr) + pool.srr_ptr[:-1]]
+            )
+            self.row_hi = np.concatenate(
+                [self.smr_ptr[1:], len(self.smr) + pool.srr_ptr[1:]]
+            )
 
     def draw_args(self):
         """Arguments of the scalar ``draw`` after ``j``, before the keys."""
