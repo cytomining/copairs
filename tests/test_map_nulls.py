@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import copairs.map.map as map_module
 from copairs import compute
 from copairs.map import (
     get_map_pvalue,
@@ -69,7 +70,8 @@ def test_float32_scores_count_ties(null, tmp_path):
 
     With one positive among 3, AP is 1, 1/2 or 1/3, so every null value is
     ``>= 1/3`` and the p-value of an mAP of 1/3 is exactly 1. pandas 2 averages
-    float32 APs to float32 and pandas 3 to float64; ties hold under both.
+    these float32 APs to float32 and pandas 3 to float64; ties hold under both,
+    and the reported mAP keeps the APs' dtype.
     """
     scores = pd.DataFrame(
         {
@@ -84,6 +86,44 @@ def test_float32_scores_count_ties(null, tmp_path):
         scores, ["g"], 1000, 0.05, 0, progress_bar=False, null=null, cache_dir=tmp_path
     )
     assert got["p_value"].iloc[0] == 1.0
+    assert got["mean_average_precision"].dtype == np.float32
+
+
+@pytest.mark.parametrize("keys", [str, int])
+def test_map_column_is_the_score(keys, tmp_path, monkeypatch):
+    """The mAP column is the float64 mean in the APs' dtype, and the nulls' score.
+
+    pandas averages float32 APs to float32 or float64 depending on its version
+    and the keys' dtype (pandas 3 string keys give float64), and its float32
+    mean can differ in the last bit from the rounded float64 mean.
+    """
+    rng = np.random.default_rng(0)
+    g = rng.integers(0, 50, 400)
+    frame = ap_frame(
+        list(
+            zip(
+                g.astype(keys),
+                rng.random(400).astype(np.float32),
+                [3] * 400,
+                [30] * 400,
+            )
+        )
+    )
+    frame["average_precision"] = frame["average_precision"].astype(np.float32)
+    seen = []
+
+    def copied(scores, *args, **kwargs):
+        seen.append(scores)
+        return np.ones(len(scores))
+
+    monkeypatch.setattr(map_module, "_copied_pvalues", copied)
+    got = get_map_pvalue(frame, ["g"], 10, 0, progress_bar=False, null="copied")
+    mean = frame.astype({"average_precision": np.float64}).groupby("g")
+    expected = mean["average_precision"].mean().astype(np.float32)
+    column = got.set_index("g")["mean_average_precision"]
+    assert column.dtype == np.float32
+    np.testing.assert_array_equal(column.loc[expected.index], expected)
+    assert seen[0].tobytes() == got["mean_average_precision"].to_numpy().tobytes()
 
 
 def test_nulls_share_the_pair_count_check():
