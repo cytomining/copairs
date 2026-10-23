@@ -243,6 +243,7 @@ def cuda_runtime(monkeypatch):
     caches = [f for f in vars(_cuda).values() if hasattr(f, "cache_clear")]
     for cache in caches:
         cache.cache_clear()
+    monkeypatch.setattr(_cuda, "_initialised_in", None)
     yield _cuda
     monkeypatch.undo()
     for cache in caches:
@@ -293,6 +294,38 @@ def test_cuda_probed_once_per_process(cuda_runtime, monkeypatch):
     pid[0] = 101
     assert not cuda_runtime.usable()
     assert len(calls) == 2
+
+
+@needs_cupy
+def test_forked_child_does_not_call_cuda(cuda_runtime, monkeypatch):
+    """A child of a process whose probe found a GPU reports none, silently.
+
+    It does not call CUDA: there, the device is still counted but the first
+    kernel load fails (CUDADriverError), which would warn of a compile
+    failure in every forked worker.
+    """
+    pid = [100]
+    monkeypatch.setattr(
+        cuda_runtime, "os", types.SimpleNamespace(getpid=lambda: pid[0])
+    )
+    monkeypatch.setattr(cuda_runtime.cp.cuda.runtime, "getDeviceCount", lambda: 1)
+    monkeypatch.setattr(
+        cuda_runtime.cp,
+        "RawKernel",
+        lambda *args, **kwargs: types.SimpleNamespace(compile=lambda: None),
+    )
+    assert cuda_runtime.usable()
+
+    def fails(*args, **kwargs):
+        raise RuntimeError("CUDA_ERROR_NOT_INITIALIZED: initialization error")
+
+    pid[0] = 101
+    monkeypatch.setattr(cuda_runtime.cp, "RawKernel", fails)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert not cuda_runtime.usable()
+        with pytest.raises(RuntimeError, match="forked from process 100"):
+            cuda_runtime.require()
 
 
 @pytest.fixture

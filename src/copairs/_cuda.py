@@ -58,8 +58,9 @@ _INSTALL = "pip install 'copairs[gpu]'"
 def usable() -> bool:
     """Whether CuPy sees a CUDA device and can compile kernels for it.
 
-    Probed once per process: a child forked after its parent initialised CUDA
-    cannot use it, so the child probes again and finds no usable GPU.
+    Probed once per process. A child forked after its parent's probe found a
+    device (initialising CUDA) cannot use CUDA, so it reports no usable GPU
+    without calling CUDA, where a kernel load would fail as a compile failure.
     """
     return _probe(os.getpid()) is None
 
@@ -76,9 +77,17 @@ def require() -> None:
         )
 
 
+# The process whose probe found a CUDA device, which initialises CUDA there.
+_initialised_in: int | None = None
+
+
 @functools.cache
 def _probe(pid: int) -> str | None:
     """None when the CUDA backend is usable in process ``pid``, else why not."""
+    global _initialised_in
+    if _initialised_in not in (None, pid):
+        # Forked after CUDA was initialised: CUDA cannot run here.
+        return f"forked from process {_initialised_in}, which initialised CUDA"
     try:
         if cp.cuda.runtime.getDeviceCount() == 0:
             return "no CUDA device"
@@ -86,6 +95,7 @@ def _probe(pid: int) -> str | None:
         # No driver, an insufficient one, or CUDA libraries that fail to load:
         # no GPU, so backend="auto" uses the CPU without a warning.
         return f"{type(exc).__name__}: {exc}"
+    _initialised_in = pid
     try:
         # A visible GPU is not enough: without NVRTC (e.g. CuPy without its
         # [ctk] extra or a CUDA Toolkit) every kernel fails to compile.
