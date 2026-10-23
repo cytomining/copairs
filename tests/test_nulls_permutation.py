@@ -136,22 +136,21 @@ def test_vectorized_matches_scalar_draws(
     observed, (members, edges, blocks, block_of), pairs = group_of_q(meta, feats, spec)
     pool = permutation._Pool(blocks, pairs.similarity)
     draws = 0 if tables == "full-ranks" else 300
-    layout = permutation._Layout(
-        members, edges, block_of, pairs.similarity, pool, draws=draws
-    )
+    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    np_tables = permutation._NumpyTables(layout, draws)
     assert pool.ranked == (tables != "search")
-    assert (layout.full_keys is not None) == tables.startswith("full")
-    assert (layout.full_ranks is not None) == (tables == "full-ranks")
-    assert (layout.full_before is not None) == (tables == "full")
+    assert (np_tables.full_keys is not None) == tables.startswith("full")
+    assert (np_tables.full_ranks is not None) == (tables == "full-ranks")
+    assert (np_tables.full_before is not None) == (tables == "full")
     k0, k1 = permutation.group_key(3, members)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
     pm, maps = scalar_draws(layout, start, 300, k0, k1)
     got_pm = permutation._draws_np(layout, start, 300, k0, k1)
     np.testing.assert_array_equal(got_pm, pm)
-    np.testing.assert_array_equal(permutation._group_maps_np(layout, got_pm), maps)
+    np.testing.assert_array_equal(permutation._group_maps_np(np_tables, got_pm), maps)
     identity = np.arange(layout.n)
     scalar_identity = scalar_identity_map(layout, identity)
-    assert permutation._group_maps_np(layout, identity[None])[0] == scalar_identity
+    assert permutation._group_maps_np(np_tables, identity[None])[0] == scalar_identity
     assert scalar_identity == pytest.approx(observed, abs=1e-12)
 
 
@@ -164,7 +163,6 @@ def test_numba_matches_numpy_draws(
     """Numba's draws, mAPs and hits equal NumPy's, bit for bit.
 
     Pools up to RANK_POOL read rank tables, larger ones search sorted rows.
-    The Numba kernels read a layout without the NumPy-only tables.
     """
     pytest.importorskip("numba")
     from copairs.nulls import _numba
@@ -179,10 +177,7 @@ def test_numba_matches_numpy_draws(
     members, edges, blocks, block_of = group
     pool = permutation._Pool(blocks, pairs.similarity)
     layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
-    lean = permutation._Layout(
-        members, edges, block_of, pairs.similarity, pool, vectorized=False
-    )
-    assert lean.full_keys is None and lean.counted is None
+    np_tables = permutation._NumpyTables(layout, 300)
     assert pool.ranked == ranked
     k0, k1 = permutation.group_key(3, members)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
@@ -190,14 +185,14 @@ def test_numba_matches_numpy_draws(
     got = np.empty(layout.n, dtype=np.int64)
     chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
     for r in range(len(pm)):
-        _numba._draw_nb(start + r, *lean.draw_args(), k0, k1, got, chosen)
+        _numba._draw_nb(start + r, *layout.draw_args(), k0, k1, got, chosen)
         np.testing.assert_array_equal(got, pm[r])
-    expected = permutation._group_maps_np(layout, pm)
+    expected = permutation._group_maps_np(np_tables, pm)
     for parallel in (True, False):  # on Numba's threads or the caller's
-        maps = _numba.permutation_maps(lean, start, 300, k0, k1, parallel)
+        maps = _numba.permutation_maps(layout, start, 300, k0, k1, parallel)
         np.testing.assert_array_equal(maps, expected)
-    identity = permutation._group_maps_np(layout, np.arange(layout.n)[None])[0]
-    assert _numba.permutation_identity(lean) == identity
+    identity = permutation._group_maps_np(np_tables, np.arange(layout.n)[None])[0]
+    assert _numba.permutation_identity(layout) == identity
     out = {b: np.empty(2000) for b in ("numpy", "numba")}
     runs = {
         b: permutation.permutation_null(
@@ -237,7 +232,7 @@ def test_draws_do_not_depend_on_chunks(backend, monkeypatch):
     feats = np.random.default_rng(22).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
     full = draws_of(meta, feats, spec, 1000, backend=backend)
-    monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 77)
+    monkeypatch.setattr(permutation._NumpyTables, "chunk", lambda self: 77)
     monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)
     monkeypatch.setattr(permutation, "_PAIR_CHUNK", 7)
     monkeypatch.setattr(permutation, "_CHUNK_ELEMENTS", 5)

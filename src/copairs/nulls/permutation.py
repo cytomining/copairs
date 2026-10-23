@@ -397,16 +397,14 @@ class _Pool:
 
 
 class _Layout:
-    """One group's slots, blocks and rank codes, as the draw functions take them.
+    """One group's slots, blocks and rank codes, as the scalar functions take them.
 
     Pool codes number the group's members ``0 .. n - 1`` (a member's code is
-    its slot) and then the pool's references. ``vectorized=False`` skips the
-    tables only :func:`_group_maps_np` reads, for the Numba kernels.
+    its slot) and then the pool's references. The NumPy backend gathers from
+    further tables (:class:`_NumpyTables`).
     """
 
-    def __init__(
-        self, members, edges, block_of, similarity, pool, draws=0, vectorized=True
-    ):
+    def __init__(self, members, edges, block_of, similarity, pool):
         members = np.asarray(members, dtype=np.int64)
         block_of = np.asarray(block_of, dtype=np.int64)
         self.n = n = len(members)
@@ -458,50 +456,6 @@ class _Layout:
             )
         else:
             self.rmu = self.rcm = np.zeros((0, 0), dtype=np.int32)
-        self.gkeys = self.counted = self.rows = None
-        self.full_keys = self.full_ranks = self.full_before = None
-        if vectorized:
-            self._vectorized_tables(adjm, block_of, widths[code_block], draws)
-
-    def _vectorized_tables(self, adjm, block_of, gwidths, draws):
-        """Build the tables :func:`_group_maps_np` reads besides the kernels'."""
-        n, pool = self.n, self.pool
-        # The rows as one sorted array of (code, key) words, for one searchsorted.
-        code_of = np.repeat(np.arange(len(gwidths), dtype=np.uint64), gwidths)
-        self.gkeys = (code_of << np.uint64(32)) | self.grow.astype(np.uint64)
-        # Small layouts gather keys from one (code, code) table. A positive y
-        # of x is ranked after full_before[x, y] pool profiles (x's rank of y
-        # among references plus its block members before y); that table is
-        # built when ``draws`` draws gather more positives than it has
-        # entries, else ranks are gathered from a (code, code) rank table.
-        m = n + len(pool.refs)
-        if m**2 <= _FULL_TABLE:
-            self.full_keys = _full_table(n, self.kmu, self.kmu.T[n:], pool.krr)
-            if pool.ranked:
-                self.full_ranks = _full_table(n, self.rmu, self.rcm, pool.rrr)
-            if pool.ranked and m**2 <= draws * int(self.deg.sum()):
-                x = np.repeat(np.arange(m), m)
-                word = (x.astype(np.uint64) << np.uint64(32)) | self.full_keys.ravel()
-                members_before = np.searchsorted(self.gkeys, word) - self.gptr[x]
-                before = self.full_ranks.ravel() + members_before
-                self.full_before, self.full_ranks = before.reshape(m, m), None
-        # Slots each slot's rank list counts: its positives and its block.
-        self.counted = [
-            np.flatnonzero(
-                (np.arange(n) != s) & (adjm[s] | (block_of == block_of[s]))
-            ).astype(np.int64)
-            for s in range(n)
-        ]
-        # Each code's sorted reference codes, for searches where no rank
-        # tables replace them.
-        if not pool.ranked:
-            self.rows = np.concatenate([self.smr, pool.srr])
-            self.row_lo = np.concatenate(
-                [self.smr_ptr[:-1], len(self.smr) + pool.srr_ptr[:-1]]
-            )
-            self.row_hi = np.concatenate(
-                [self.smr_ptr[1:], len(self.smr) + pool.srr_ptr[1:]]
-            )
 
     def draw_args(self):
         """Arguments of the scalar ``draw`` after ``j``, before the keys."""
@@ -524,9 +478,61 @@ class _Layout:
             self.rmu, self.rcm, pool.rrr, pool.ranked,
         )  # fmt: skip
 
+
+class _NumpyTables:
+    """The tables :func:`_group_maps_np` gathers from besides its layout's.
+
+    Built for ``draws`` draws of the layout's group: given enough, the ranks
+    of a small layout come with its drawn block members before them.
+    """
+
+    def __init__(self, layout, draws):
+        self.layout = layout
+        n, pool = layout.n, layout.pool
+        adjm, block_of = layout.adjm, layout.slot_block
+        # The rows as one sorted array of (code, key) words, for one searchsorted.
+        gwidths = np.diff(layout.gptr)
+        code_of = np.repeat(np.arange(len(gwidths), dtype=np.uint64), gwidths)
+        self.gkeys = (code_of << np.uint64(32)) | layout.grow.astype(np.uint64)
+        self.full_keys = self.full_ranks = self.full_before = None
+        # Small layouts gather keys from one (code, code) table. A positive y
+        # of x is ranked after full_before[x, y] pool profiles (x's rank of y
+        # among references plus its block members before y); that table is
+        # built when ``draws`` draws gather more positives than it has
+        # entries, else ranks are gathered from a (code, code) rank table.
+        m = n + len(pool.refs)
+        if m**2 <= _FULL_TABLE:
+            self.full_keys = _full_table(n, layout.kmu, layout.kmu.T[n:], pool.krr)
+            if pool.ranked:
+                self.full_ranks = _full_table(n, layout.rmu, layout.rcm, pool.rrr)
+            if pool.ranked and m**2 <= draws * int(layout.deg.sum()):
+                x = np.repeat(np.arange(m), m)
+                word = (x.astype(np.uint64) << np.uint64(32)) | self.full_keys.ravel()
+                members_before = np.searchsorted(self.gkeys, word) - layout.gptr[x]
+                before = self.full_ranks.ravel() + members_before
+                self.full_before, self.full_ranks = before.reshape(m, m), None
+        # Slots each slot's rank list counts: its positives and its block.
+        self.counted = [
+            np.flatnonzero(
+                (np.arange(n) != s) & (adjm[s] | (block_of == block_of[s]))
+            ).astype(np.int64)
+            for s in range(n)
+        ]
+        # Each code's sorted reference codes, for searches where no rank
+        # tables replace them.
+        if not pool.ranked:
+            self.rows = np.concatenate([layout.smr, pool.srr])
+            self.row_lo = np.concatenate(
+                [layout.smr_ptr[:-1], len(layout.smr) + pool.srr_ptr[:-1]]
+            )
+            self.row_hi = np.concatenate(
+                [layout.smr_ptr[1:], len(layout.smr) + pool.srr_ptr[1:]]
+            )
+
     def chunk(self):
         """Draws per vectorized chunk, bounding the per-slot arrays."""
-        return int(min(2**16, max(256, _CHUNK_ELEMENTS // max(self.n * self.n, 1))))
+        n = self.layout.n
+        return int(min(2**16, max(256, _CHUNK_ELEMENTS // max(n * n, 1))))
 
 
 def _uniforms_np(c0, c1, count, k0, k1):
@@ -617,20 +623,24 @@ def _count_less_np(row, lo, hi, key):
     return lo
 
 
-def _group_maps_np(layout, pm):
-    """Return the mAP of each draw in ``pm`` (one row each), as ``group_map``."""
+def _group_maps_np(tables, pm):
+    """Return the mAP of each draw in ``pm`` (one row each), as ``group_map``.
+
+    ``tables`` are the :class:`_NumpyTables` of the group's layout.
+    """
+    layout = tables.layout
     n, size = layout.n, len(pm)
     pool = layout.pool
     kmu_t = np.ascontiguousarray(layout.kmu.T)  # (pool code, member) -> key
     total = np.zeros(size)
     for s in range(n):
         b = layout.slot_block[s]
-        slots = layout.counted[s]
+        slots = tables.counted[s]
         x = pm[:, s][:, None]
-        if layout.full_keys is None:
+        if tables.full_keys is None:
             keys = _pair_table(x, pm[:, slots], n, layout.kmu, kmu_t[n:], pool.krr)
         else:
-            keys = _gather(layout.full_keys, x, pm[:, slots])
+            keys = _gather(tables.full_keys, x, pm[:, slots])
         ent = (keys.astype(np.uint64) << np.uint64(32)) | slots.astype(np.uint64)
         ent.sort(axis=1)
         k = ent >> np.uint64(32)
@@ -647,20 +657,20 @@ def _group_maps_np(layout, pm):
         tp = np.take_along_axis(t, cols, axis=1)
         yp = np.take_along_axis(pm, tp, axis=1)
         xp = np.broadcast_to(x, yp.shape)
-        if layout.full_before is not None:
-            before = _gather(layout.full_before, xp, yp)
+        if tables.full_before is not None:
+            before = _gather(tables.full_before, xp, yp)
         else:
             kp = np.take_along_axis(k, cols, axis=1)
-            if layout.full_ranks is not None:
-                before = _gather(layout.full_ranks, xp, yp)
+            if tables.full_ranks is not None:
+                before = _gather(tables.full_ranks, xp, yp)
             elif pool.ranked:
                 before = _pair_table(xp, yp, n, layout.rmu, layout.rcm, pool.rrr)
             else:
-                lo = layout.row_lo[xp]
-                before = _count_less_np(layout.rows, lo, layout.row_hi[xp], kp) - lo
+                lo = tables.row_lo[xp]
+                before = _count_less_np(tables.rows, lo, tables.row_hi[xp], kp) - lo
             # Block members x ranks before the key: count_less on its sorted g-row.
             word = (xp.astype(np.uint64) << np.uint64(32)) | kp
-            before = before + (np.searchsorted(layout.gkeys, word) - layout.gptr[xp])
+            before = before + (np.searchsorted(tables.gkeys, word) - layout.gptr[xp])
         before = before - np.take_along_axis(drawn, cols, axis=1)
         acc = np.zeros(size)
         for d in range(deg):
@@ -894,32 +904,31 @@ def permutation_null(
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
     k0, k1 = group_key(seed, members)
+    layout = _Layout(members, edges, block_of, similarity, pool)
     if backend == "numba":
-        layout = _Layout(members, edges, block_of, similarity, pool, vectorized=False)
         kernels = _import_numba_backend()
         identity = kernels.permutation_identity(layout)
         chunk = _NUMBA_CHUNK
 
-        def kernel(layout, start, size, k0, k1):
+        def maps_of(start, size):
             return kernels.permutation_maps(layout, start, size, k0, k1, parallel)
 
     else:
-        layout = _Layout(members, edges, block_of, similarity, pool, int(null_size))
-        identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
-        chunk, kernel = layout.chunk(), _permutation_maps_np
+        tables = _NumpyTables(layout, int(null_size))
+        identity = float(_group_maps_np(tables, np.arange(layout.n)[None])[0])
+        chunk = tables.chunk()
+
+        def maps_of(start, size):
+            return _group_maps_np(tables, _draws_np(layout, start, size, k0, k1))
+
     thr = float(tie_thresholds(identity))
     count = 0
     for start, size in chunks(int(null_size), chunk):
-        maps = kernel(layout, start, size, k0, k1)
+        maps = maps_of(start, size)
         if out is not None:
             out[start : start + size] = maps
         count += int((maps >= thr).sum())
     return count, identity, pool
-
-
-def _permutation_maps_np(layout, start, size, k0, k1):
-    """float64 mAPs of draws ``start, ..., start + size - 1``, vectorized."""
-    return _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
 
 
 def _pool_bytes(blocks):
