@@ -725,12 +725,31 @@ def _key_pairs(keys: np.ndarray) -> np.ndarray:
     ).astype(np.uint32)
 
 
+# Rows per chunk of _sorted_unique's check: 2 MiB of keys.
+_SORTED_CHECK_ROWS = 2**18
+
+
+def _sorted_unique(pairs: np.ndarray) -> bool:
+    """Whether ``(i, j)`` pairs are strictly increasing, chunk by chunk.
+
+    Consecutive chunks overlap by one row, so order across their boundary is
+    checked too; the temporaries are a few chunk-sized arrays.
+    """
+    step = _SORTED_CHECK_ROWS
+    for start in range(0, len(pairs) - 1, step):
+        keys = _pair_keys(pairs[start : start + step + 1])
+        if not (keys[1:] > keys[:-1]).all():
+            return False
+    return True
+
+
 def _unique_pairs(pairs: np.ndarray) -> np.ndarray:
     """``np.unique(pairs, axis=0)`` for uint32 ``(i, j)`` pairs, via packed keys.
 
-    Pairs that are already sorted and unique are returned as they are.
+    Pairs that are already sorted and unique, such as the label index's pairs
+    sharing no label, are returned as they are, after a check in bounded
+    memory.
     """
-    keys = _pair_keys(pairs)
-    if (keys[1:] > keys[:-1]).all():
+    if _sorted_unique(pairs):
         return pairs
-    return _key_pairs(np.unique(keys))
+    return _key_pairs(np.unique(_pair_keys(pairs)))

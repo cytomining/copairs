@@ -1,9 +1,12 @@
 """Tests for the multilabel matching implementation."""
 
+import tracemalloc
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from copairs import matching
 from tests.helpers import simulate_random_plates
 from copairs.matching import _unique_pairs, find_pairs_multilabel
 
@@ -184,3 +187,32 @@ def test_unique_pairs_match_numpy(order):
     got = _unique_pairs(pairs)
     assert got.dtype == np.uint32
     np.testing.assert_array_equal(got, np.unique(pairs, axis=0))
+
+
+@pytest.mark.parametrize("at", [0, 1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("change", ["duplicate", "decrease"])
+def test_unique_pairs_chunk_boundaries(monkeypatch, at, change):
+    """Order is checked across chunk boundaries, not only within chunks."""
+    monkeypatch.setattr(matching, "_SORTED_CHECK_ROWS", 3)
+    pairs = np.array([[0, 1], [0, 2], [1, 2], [1, 5], [2, 3], [3, 4], [4, 0], [4, 1]])
+    pairs = pairs.astype(np.uint32)
+    assert _unique_pairs(pairs) is pairs
+    if change == "duplicate":
+        pairs[at + 1] = pairs[at]
+    else:
+        pairs[[at, at + 1]] = pairs[[at + 1, at]]
+    np.testing.assert_array_equal(_unique_pairs(pairs), np.unique(pairs, axis=0))
+
+
+def test_unique_pairs_sorted_input_bounded_memory():
+    """Sorted unique pairs are checked without a full-size key array."""
+    keys = np.arange(2**22, dtype=np.uint32)
+    pairs = np.stack([keys >> 6, keys & 63], axis=1)  # sorted, unique: 32 MiB
+    tracemalloc.start()
+    try:
+        got = _unique_pairs(pairs)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert got is pairs
+    assert peak < pairs.nbytes / 2, peak
