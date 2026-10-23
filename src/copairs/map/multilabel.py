@@ -11,6 +11,12 @@ from copairs.matching import UnpairedException, find_pairs_multilabel
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
+from .average_precision import (
+    LabelPairs,
+    attach_pairs,
+    _diffby_codes,
+    _FeatureSimilarity,
+)
 
 logger = logging.getLogger("copairs")
 
@@ -79,11 +85,23 @@ def average_precision(
     batch_size=20000,
     distance="cosine",
     progress_bar: bool = True,
+    return_pairs: bool = False,
 ) -> pd.DataFrame:
     """
     Compute average precision with multilabel support.
 
     Returns normalized_average_precision in addition to average_precision.
+    Each row is one (profile, label) pair: the profile's AP for that label.
+
+    The :class:`~copairs.map.LabelPairs` the APs were computed from, which
+    ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
+    needs, are attached to the returned frame as
+    ``frame.attrs["copairs_pairs"]``, as in
+    :func:`copairs.map.average_precision`; ``return_pairs=True`` also returns
+    them, as a ``(DataFrame, LabelPairs)`` tuple. They keep ``feats`` and
+    every positive, negative and lone pair (8 bytes per pair) alive with the
+    frame, whichever null is used; drop them with
+    ``frame.attrs.pop("copairs_pairs")``.
 
     See Also
     --------
@@ -150,9 +168,64 @@ def average_precision(
         )
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
+    # The merged frame keeps these rows' positions as its index, so row i of
+    # the AP frame is profile ix[i].
+    profile = results["ix"].to_numpy().astype(np.int64)
+    lone = lone_key = None
+    if multilabel_col in _columns(neg_diffby) and multilabel_col not in _columns(
+        neg_sameby
+    ):
+        lone, lone_key = _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, keys)
+    diffby = [c for c in _columns(pos_diffby) if c != multilabel_col]
+    pairs = LabelPairs(
+        np.asarray(pos_pairs),
+        np.asarray(neg_pairs),
+        _FeatureSimilarity(feats, distance, batch_size),
+        _diffby_codes(meta, diffby),
+        profile=profile,
+        label_col=multilabel_col,
+        keys=np.asarray(keys),
+        pos_key=np.repeat(np.arange(len(pos_counts)), pos_counts),
+        lone=lone,
+        lone_key=lone_key,
+    )
     meta = meta.drop(multilabel_col, axis=1)
     results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
     results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.uint32)
     results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.uint32)
+    attach_pairs(results, pairs)
     logger.info("Finished.")
-    return results
+    return (results, pairs) if return_pairs else results
+
+
+def _columns(cols) -> list:
+    """``cols`` (a column name or a list of them) as a list."""
+    return [cols] if isinstance(cols, str) else list(cols)
+
+
+def _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, keys):
+    """Pairs sharing exactly one label that the negative rules join without it.
+
+    Returns ``(pairs, key)``, ``pairs`` oriented ``(min, max)`` and ``key``
+    indexing ``keys``; pairs of labels without positive pairs are dropped.
+    """
+    other = [c for c in _columns(neg_diffby) if c != multilabel_col]
+    pairs, found_keys, counts = find_pairs_multilabel(
+        meta,
+        sameby=[multilabel_col, *_columns(neg_sameby)],
+        diffby=other,
+        multilabel_col=multilabel_col,
+    )
+    pairs = np.asarray(pairs, dtype=np.int64).reshape(-1, 2)
+    if not len(pairs):
+        return pairs, np.zeros(0, dtype=np.int64)
+    index = {k: i for i, k in enumerate(np.asarray(keys).tolist())}
+    key = np.repeat(
+        [index.get(k, -1) for k in np.asarray(found_keys).tolist()], counts
+    ).astype(np.int64)
+    a, b = pairs.min(axis=1), pairs.max(axis=1)
+    _, inverse, shared = np.unique(
+        a * len(meta) + b, return_inverse=True, return_counts=True
+    )
+    keep = (shared[inverse.ravel()] == 1) & (key >= 0)
+    return np.stack([a[keep], b[keep]], axis=1), key[keep]

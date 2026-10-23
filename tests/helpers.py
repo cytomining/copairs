@@ -95,3 +95,14 @@ def query_meta(others: int = 0) -> pd.DataFrame:
     """
     groups = ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * others
     return pd.DataFrame({"g": groups})
+
+
+def label_meta() -> pd.DataFrame:
+    """Compounds with overlapping targets; c1 and c8 share two of them.
+
+    Each compound also has a label of its own, so none is left without one
+    when a label moves away; such labels make no pairs.
+    """
+    targets = [["A"], ["A", "B"], ["B"], ["A", "C"], ["C"], ["B", "C"], ["D"]]
+    targets += [["D", "A"], ["A", "B"]]
+    return pd.DataFrame({"target": [t + [f"own{i}"] for i, t in enumerate(targets)]})

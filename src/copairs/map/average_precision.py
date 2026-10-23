@@ -141,6 +141,41 @@ class RankPairs:
     pos_diffby: np.ndarray | None = None
 
 
+@dataclass(frozen=True, eq=False, kw_only=True)
+class LabelPairs(RankPairs):
+    """The pairs behind a multilabel AP table, whose rows are (profile, label).
+
+    Attached to the frame :func:`copairs.map.multilabel.average_precision`
+    returns (and returned with it by ``return_pairs=True``). ``pos``, ``neg``,
+    ``lone`` and the rows of ``pos_diffby`` index profiles (rows of the
+    metadata), not AP rows; ``profile`` maps one to the other.
+
+    Attributes
+    ----------
+    profile : np.ndarray
+        Profile of each AP row, by the AP frame's index.
+    label_col : str
+        The multilabel column.
+    keys : np.ndarray
+        The labels with positive pairs.
+    pos_key : np.ndarray
+        Label (index into ``keys``) of each positive pair; a pair sharing
+        several labels appears once per label.
+    lone, lone_key : np.ndarray or None
+        ``(n, 2)`` pairs that share exactly one label, ``keys[lone_key]``,
+        and meet the negative rules on the other columns, so that without
+        that label they would be negatives. None when the label column is
+        not one of the negative pairs' ``diffby`` columns.
+    """
+
+    profile: np.ndarray
+    label_col: str
+    keys: np.ndarray
+    pos_key: np.ndarray
+    lone: np.ndarray | None
+    lone_key: np.ndarray | None
+
+
 def build_rank_lists(
     pos_pairs: np.ndarray,
     neg_pairs: np.ndarray,
@@ -375,17 +410,22 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
-    diffby = [pos_diffby] if isinstance(pos_diffby, str) else list(pos_diffby)
     pairs = RankPairs(
         pos_pairs,
         neg_pairs,
         _FeatureSimilarity(feats, distance, batch_size),
-        np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
-        if diffby
-        else None,
+        _diffby_codes(meta, pos_diffby),
     )
     attach_pairs(meta, pairs)
     return (meta, pairs) if return_pairs else meta
+
+
+def _diffby_codes(meta: pd.DataFrame, pos_diffby) -> np.ndarray | None:
+    """``(profiles, columns)`` integer codes of ``meta``'s ``pos_diffby`` columns, or None."""
+    diffby = [pos_diffby] if isinstance(pos_diffby, str) else list(pos_diffby)
+    if not diffby:
+        return None
+    return np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
 
 
 def p_values(

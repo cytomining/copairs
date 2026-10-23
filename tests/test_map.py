@@ -14,10 +14,10 @@ from sklearn.metrics import average_precision_score
 import copairs.map.map as map_module
 from copairs import compute
 from copairs.map import get_map_pvalue, average_precision, mean_average_precision
-from tests.helpers import ap_frame, query_meta, simulate_random_dframe
+from tests.helpers import ap_frame, label_meta, query_meta, simulate_random_dframe
 from copairs.matching import UnpairedException, find_pairs
 from copairs.map.multilabel import average_precision as multilabel_average_precision
-from copairs.map.average_precision import attached_pairs
+from copairs.map.average_precision import LabelPairs, attached_pairs
 
 SEED = 0
 
@@ -560,6 +560,53 @@ def test_rank_pairs_compare_by_identity():
     assert pairs == pairs
     assert pairs != again
     assert len({pairs, again, pairs}) == 2
+
+
+ML_SPEC = (["target"], [], [], ["target"])
+
+
+def test_multilabel_frames_carry_label_pairs():
+    """Multilabel AP frames carry LabelPairs: per-label pairs and each row's profile."""
+    meta = label_meta()
+    meta["cpd"] = np.arange(len(meta))
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
+    ap, pairs = multilabel_average_precision(
+        meta, feats, *ML_SPEC, "target", progress_bar=False, return_pairs=True
+    )
+    assert isinstance(pairs, LabelPairs) and pairs.label_col == "target"
+    assert attached_pairs(ap) is pairs
+    assert attached_pairs(ap[ap["target"] == "A"].copy()) is pairs
+    assert attached_pairs(pickle.loads(pickle.dumps(ap))) is None
+    plain = multilabel_average_precision(
+        meta, feats, *ML_SPEC, "target", progress_bar=False
+    )
+    pd.testing.assert_frame_equal(plain, ap)
+    assert pairs == pairs and pairs != attached_pairs(plain)  # identity
+    # Row i of the frame is profile pairs.profile[i], whatever its position.
+    np.testing.assert_array_equal(pairs.profile[ap.index], ap["cpd"])
+    labels = [set(t) for t in meta["target"]]
+    keys = pairs.keys.tolist()
+    assert keys == ["A", "B", "C", "D"]  # the labels with positive pairs
+    for (a, b), k in zip(pairs.pos, pairs.pos_key):
+        assert keys[k] in labels[a] & labels[b]
+    for a, b in pairs.neg:
+        assert not labels[a] & labels[b]
+    rows = ap.set_index(["cpd", "target"])
+    for (a, k), n_pos in rows["n_pos_pairs"].items():
+        on_label = pairs.pos[pairs.pos_key == keys.index(k)]
+        assert n_pos == (on_label == a).sum()
+    # Lone pairs share exactly one label, which has positive pairs.
+    lone = {(int(a), int(b), keys[k]) for (a, b), k in zip(pairs.lone, pairs.lone_key)}
+    expected = {
+        (a, b, next(iter(labels[a] & labels[b])))
+        for a, b in itertools.combinations(range(len(meta)), 2)
+        if len(labels[a] & labels[b]) == 1 and labels[a] & labels[b] <= set(keys)
+    }
+    assert lone == expected and len(lone) > 0
+    similarity = compute.get_similarity_fn("cosine", progress_bar=False)
+    np.testing.assert_array_equal(
+        pairs.similarity(pairs.neg), similarity(feats, pairs.neg, 20000)
+    )
 
 
 @pytest.mark.parametrize("distance", ["cosine", "correlation", "cityblock"])

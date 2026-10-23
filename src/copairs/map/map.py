@@ -20,6 +20,7 @@ from copairs.map.hierarchical_fdr import (
 )
 from copairs.map.average_precision import (
     RankPairs,
+    LabelPairs,
     attached_pairs,
     check_recomputable,
 )
@@ -128,6 +129,8 @@ def get_map_pvalue(
         raise ValueError("pos_pairs is used by the joint null only")
     if null != "copied" and pos_pairs is None and pairs is None:
         pairs = attached_pairs(ap_scores)
+    if isinstance(pairs, LabelPairs):  # multilabel APs: not read by these nulls
+        pairs = None
     if null == "joint" and pos_pairs is None and pairs is not None:
         pos_pairs = pairs.pos
     if null == "permutation" and pairs is None:
