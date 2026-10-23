@@ -97,6 +97,12 @@ def query_meta(others: int = 0) -> pd.DataFrame:
     return pd.DataFrame({"g": groups})
 
 
+# Multilabel APs' usual rules: positives share a label, negatives share none.
+ML_SPEC = dict(
+    pos_sameby=["target"], pos_diffby=[], neg_sameby=[], neg_diffby=["target"]
+)
+
+
 def label_meta() -> pd.DataFrame:
     """Compounds with overlapping targets; c1 and c8 share two of them.
 

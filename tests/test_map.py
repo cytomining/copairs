@@ -15,7 +15,13 @@ import copairs.map.map as map_module
 import copairs.map.multilabel as multilabel_module
 from copairs import compute
 from copairs.map import get_map_pvalue, average_precision, mean_average_precision
-from tests.helpers import ap_frame, label_meta, query_meta, simulate_random_dframe
+from tests.helpers import (
+    ML_SPEC,
+    ap_frame,
+    label_meta,
+    query_meta,
+    simulate_random_dframe,
+)
 from copairs.matching import UnpairedException, find_pairs
 from copairs.map.multilabel import average_precision as multilabel_average_precision
 from copairs.map.average_precision import LabelPairs, attached_pairs
@@ -563,23 +569,25 @@ def test_rank_pairs_compare_by_identity():
     assert len({pairs, again, pairs}) == 2
 
 
-ML_SPEC = (["target"], [], [], ["target"])
-
-
 def test_multilabel_frames_carry_label_pairs():
     """Multilabel AP frames carry LabelPairs: per-label pairs and each row's profile."""
     meta = label_meta()
     meta["cpd"] = np.arange(len(meta))
     feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
     ap, pairs = multilabel_average_precision(
-        meta, feats, *ML_SPEC, "target", progress_bar=False, return_pairs=True
+        meta,
+        feats,
+        **ML_SPEC,
+        multilabel_col="target",
+        progress_bar=False,
+        return_pairs=True,
     )
     assert isinstance(pairs, LabelPairs) and pairs.label_col == "target"
     assert attached_pairs(ap) is pairs
     assert attached_pairs(ap[ap["target"] == "A"].copy()) is pairs
     assert attached_pairs(pickle.loads(pickle.dumps(ap))) is None
     plain = multilabel_average_precision(
-        meta, feats, *ML_SPEC, "target", progress_bar=False
+        meta, feats, **ML_SPEC, multilabel_col="target", progress_bar=False
     )
     pd.testing.assert_frame_equal(plain, ap)
     assert pairs == pairs and pairs != attached_pairs(plain)  # identity
@@ -744,7 +752,7 @@ def test_joint_null_reads_label_pairs():
     assert read["p_value"].tolist() == given["p_value"].tolist()
     # Label groups that are cliques get what the pair counts imply.
     clique = multilabel_average_precision(
-        meta, feats, *ML_SPEC, "target", progress_bar=False
+        meta, feats, **ML_SPEC, multilabel_col="target", progress_bar=False
     )
     inferred = mean_average_precision(
         pickle.loads(pickle.dumps(clique)), ["target"], **kwargs

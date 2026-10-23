@@ -15,7 +15,7 @@ from scipy import stats
 from copairs import compute
 from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import permutation, tie_thresholds
-from tests.helpers import label_meta
+from tests.helpers import ML_SPEC, label_meta
 from copairs.nulls.common import stream_key
 
 SPEC = dict(pos_sameby=["g"], pos_diffby=[], neg_sameby=[], neg_diffby=["g"])
@@ -100,17 +100,28 @@ def permutation_similarity(feats):
     return lambda pairs: cosine(feats, np.asarray(pairs), 20000)
 
 
-def scalar_draws(layout, start, size, k0, k1):
-    """Return draws ``start, ...`` from the scalar functions, one at a time."""
+def scalar_draws(layout, start, size, k0, k1, label=False):
+    """Return draws ``start, ...`` from the scalar functions, one at a time.
+
+    ``label`` takes the label null's (``draw_pool``, ``label_group_map``).
+    """
     n = layout.n
     pm = np.empty(n, dtype=np.int64)
     chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
-    scratch = map_scratch(n)
+    if label:
+        draw, group_map = permutation._draw_pool, permutation._label_group_map
+        scratch = label_scratch(n)
+    else:
+        draw, group_map, scratch = (
+            permutation._draw,
+            permutation._group_map,
+            map_scratch(n),
+        )
     pms, maps = [], []
     for j in range(start, start + size):
-        permutation._draw(j, *layout.draw_args(), k0, k1, pm, chosen)
+        draw(j, *layout.draw_args(), k0, k1, pm, chosen)
         pms.append(pm.copy())
-        maps.append(permutation._group_map(pm, *layout.map_args(), *scratch))
+        maps.append(group_map(pm, *layout.map_args(), *scratch))
     return np.array(pms), np.array(maps)
 
 
@@ -668,9 +679,6 @@ def test_split_draws_do_not_change_pvalues(stop_after, monkeypatch):
             assert min(tasks.values()) == 1 and max(tasks.values()) > 2
 
 
-ML_SPEC = dict(
-    pos_sameby=["target"], pos_diffby=[], neg_sameby=[], neg_diffby=["target"]
-)
 PLATE_SPEC = dict(ML_SPEC, neg_sameby=["plate"])
 
 
@@ -752,20 +760,6 @@ def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0):
     return observed, run.identity, count, out
 
 
-def scalar_label_draws(layout, start, size, k0, k1):
-    """Return draws ``start, ...`` from the scalar label functions, one at a time."""
-    n = layout.n
-    pm = np.empty(n, dtype=np.int64)
-    chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
-    scratch = label_scratch(n)
-    pms, maps = [], []
-    for j in range(start, start + size):
-        permutation._draw_pool(j, *layout.draw_args(), k0, k1, pm, chosen)
-        pms.append(pm.copy())
-        maps.append(permutation._label_group_map(pm, *layout.map_args(), *scratch))
-    return np.array(pms), np.array(maps)
-
-
 def label_scratch(n):
     """Scratch arrays of the scalar ``label_group_map`` for ``n`` members."""
     return (
@@ -809,7 +803,7 @@ def test_label_vectorized_matches_scalar_draws(
     assert (layout.lone_before is not None) == lone_table
     k0, k1 = permutation._label_key(3, members, key)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
-    pm, maps = scalar_label_draws(layout, start, 300, k0, k1)
+    pm, maps = scalar_draws(layout, start, 300, k0, k1, label=True)
     got_pm = permutation._draws_pool_np(layout, start, 300, k0, k1)
     np.testing.assert_array_equal(got_pm, pm)
     np.testing.assert_array_equal(permutation._label_maps_np(layout, got_pm), maps)
@@ -852,15 +846,6 @@ def test_label_permutation_through_mean_average_precision():
     )  # fmt: skip
     assert set(res["target"]) == {"A", "B", "C", "D"}
     assert ((res["p_value"] > 0) & (res["p_value"] <= 1)).all()
-    with pytest.raises(ValueError, match="one 'target' value"):
-        mean_average_precision(
-            ap.assign(g=0), ["g"], 100, 0.05, 0, progress_bar=False, pairs=pairs
-        )
-    split = ap.assign(half=np.arange(len(ap)) % 2)
-    with pytest.raises(ValueError, match="no row for it in the group.*null='joint'"):
-        mean_average_precision(
-            split, ["target", "half"], 100, 0.05, 0, progress_bar=False, pairs=pairs
-        )
     # Labels come from the pairs: the frame needs no label column.
     renamed = mean_average_precision(
         ap.drop(columns="target").assign(g=ap["target"]), ["g"], 500, 0.05, 0,
@@ -921,12 +906,18 @@ def test_label_guards():
     args = (["target"], 100, 0.05, 0)
     ap = multilabel_ap(meta, feats, PLATE_SPEC)
     by_plate = (["plate"], *args[1:])  # groups holding several labels
-    with pytest.raises(ValueError, match="group by it, or pass null='joint'"):
+    with pytest.raises(
+        ValueError, match="one 'target' value; group by it, or pass null='joint'"
+    ):
         mean_average_precision(ap, *by_plate, progress_bar=False)
     assert len(mean_average_precision(ap, *by_plate, progress_bar=False, null="joint"))
     dropped = ap.drop(index=ap.index[ap["target"] == "A"][:1])
-    with pytest.raises(ValueError, match="no row for it in the group.*null='joint'"):
-        mean_average_precision(dropped, *args, progress_bar=False)
+    split = ap.assign(half=np.arange(len(ap)) % 2)  # a label's rows grouped apart
+    for part, by in ((dropped, args), (split, (["target", "half"], *args[1:]))):
+        with pytest.raises(
+            ValueError, match="no row for it in the group.*null='joint'"
+        ):
+            mean_average_precision(part, *by, progress_bar=False)
     assert len(mean_average_precision(dropped, *args, progress_bar=False, null="joint"))
     scaled = multilabel_ap(meta, feats, PLATE_SPEC, distance="seuclidean")
     with pytest.raises(ValueError, match="distance='seuclidean'.*null='joint'"):
