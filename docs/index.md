@@ -8,6 +8,12 @@
 pip install copairs
 ```
 
+For the optional Numba backend (`backend="numba"`), install the extra:
+
+```bash
+pip install 'copairs[numba]'
+```
+
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):
 

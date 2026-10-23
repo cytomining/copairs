@@ -5,8 +5,9 @@ import pandas as pd
 import pytest
 from sklearn.metrics import average_precision_score
 
+import copairs.map.map as map_module
 from copairs import compute
-from copairs.map import average_precision
+from copairs.map import average_precision, mean_average_precision
 from tests.helpers import simulate_random_dframe
 from copairs.matching import UnpairedException
 from copairs.map.multilabel import average_precision as multilabel_average_precision
@@ -263,3 +264,104 @@ def test_multilabel_has_normalized_ap():
     )
 
     assert "normalized_average_precision" in result.columns
+
+
+@pytest.mark.parametrize(
+    "labels, plates, feats, no_neg_ix",
+    [
+        # Profile 1 sorts before profile 2, which has negatives.
+        (
+            ["A", "A", "B", "B"],
+            [1, 2, 1, 1],
+            [[1, 0], [0, 1], [1, 0.1], [0.9, 0.2]],
+            1,
+        ),
+        # Profile 2 sorts after every profile that has negatives.
+        (["A", "B", "A"], [1, 1, 2], [[1, 0], [0, 1], [0.6, 0.8]], 2),
+    ],
+)
+def test_multilabel_profile_without_negatives(labels, plates, feats, no_neg_ix):
+    """Test that a multilabel profile with positives but no negatives gets none."""
+    meta = pd.DataFrame({"id": range(len(labels)), "l": labels, "plate": plates})
+    feats = np.asarray(feats, dtype=float)
+    args = (["l"], [], ["plate"], ["l"])
+
+    expected = average_precision(meta, feats, *args, progress_bar=False)
+    result = multilabel_average_precision(
+        meta.assign(l=[[label] for label in labels]),
+        feats,
+        *args,
+        "l",
+        progress_bar=False,
+    )
+    expected = expected.set_index("id")
+    result = result.set_index("id").sort_index()
+
+    row = result.loc[no_neg_ix]
+    assert row["average_precision"] == 1.0
+    assert row["n_pos_pairs"] == 1
+    assert row["n_total_pairs"] == 1
+
+    cols = [
+        "average_precision",
+        "normalized_average_precision",
+        "n_pos_pairs",
+        "n_total_pairs",
+    ]
+    # The two functions store pair counts with different integer dtypes.
+    pd.testing.assert_frame_equal(
+        result[cols], expected.loc[result.index, cols], check_dtype=False
+    )
+
+
+def test_mean_average_precision_independent_of_other_groups(tmp_path):
+    """A group's mAP p-value depends neither on the other groups nor on the cache."""
+    ap_scores = pd.DataFrame(
+        {
+            "group": ["X", "X", "Y", "Y"],
+            "average_precision": [0.9, 0.8, 0.7, 0.6],
+            "normalized_average_precision": [0.9, 0.8, 0.7, 0.6],
+            "n_pos_pairs": [3, 3, 5, 5],
+            "n_total_pairs": [20, 20, 30, 30],
+        }
+    )
+    only_y = ap_scores[ap_scores["group"] == "Y"]
+    kwargs = dict(
+        sameby=["group"], null_size=200, threshold=0.05, seed=0, progress_bar=False
+    )
+    shared = tmp_path / "shared"
+    both = mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
+    cached = list(shared.rglob("*.npy"))
+    after_both = mean_average_precision(only_y, cache_dir=shared, **kwargs)
+    alone = mean_average_precision(only_y, cache_dir=tmp_path / "fresh", **kwargs)
+
+    # The second run reads Y's null from the first run's cache.
+    assert sorted(shared.rglob("*.npy")) == sorted(cached)
+    pd.testing.assert_frame_equal(after_both, alone)
+    y_in_both = both.loc[both["group"] == "Y", "p_value"].tolist()
+    assert y_in_both == alone["p_value"].tolist()
+
+
+def test_mean_average_precision_unknown_cpu_count(tmp_path, monkeypatch):
+    """When os.cpu_count() cannot tell the CPU count, use one CPU."""
+    monkeypatch.setattr(compute.os, "cpu_count", lambda: None)
+    monkeypatch.setattr(map_module, "cpu_count", lambda: None)
+    ap_scores = pd.DataFrame(
+        {
+            "group": ["X", "X", "Y", "Y"],
+            "average_precision": [0.9, 0.8, 0.7, 0.6],
+            "normalized_average_precision": [0.9, 0.8, 0.7, 0.6],
+            "n_pos_pairs": [3, 3, 5, 5],
+            "n_total_pairs": [20, 20, 30, 30],
+        }
+    )
+    result = mean_average_precision(
+        ap_scores,
+        ["group"],
+        null_size=100,
+        threshold=0.05,
+        seed=0,
+        progress_bar=False,
+        cache_dir=tmp_path,
+    )
+    assert len(result) == 2

@@ -12,6 +12,7 @@ import pandas as pd
 from copairs import compute
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
+    check_hierarchical_by,
     apply_hierarchical_fdr_correction,
 )
 
@@ -262,6 +263,7 @@ def mean_average_precision_hierarchical(
     mean_average_precision : For standard BH FDR correction.
 
     """
+    check_hierarchical_by(hierarchical_by, sameby)
     # Step 1: Compute mAP scores and p-values
     map_scores = get_map_pvalue(
         ap_scores=ap_scores,
@@ -305,7 +307,7 @@ def silent_thread_map(fn, *iterables, **kwargs):
     # (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
 
     kwargs = kwargs.copy()
-    max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
+    max_workers = kwargs.pop("max_workers", min(32, (cpu_count() or 1) + 4))
     chunksize = kwargs.pop("chunksize", 1)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
