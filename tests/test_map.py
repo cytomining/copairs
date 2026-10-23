@@ -507,6 +507,21 @@ def test_ap_frames_carry_their_pairs():
     )
 
 
+def test_rank_pairs_compare_by_identity():
+    """RankPairs hold arrays: == and hash() are identity, and do not raise."""
+    meta = pd.DataFrame({"g": ["q"] * 3 + [f"c{i}" for i in range(6)]})
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
+    _, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    _, again = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    assert pairs == pairs
+    assert pairs != again
+    assert len({pairs, again, pairs}) == 2
+
+
 def test_map_pvalue_rejects_misaligned_pos_pairs():
     """pos_pairs from a meta whose index has gaps no longer index ap_scores."""
     rng = np.random.default_rng(SEED)

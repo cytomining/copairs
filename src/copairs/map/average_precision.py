@@ -76,12 +76,13 @@ class _FeatureSimilarity:
         return self._fn(self.feats, np.asarray(pairs), self.batch_size)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class RankPairs:
     """The pairs behind an AP table, for mAP nulls that re-rank profiles.
 
     Attached to the frame :func:`average_precision` returns (and returned with
-    it by ``return_pairs=True``); indices are rows of that frame.
+    it by ``return_pairs=True``); indices are rows of that frame. Instances
+    compare and hash by identity, since their fields are arrays.
 
     Attributes
     ----------
