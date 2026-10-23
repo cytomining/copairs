@@ -172,19 +172,6 @@ def _all_pairs_except(n, shared):
     return out
 
 
-@numba.njit(cache=True)
-def _sorted_difference(candidates, shared):
-    """Elements of sorted ``candidates`` not in sorted ``shared`` (linear merge)."""
-    keep = np.ones(len(candidates), dtype=np.bool_)
-    s = 0
-    for c in range(len(candidates)):
-        while s < len(shared) and shared[s] < candidates[c]:
-            s += 1
-        if s < len(shared) and shared[s] == candidates[c]:
-            keep[c] = False
-    return candidates[keep]
-
-
 def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col):
     """Sorted unique pairs ``(i < j)`` of rows sharing no label, or None."""
     found = multilabel_pairs(dframe, multilabel_col)
@@ -195,7 +182,8 @@ def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col):
     shared = np.unique(pairs[:, 0] * n + pairs[:, 1])
     if not (len(sameby) or len(diffby)):
         return _all_pairs_except(n, shared)
-    kept = _sorted_difference(_monolabel_keys(dframe, sameby, diffby), shared)
+    mono = _monolabel_keys(dframe, sameby, diffby)
+    kept = mono[~_in_sorted(mono, shared)]
     return np.stack([kept // n, kept % n], axis=1).astype(np.uint32)
 
 
