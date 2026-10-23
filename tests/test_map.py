@@ -12,6 +12,7 @@ import pytest
 from sklearn.metrics import average_precision_score
 
 import copairs.map.map as map_module
+import copairs.map.multilabel as multilabel_module
 from copairs import compute
 from copairs.map import get_map_pvalue, average_precision, mean_average_precision
 from tests.helpers import ap_frame, label_meta, query_meta, simulate_random_dframe
@@ -610,6 +611,41 @@ def test_multilabel_frames_carry_label_pairs():
     np.testing.assert_array_equal(
         pairs.similarity(pairs.neg), similarity(feats, pairs.neg, 20000)
     )
+
+
+def test_lone_pairs_skip_profiles_without_positive_labels(monkeypatch):
+    """The lone-pair query sees only profiles holding a label with positive pairs.
+
+    The others share no such label, so they form no lone pairs, but many of
+    them (a control compound's replicates under a control-only label) would
+    fill memory with pairs to discard. Profiles kept keep all their labels:
+    profiles 2 and 4 share C and the dropped "ctl", so they are not lone.
+    """
+    targets = [["A"], ["A", "B"], ["B", "C", "ctl"], ["A", "C"], ["C", "ctl"]]
+    targets += [["B", "C"]] + [["ctl"]] * 6
+    meta = pd.DataFrame({"target": targets, "plate": [0, 1] * 6})
+    keys = np.array(["A", "B", "C"])  # "ctl" has no positive pairs
+    seen, find = [], multilabel_module.find_pairs_multilabel
+
+    def recorded(dframe, *args, **kwargs):
+        seen.append(len(dframe))
+        return find(dframe, *args, **kwargs)
+
+    monkeypatch.setattr(multilabel_module, "find_pairs_multilabel", recorded)
+    lone, key = multilabel_module._lone_pairs(
+        meta, "target", ["plate"], ["target"], keys
+    )
+    assert seen == [6]  # the profiles holding A, B or C
+    labels = [set(t) for t in targets]
+    expected = {
+        (a, b, next(iter(labels[a] & labels[b])))
+        for a, b in itertools.combinations(range(len(meta)), 2)
+        if len(labels[a] & labels[b]) == 1
+        and labels[a] & labels[b] <= set(keys)
+        and meta["plate"][a] == meta["plate"][b]
+    }
+    assert {(int(a), int(b), keys[k]) for (a, b), k in zip(lone, key)} == expected
+    assert expected == {(1, 3, "A"), (1, 5, "B"), (3, 5, "C")}
 
 
 def test_joint_null_reads_label_pairs():

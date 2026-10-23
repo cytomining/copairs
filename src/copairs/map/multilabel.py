@@ -225,13 +225,26 @@ def _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, keys):
     indexing ``keys``; pairs of labels without positive pairs are dropped.
     """
     other = [c for c in _columns(neg_diffby) if c != multilabel_col]
+    # Only profiles holding a label with positive pairs can share one; the
+    # rest (say, a control compound's replicates under a control-only
+    # label) would add pairs to discard. Kept profiles keep all their
+    # labels, so a pair sharing a dropped label too is still not lone.
+    wanted = set(np.asarray(keys).tolist())
+    held = np.flatnonzero(
+        [
+            pd.api.types.is_list_like(labels) and not wanted.isdisjoint(labels)
+            for labels in meta[multilabel_col]
+        ]
+    )
+    if len(held) < 2:
+        return np.zeros((0, 2), dtype=np.int64), np.zeros(0, dtype=np.int64)
     pairs, found_keys, counts = find_pairs_multilabel(
-        meta,
+        meta.iloc[held].reset_index(drop=True),
         sameby=[multilabel_col, *_columns(neg_sameby)],
         diffby=other,
         multilabel_col=multilabel_col,
     )
-    pairs = np.asarray(pairs, dtype=np.int64).reshape(-1, 2)
+    pairs = held[np.asarray(pairs, dtype=np.int64).reshape(-1, 2)]
     if not len(pairs):
         return pairs, np.zeros(0, dtype=np.int64)
     index = {k: i for i, k in enumerate(np.asarray(keys).tolist())}
