@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.nulls import tie_thresholds
+from copairs.nulls import joint, tie_thresholds
 from copairs.methods import check_null
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
@@ -70,7 +70,7 @@ def get_map_pvalue(
         back to the copied null with a warning. Joint null only.
     null : str
         Null of the group mAP. ``"joint"`` (default) samples the members' APs
-        together (`compute.random_map`): a positive pair inside the group is
+        together (`copairs.nulls.joint`): a positive pair inside the group is
         one random number in both members' rank lists, so the null narrows as
         replicates are added. ``"copied"`` is the null of copairs <= 0.5.5:
         each member's AP null is sampled per `(n_pos_pairs, n_total_pairs)`
@@ -130,33 +130,23 @@ def get_map_pvalue(
     signatures = [
         None
         if edges is None
-        else (tuple(zip(num_pos[ix], num_neg[ix])), tuple(sorted(edges)))
+        else joint.canonical_signature(zip(num_pos[ix], num_neg[ix]), edges)
         for ix, edges in zip(groups, edges_of)
     ]
-    logger.info("Computing null_dist...")
     unique = sorted(set(sig for sig in signatures if sig is not None))
-    null_of = {}
-
-    def par_func(k):
-        members, edges = unique[k]
-        null_of[unique[k]] = np.sort(
-            compute.random_map(members, edges, null_size, seed)
-        )
-
-    if unique:
-        compute.parallel_map(par_func, np.arange(len(unique)), progress_bar)
-
-    thresholds = tie_thresholds(scores)
-
-    def get_p_value(k):
-        null_dist = null_of[signatures[k]]
-        num = null_size - np.searchsorted(null_dist, thresholds[k], side="left")
-        return (num + 1) / (null_size + 1)  # Add 1 for stability
+    index = {sig: k for k, sig in enumerate(unique)}
+    sampled = [g for g, sig in enumerate(signatures) if sig is not None]
 
     logger.info("Computing p-values...")
-    joint = [k for k, sig in enumerate(signatures) if sig is not None]
     p_values = np.empty(len(groups), dtype=np.float64)
-    p_values[joint] = _thread_map(get_p_value, joint, progress_bar, max_workers)
+    p_values[sampled] = joint.joint_pvalues(
+        scores[sampled],
+        [index[signatures[g]] for g in sampled],
+        unique,
+        null_size,
+        seed,
+        progress_bar=progress_bar,
+    )
 
     fallback = [k for k, sig in enumerate(signatures) if sig is None]
     if fallback:
