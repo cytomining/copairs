@@ -205,13 +205,16 @@ def test_import_does_not_load_cupy():
 
 @pytest.fixture
 def cuda_runtime(monkeypatch):
-    """Yield :mod:`copairs._cuda` with a fresh probe cache, cleared afterwards."""
+    """Yield :mod:`copairs._cuda` with fresh caches (probe, kernels), cleared afterwards."""
     from copairs import _cuda
 
-    _cuda._probe.cache_clear()
+    caches = [f for f in vars(_cuda).values() if hasattr(f, "cache_clear")]
+    for cache in caches:
+        cache.cache_clear()
     yield _cuda
     monkeypatch.undo()
-    _cuda._probe.cache_clear()
+    for cache in caches:
+        cache.cache_clear()
 
 
 @needs_cupy
@@ -258,6 +261,72 @@ def test_cuda_probed_once_per_process(cuda_runtime, monkeypatch):
     pid[0] = 101
     assert not cuda_runtime.usable()
     assert len(calls) == 2
+
+
+@pytest.fixture
+def fake_runtime(cuda_runtime, monkeypatch):
+    """:mod:`copairs._cuda` on a fake CuPy that records compiles and driver queries."""
+    calls = types.SimpleNamespace(compiled=[], fetched=[], queried=[])
+
+    class Device:
+        def __init__(self, device_id=None):
+            self.id = 0 if device_id is None else device_id
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        @property
+        def attributes(self):
+            raise AssertionError("queried every device attribute")
+
+    class Module:
+        def __init__(self, code, options):
+            calls.compiled.append(code)
+
+        def get_function(self, name):
+            calls.fetched.append(name)
+            return name
+
+    def get_attribute(attr, device_id):
+        calls.queried.append((attr, device_id))
+        return 3
+
+    runtime = types.SimpleNamespace(
+        deviceGetAttribute=get_attribute, cudaDevAttrMultiProcessorCount=16
+    )
+    fake = types.SimpleNamespace(
+        RawModule=Module, cuda=types.SimpleNamespace(Device=Device, runtime=runtime)
+    )
+    monkeypatch.setattr(cuda_runtime, "cp", fake)
+    return cuda_runtime, calls
+
+
+@needs_cupy
+def test_cuda_kernels_looked_up_once(fake_runtime):
+    """Launches reuse each kernel: one compile per source, one fetch per kernel."""
+    cuda_runtime, calls = fake_runtime
+    source = "// test_cuda_kernels_looked_up_once"
+    for _ in range(3):
+        assert cuda_runtime.kernel(source, "a") == "a"
+        assert cuda_runtime.kernel(source, "b") == "b"
+    assert calls.compiled == [source]
+    assert calls.fetched == ["a", "b"]
+
+
+@needs_cupy
+def test_cuda_multiprocessor_count_read_once(fake_runtime):
+    """Grids read the multiprocessor count once per device, as one attribute.
+
+    ``Device().attributes`` would query every attribute of the device.
+    """
+    cuda_runtime, calls = fake_runtime
+    for _ in range(3):
+        assert cuda_runtime.grid(10**9) == 3 * 32
+        assert cuda_runtime.grid(1000) == 4
+    assert calls.queried == [(16, 0)]
 
 
 class _HostCuda:

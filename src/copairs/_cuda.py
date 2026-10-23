@@ -81,14 +81,27 @@ def _compiled(source: str, device_id: int):
         return cp.RawModule(code=source, options=OPTIONS)
 
 
+@functools.cache
+def _function(source: str, name: str, device_id: int):
+    with cp.cuda.Device(device_id):
+        return _compiled(source, device_id).get_function(name)
+
+
 def kernel(source: str, name: str):
-    """Kernel ``name`` of CUDA ``source``, compiled once per source and device."""
-    return _compiled(source, cp.cuda.Device().id).get_function(name)
+    """Kernel ``name`` of CUDA ``source``, compiled and fetched once per device."""
+    return _function(source, name, cp.cuda.Device().id)
+
+
+@functools.cache
+def _multiprocessors(device_id: int) -> int:
+    # One attribute: Device().attributes queries all of them.
+    runtime = cp.cuda.runtime
+    return runtime.deviceGetAttribute(runtime.cudaDevAttrMultiProcessorCount, device_id)
 
 
 def grid(n: int, blocks_per_sm: int = 32) -> int:
     """1-D grid for ``n`` threads in blocks of :data:`BLOCK`, capped per multiprocessor."""
-    sms = cp.cuda.Device().attributes["MultiProcessorCount"]
+    sms = _multiprocessors(cp.cuda.Device().id)
     return int(max(1, min((n + BLOCK - 1) // BLOCK, sms * blocks_per_sm)))
 
 
