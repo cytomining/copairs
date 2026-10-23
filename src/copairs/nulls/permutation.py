@@ -261,12 +261,19 @@ def _key_matrix(similarity, profiles):
     return out
 
 
-def _row_ranks(row_ptr, rows, keys):
-    """``out[i, j]``: entries of sorted ``rows[row_ptr[i]:row_ptr[i + 1]]`` below ``keys[i, j]``."""
+def _row_words(row_ptr, rows):
+    """Sorted rows ``rows[row_ptr[i]:row_ptr[i + 1]]`` as one sorted array of (row, code) words."""
+    seg = np.repeat(np.arange(len(row_ptr) - 1, dtype=np.uint64), np.diff(row_ptr))
+    return (seg << np.uint64(32)) | rows.astype(np.uint64)
+
+
+def _row_ranks(row_ptr, flat, keys):
+    """``out[i, j]``: entries of sorted row ``i`` below ``keys[i, j]``.
+
+    ``flat`` is the rows' :func:`_row_words`.
+    """
     n_rows = len(row_ptr) - 1
     out = np.empty(keys.shape, dtype=np.int32)
-    seg = np.repeat(np.arange(n_rows, dtype=np.uint64), np.diff(row_ptr))
-    flat = (seg << np.uint64(32)) | rows.astype(np.uint64)  # sorted: row, then code
     step = max(1, _CHUNK_ELEMENTS // max(keys.shape[1], 1))
     for lo, size in chunks(n_rows, step):
         hi = lo + size
@@ -310,11 +317,10 @@ class _Pool:
                     :, : hi - lo - 1
                 ].ravel()
         self.ranked = r <= RANK_POOL
-        self.rrr = (
-            _row_ranks(self.srr_ptr, self.srr, krr)
-            if self.ranked
-            else np.zeros((0, 0), dtype=np.int32)
-        )
+        self.rrr = np.zeros((0, 0), dtype=np.int32)
+        if self.ranked:  # the sorted rows' words serve every layout's rcm too
+            self.srr_words = _row_words(self.srr_ptr, self.srr)
+            self.rrr = _row_ranks(self.srr_ptr, self.srr_words, krr)
 
     def matches(self, blocks):
         return len(blocks) == len(self.blocks) and all(
@@ -380,9 +386,9 @@ class _Layout:
         )
         self.gkeys = (code_of << np.uint64(32)) | self.grow.astype(np.uint64)
         if pool.ranked:
-            self.rmu = _row_ranks(self.smr_ptr, self.smr, kmu)
+            self.rmu = _row_ranks(self.smr_ptr, _row_words(self.smr_ptr, self.smr), kmu)
             self.rcm = _row_ranks(
-                pool.srr_ptr, pool.srr, np.ascontiguousarray(kmu[:, n:].T)
+                pool.srr_ptr, pool.srr_words, np.ascontiguousarray(kmu[:, n:].T)
             )
         else:
             self.rmu = self.rcm = np.zeros((0, 0), dtype=np.int32)
