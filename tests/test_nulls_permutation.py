@@ -866,7 +866,7 @@ def test_default_null_on_multilabel_frames():
 
 
 def test_label_guards():
-    """Dropped rows, batch-dependent distances and pos_diffby breaks raise."""
+    """Dropped rows, batch-dependent distances, pair counts and pos_diffby breaks raise."""
     meta = plate_label_meta()
     feats = np.random.default_rng(13).standard_normal((len(meta), 5))
     args = (["target"], 100, 0.05, 0)
@@ -884,6 +884,12 @@ def test_label_guards():
         )
     with pytest.raises(ValueError, match="index reaches row"):
         mean_average_precision(ap.set_axis(ap.index + 100), *args, progress_bar=False)
+    for column, kind in (("n_pos_pairs", "positive"), ("n_total_pairs", "negative")):
+        miscounted = ap.copy()
+        miscounted.loc[miscounted.index[0], column] += 1
+        label = miscounted["target"].iloc[0]
+        with pytest.raises(ValueError, match=f"{kind} pairs for '{label}' but"):
+            mean_average_precision(miscounted, *args, progress_bar=False)
     # Positives must differ in "well"; one well on each plate is shared by
     # two compounds, so moved labels could pair profiles in one well.
     wells = meta.assign(well=[0, 1, 2, 3, 3, 0, 1, 2, 3, 3])

@@ -780,7 +780,7 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     edges_of, leaves = group_edges(groups, profile, num_pos, pos_pairs)
     member = profile[rows]
     count, h1, h2, inside = _scan_negatives(neg_pairs, group_of, len(groups), n_prof)
-    check_pair_counts(count, member, num_neg[rows], "negative")
+    check_pair_counts(count[member], member, num_neg[rows], "negative")
     # Positives to profiles in no group: members dropped from the AP scores.
     ga, gb = group_of[pos_pairs[:, 0]], group_of[pos_pairs[:, 1]]
     orphaned = np.unique(np.concatenate([ga[gb < 0], gb[ga < 0]]))
@@ -1750,19 +1750,8 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
         degree = np.bincount(layout[1].ravel(), minlength=n)
         local[members] = -1
         n_neg = nbr_ptr[members + 1] - nbr_ptr[members]
-        for count, want, kind in (
-            (degree, num_pos[ix], "positive"),
-            (n_neg, num_neg[ix], "negative"),
-        ):
-            wrong = np.flatnonzero(count != want)
-            if len(wrong):
-                raise ValueError(
-                    f"profile {members[wrong[0]]} has {count[wrong[0]]} {kind} "
-                    f"pairs for {label!r} but {want[wrong[0]]} in the AP table; "
-                    "pass the pairs multilabel.average_precision(..., "
-                    "return_pairs=True) returned with the frame it returned, and "
-                    "keep that frame's index (no reset_index)"
-                )
+        check_pair_counts(degree, members, num_pos[ix], "positive", label)
+        check_pair_counts(n_neg, members, num_neg[ix], "negative", label)
         comps, block_of = np.unique(comp[members], return_inverse=True)
         layout += [tuple(int(c) for c in comps), block_of.ravel().astype(np.int64), key]
         layouts.append(tuple(layout))
