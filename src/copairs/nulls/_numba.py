@@ -27,6 +27,7 @@ from copairs._search import upper_bound
 from copairs._numba_cache import cached_njit
 from copairs.nulls.common import split_segments, segment_batches
 from copairs.nulls.philox import uniform53, philox4x32
+from copairs.nulls.pvalues import _GROUP_WORK_ROWS
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
 
 # The kernels compile functions of copairs.nulls' files and the p-value
@@ -162,18 +163,33 @@ def _count_ge_kernel(null, rows, thr, ptr, counts, max_blocks):
             counts[lo + q] += run
 
 
+# Samples per task of group_ge, unless the groups' slots would exceed its share.
+_GROUP_BLOCK = 1 << 14
+
+
 def group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
-    """:func:`copairs.nulls.pvalues._group_ge_host` in parallel over sample blocks."""
-    _launch(_group_ge, null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
+    """:func:`copairs.nulls.pvalues._group_ge_host` in parallel over sample blocks.
+
+    Each (group, block) task counts into a slot of its own. The slots stay
+    within the ``_GROUP_WORK_ROWS`` rows of the chunk that ``map_pvalues``
+    budgets for the counts' temporaries, so many groups get fewer, longer
+    blocks; with one block per group the tasks count straight into ``counts``.
+    The counts are integers and do not depend on the blocks.
+    """
+    size = null.shape[1]
+    max_slots = _GROUP_WORK_ROWS * size
+    n_blocks = min(-(-size // _GROUP_BLOCK), max_slots // max(1, len(ptr) - 1))
+    args = (null, ptr, conf_ix, conf_cnt, n_group, thr, counts, max(1, n_blocks))
+    _launch(_group_ge, *args)
 
 
 @cached_njit(_SOURCES, parallel=True)
-def _group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
+def _group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts, n_blocks):
+    """Count group ``g``'s null means at least ``thr[g]`` in ``n_blocks`` blocks."""
     n_groups = len(ptr) - 1
     size = null.shape[1]
-    block = 1 << 14
-    n_blocks = (size + block - 1) // block
-    partial = np.zeros(n_groups * n_blocks, dtype=np.int64)
+    block = (size + n_blocks - 1) // n_blocks
+    partial = np.zeros(n_groups * n_blocks if n_blocks > 1 else 0, dtype=np.int64)
     for flat in numba.prange(n_groups * n_blocks):
         g = flat // n_blocks
         t0 = (flat - g * n_blocks) * block
@@ -185,9 +201,13 @@ def _group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
                 acc += conf_cnt[e] * null[conf_ix[e], t]
             if acc / n_group[g] >= thr[g]:
                 hits += 1
-        partial[flat] = hits
-    for g in range(n_groups):
-        counts[g] += partial[g * n_blocks : (g + 1) * n_blocks].sum()
+        if n_blocks > 1:
+            partial[flat] = hits
+        else:
+            counts[g] += hits
+    if n_blocks > 1:
+        for g in range(n_groups):
+            counts[g] += partial[g * n_blocks : (g + 1) * n_blocks].sum()
 
 
 def joint_nulls(

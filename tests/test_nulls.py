@@ -727,6 +727,73 @@ def test_numba_count_histograms_within_bound(hist_bytes, monkeypatch):
     assert (len(calls) > 1) == (hist_bytes < 8 * (sum(lengths) + len(lengths)))
 
 
+@pytest.mark.parametrize("n_blocks", [1, 2, 3, 7, 1499, 1500, 1501, 4000])
+def test_numba_group_counts_independent_of_blocks(n_blocks):
+    """Numba's group counts equal NumPy's for any number of sample blocks.
+
+    Blocks beyond the samples are empty, and the counts are integers, so
+    splitting the samples into fewer, longer blocks leaves them bitwise equal.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    rng = np.random.default_rng(5)
+    ptr, conf_ix, conf_cnt = random_groups(rng, 30)
+    null = rng.integers(0, 40, size=(len(CONFS), 1500)) / 40
+    n_group = np.add.reduceat(conf_cnt, ptr[:-1])
+    thr = rng.integers(0, 40, size=30) / 40
+    args = (null, ptr, conf_ix, conf_cnt, n_group, thr)
+    expected = np.full(30, 3, dtype=np.int64)  # counts accumulate
+    pvalues._group_ge_host(*args, expected)
+    counts = np.full(30, 3, dtype=np.int64)
+    _numba._group_ge(*args, counts, n_blocks)
+    np.testing.assert_array_equal(counts, expected)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_map_pvalues_counts_within_budget(backend, monkeypatch):
+    """The mAP counts' temporaries fit the budget next to the null chunk.
+
+    The budget holds a chunk of 2**15 samples of one configuration, for 2**17
+    groups. Numba's count held a slot per group and block of 2**14 samples, 2
+    MiB, so the chunk and the count peaked at 2.25x the budget. The p-values of
+    groups with equal scores and members are equal.
+    """
+    budget, n_groups = 2**20, 2**17
+    if backend == "numba":
+        from copairs.nulls import _numba as owner
+
+        name = "group_ge"
+    else:
+        owner, name = pvalues, "_group_ge_host"
+        n_groups = 2**10  # NumPy's temporaries do not grow with the groups
+    confs = MEMORY_CONFS[2:3]
+    levels = np.linspace(0.0, 0.01, 8)
+    scores = levels[np.arange(n_groups) % len(levels)]
+    kwargs = dict(null_size=2**15, seed=0, backend=backend, budget_bytes=budget)
+
+    def groups(n):  # n groups of one member with the configuration
+        return np.arange(n + 1), np.zeros(n, np.int64), np.ones(n, np.int64), confs
+
+    # Also compiles the kernel before it is measured.
+    expected = nulls.map_pvalues(levels, *groups(len(levels)), **kwargs)
+    kernel = getattr(owner, name)
+    peaks = []
+
+    def measured(null, *rest):
+        tracemalloc.start()
+        try:
+            kernel(null, *rest)
+            peaks.append(null.nbytes + tracemalloc.get_traced_memory()[1])
+        finally:
+            tracemalloc.stop()
+
+    monkeypatch.setattr(owner, name, measured)
+    got = nulls.map_pvalues(scores, *groups(n_groups), **kwargs)
+    np.testing.assert_array_equal(got, expected[np.arange(n_groups) % len(levels)])
+    assert peaks and max(peaks) <= budget, max(peaks) / budget
+
+
 # Numba and NumPy nulls, and the cache hits of the Numba kernel, of a copy of
 # copairs in the directory argv[1].
 _CACHE_PROBE = """

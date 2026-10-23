@@ -164,7 +164,8 @@ def ap_pvalues(
 
 
 # Rows of the chunk's size that _group_ge_host holds next to the null chunk:
-# the group sum, one member's term and the comparison's booleans.
+# the group sum, one member's term and the comparison's booleans. Numba's
+# group_ge keeps its per-task counts within them.
 _GROUP_WORK_ROWS = 3
 
 
