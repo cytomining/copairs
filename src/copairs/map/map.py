@@ -89,7 +89,13 @@ def get_map_pvalue(
         group's positives must be its other members (for groups of one
         profile with positives in other groups, use ``"joint"``: there it is
         that profile's AP null), and its smallest p-value is about one over
-        its number of distinct relabellings. It recomputes similarities, so
+        its number of distinct relabellings. On multilabel APs
+        (`multilabel.average_precision`, whose `LabelPairs` it reads), each
+        group holds one label, and a draw moves that label to as many
+        profiles of each component of the negative-pair graph as hold it
+        there, keeping their other labels
+        (`copairs.nulls.permutation.label_permutation_pvalues`); the group
+        needs every AP row of its label. It recomputes similarities, so
         APs computed with a distance that estimates its scale per batch
         (``"seuclidean"``, ``"mahalanobis"``) raise. ``"joint"`` samples
         the members' APs together (`copairs.nulls.joint`): a positive pair
@@ -106,12 +112,14 @@ def get_map_pvalue(
         The pairs the AP scores were computed with, as
         ``average_precision(..., return_pairs=True)`` returns them; their
         indices are rows of that call's frame, so ``ap_scores`` must keep its
-        index. The permutation null needs them and, when not given, takes
-        them from ``ap_scores.attrs["copairs_pairs"]``, where
-        `average_precision` attaches them; frames that lost them (built,
-        reloaded, pickled, or concatenated from several AP calls) need
-        ``pairs=`` or another null. The joint null takes its positive pairs
-        from ``pairs`` too, or from the attached pairs (see ``pos_pairs``).
+        index. For multilabel APs they are the `LabelPairs` of
+        ``multilabel.average_precision(..., return_pairs=True)``. The
+        permutation null needs them and, when not given, takes them from
+        ``ap_scores.attrs["copairs_pairs"]``, where both functions attach
+        them; frames that lost them (built, reloaded, pickled, or
+        concatenated from several AP calls) need ``pairs=`` or another null.
+        The joint null takes its positive pairs from ``pairs`` too, or from
+        the attached pairs (see ``pos_pairs``), except `LabelPairs`.
 
     Returns
     -------
@@ -129,22 +137,27 @@ def get_map_pvalue(
         raise ValueError("pos_pairs is used by the joint null only")
     if null != "copied" and pos_pairs is None and pairs is None:
         pairs = attached_pairs(ap_scores)
-    if isinstance(pairs, LabelPairs):  # multilabel APs: not read by these nulls
-        pairs = None
+    if null == "joint" and isinstance(pairs, LabelPairs):
+        pairs = None  # multilabel APs: edges inferred from the pair counts
     if null == "joint" and pos_pairs is None and pairs is not None:
         pos_pairs = pairs.pos
     if null == "permutation" and pairs is None:
         raise ValueError(
             "null='permutation' (the default) needs the pairs the APs were "
-            "computed from. average_precision attaches them to the frame it "
-            "returns, and these AP scores have none: they were built, loaded "
-            "from disk, pickled or concatenated from several AP calls, or come "
-            "from multilabel.average_precision, which this null does not "
-            "support. Recompute the APs, pass pairs=, or choose null='joint' "
-            "or null='copied'."
+            "computed from. average_precision and multilabel.average_precision "
+            "attach them to the frame they return, and these AP scores have "
+            "none: they were built, loaded from disk, pickled or concatenated "
+            "from several AP calls. Recompute the APs, pass pairs=, or choose "
+            "null='joint' or null='copied'."
         )
     if null == "permutation":
         check_recomputable(pairs.similarity)
+    labelled = null == "permutation" and isinstance(pairs, LabelPairs)
+    if labelled and pairs.label_col not in ap_scores:
+        raise ValueError(
+            f"null='permutation' of multilabel APs needs their {pairs.label_col!r} "
+            "column"
+        )
 
     if null == "permutation" or pos_pairs is not None:
         _check_row_index(ap_scores.index)
@@ -189,6 +202,23 @@ def get_map_pvalue(
 
     if null == "copied":
         map_scores["p_value"] = _copied_pvalues(scores, groups, ap_scores, **copied)
+        return map_scores
+
+    if labelled:
+        logger.info("Computing p-values...")
+        map_scores["p_value"] = permutation.label_permutation_pvalues(
+            groups,
+            profile,
+            ap_scores[pairs.label_col].to_numpy(),
+            ap_scores["n_pos_pairs"].to_numpy(),
+            ap_scores["n_total_pairs"].to_numpy(),
+            pairs,
+            null_size,
+            seed,
+            observed=scores,
+            progress_bar=progress_bar,
+            max_workers=max_workers,
+        )
         return map_scores
 
     if null == "permutation":
