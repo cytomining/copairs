@@ -158,7 +158,8 @@ def average_precision(
         match ``"numpy"`` to float64 rounding. The kernels' similarities match
         to float32 rounding, so near-ties can rank differently, and they are
         computed in float64, so float32 rows whose norms overflow float32 get
-        their actual similarity.
+        their actual similarity. The kernels take all pairs at once:
+        ``batch_size`` and ``progress_bar`` apply only to the other distances.
 
     Returns
     -------

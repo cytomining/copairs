@@ -93,6 +93,8 @@ def average_precision(
         pairs through an inverted label index (see
         :func:`copairs.matching.find_pairs_multilabel`) and computes every
         label's APs in one parallel kernel instead of a loop over labels.
+        As there, ``batch_size`` and ``progress_bar`` apply only to
+        distances without a kernel.
 
     See Also
     --------

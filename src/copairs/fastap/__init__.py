@@ -15,7 +15,7 @@ import numpy as np
 from copairs.fastap import multilabel
 from copairs.fastap.draws import draw_average_precisions
 from copairs.fastap.ranking import ap_from_pairs
-from copairs.fastap.similarity import FAST_METRICS, PairSimilarity
+from copairs.fastap.similarity import FAST_METRICS, PairSimilarity, pair_similarity
 from copairs.fastap.normalization import expected_ap_array
 
 __all__ = [
@@ -30,13 +30,6 @@ __all__ = [
 ]
 
 
-def pair_similarity(feats: np.ndarray, distance) -> PairSimilarity | None:
-    """Return a ``pairs -> float32 similarities`` kernel, or None without one."""
-    if not isinstance(distance, str) or distance not in FAST_METRICS:
-        return None
-    return PairSimilarity(feats, distance)
-
-
 def similarity_fn(feats: np.ndarray, distance, generic: Callable) -> Callable:
     """Return ``generic``, or a kernel for ``distance`` on ``feats`` in its place.
 
@@ -45,7 +38,7 @@ def similarity_fn(feats: np.ndarray, distance, generic: Callable) -> Callable:
     arguments, but the features it uses are the ``feats`` given here, which
     the kernel normalizes once.
     """
-    kernel = pair_similarity(np.asarray(feats), distance)
+    kernel = pair_similarity(feats, distance)
     if kernel is None:
         return generic
 

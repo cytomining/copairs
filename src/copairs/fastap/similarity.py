@@ -9,22 +9,19 @@ the input's precision, so float32 rows whose norms overflow float32 (entries
 around 1e19 and up) get similarity 0 or NaN there and their actual value here.
 """
 
+from typing import Callable
+
 import numba
 import numpy as np
 
-FAST_METRICS = (
-    "cosine",
-    "abs_cosine",
-    "correlation",
-    "euclidean",
-    "manhattan",
-    "chebyshev",
-)
+from copairs.fastap.ranking import index_pairs
 
+# Dot products of unit rows; 1 / (1 + distance), in _minkowski_pairs' order.
+COSINE_METRICS = ("cosine", "abs_cosine", "correlation")
+MINKOWSKI_METRICS = ("euclidean", "manhattan", "chebyshev")
+FAST_METRICS = COSINE_METRICS + MINKOWSKI_METRICS
 
 _ROW_BLOCK = 8192
-# Pairs per kernel call; bounds the int64 copy of the pair indices.
-PAIR_CHUNK = 1 << 24
 
 
 def _unit_rows(
@@ -85,48 +82,57 @@ def _minkowski_pairs(x, pairs, kind, out):
         out[p] = 1.0 / (1.0 + acc)
 
 
-class PairSimilarity:
-    """Similarity of indexed profile pairs for one feature matrix.
+def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
+    """Return a ``pairs -> float32 similarities`` kernel, or None without one.
 
     Parameters
     ----------
     feats : np.ndarray
-        ``(n, d)`` profiles.
-    metric : str
-        One of :data:`FAST_METRICS`.
+        ``(n, d)`` profiles; the kernel uses them as given here.
+    metric : str or callable
+        A distance name; only :data:`FAST_METRICS` have a kernel.
+
+    Returns
+    -------
+    callable or None
+        Takes ``(m, 2)`` row indices of ``feats`` and returns ``m`` float32
+        similarities, rounded from float64 into the output without a
+        full-size temporary. uint32 pairs are used without a copy.
     """
+    if not isinstance(metric, str) or metric not in FAST_METRICS:
+        return None
+    feats = np.asarray(feats)
+    if feats.dtype not in (np.float32, np.float64):
+        feats = feats.astype(np.float64)
 
-    def __init__(self, feats: np.ndarray, metric: str):
-        if metric not in FAST_METRICS:
-            raise ValueError(f"no fast kernel for {metric!r}; expected {FAST_METRICS}")
-        feats = np.asarray(feats)
-        if feats.dtype not in (np.float32, np.float64):
-            feats = feats.astype(np.float64)
-        self.metric = metric
-        if metric in ("cosine", "abs_cosine", "correlation"):
-            self.x = np.ascontiguousarray(_unit_rows(feats, metric == "correlation"))
-        else:
-            self.x = np.ascontiguousarray(feats)
+    if metric in MINKOWSKI_METRICS:
+        x = np.ascontiguousarray(feats)
+        kind = MINKOWSKI_METRICS.index(metric)
 
-    def __call__(self, pairs: np.ndarray) -> np.ndarray:
-        """float32 similarity of each ``(i, j)`` row of ``pairs``.
+        def minkowski(pairs):
+            pairs = index_pairs(pairs)
+            out = np.empty(len(pairs), dtype=np.float32)
+            _minkowski_pairs(x, pairs, kind, out)
+            return out
 
-        Pairs are converted to int64 a chunk at a time, and the kernels round
-        each float64 result into the float32 output, so no full-size temporary
-        is built.
-        """
-        pairs = np.asarray(pairs).reshape(-1, 2)
+        return minkowski
+
+    x = np.ascontiguousarray(_unit_rows(feats, metric == "correlation"))
+
+    def dot(pairs):
+        pairs = index_pairs(pairs)
         out = np.empty(len(pairs), dtype=np.float32)
-        for start in range(0, len(pairs), PAIR_CHUNK):
-            chunk = np.ascontiguousarray(
-                pairs[start : start + PAIR_CHUNK], dtype=np.int64
-            )
-            dest = out[start : start + PAIR_CHUNK]
-            if self.metric in ("cosine", "abs_cosine", "correlation"):
-                _dot_pairs(self.x, chunk, dest)
-            else:
-                kind = ("euclidean", "manhattan", "chebyshev").index(self.metric)
-                _minkowski_pairs(self.x, chunk, kind, dest)
-        if self.metric == "abs_cosine":
+        _dot_pairs(x, pairs, out)
+        if metric == "abs_cosine":
             np.abs(out, out=out)
         return out
+
+    return dot
+
+
+def PairSimilarity(feats: np.ndarray, metric: str) -> Callable:
+    """:func:`pair_similarity`'s kernel, raising ValueError for metrics without one."""
+    kernel = pair_similarity(feats, metric)
+    if kernel is None:
+        raise ValueError(f"no fast kernel for {metric!r}; expected {FAST_METRICS}")
+    return kernel

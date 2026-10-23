@@ -95,9 +95,12 @@ def test_pair_similarity_matches_generic(metric, dtype):
     feats = rng.normal(size=(200, 37)).astype(dtype)
     pairs = rng.integers(200, size=(3000, 2))
     generic = compute.get_similarity_fn(metric, progress_bar=False)(feats, pairs, 512)
-    got = fastap.pair_similarity(feats, metric)(pairs)
+    kernel = fastap.pair_similarity(feats, metric)
+    got = kernel(pairs)
     assert got.dtype == np.float32
     np.testing.assert_allclose(got, generic, rtol=1e-5, atol=1e-6)
+    # find_pairs' uint32 pairs go to the kernels uncopied, with the same result
+    np.testing.assert_array_equal(kernel(pairs.astype(np.uint32)), got)
 
 
 def test_pair_similarity_without_kernel():
@@ -107,6 +110,8 @@ def test_pair_similarity_without_kernel():
     assert fastap.pair_similarity(feats, lambda x, y: x[:, 0]) is None
     generic = compute.get_similarity_fn("jaccard", progress_bar=False)
     assert fastap.similarity_fn(feats, "jaccard", generic) is generic
+    with pytest.raises(ValueError, match="no fast kernel"):
+        fastap.PairSimilarity(feats, "jaccard")
 
 
 @pytest.mark.parametrize("metric", ["euclidean", "manhattan", "chebyshev"])
