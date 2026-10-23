@@ -12,7 +12,7 @@ from scipy.stats import chisquare
 
 from copairs import nulls
 from copairs.nulls import common, philox, backend, pvalues, sampler
-from tests.helpers import brute_ap_pvalues
+from tests.helpers import brute_ap_pvalues, brute_group_nulls, brute_map_pvalues
 from copairs.map.normalization import expected_ap
 
 BACKENDS = nulls.available_backends()
@@ -166,26 +166,24 @@ def test_available_backends():
 
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_backends_bitwise_identical(backend):
-    """Every backend returns the scalar reference's float64 values bit for bit."""
-    ref = scalar_nulls(CONFS, 64, 3)
-    out = nulls.ap_nulls(CONFS, 64, seed=3, backend=backend, dtype=np.float64)
+    """Every backend returns the scalar reference's float64 values bit for bit.
+
+    The scalar sampler takes the guided gap search on the GUIDED
+    configurations, and the NumPy backend its own bisection or the plain loop.
+    float32 output is the float64 sample rounded once.
+    """
+    confs = np.concatenate([CONFS, GUIDED])
+    ref = scalar_nulls(confs, 64, 3)
+    out = nulls.ap_nulls(confs, 64, seed=3, backend=backend, dtype=np.float64)
     np.testing.assert_array_equal(out.view(np.uint64), ref.view(np.uint64))
-    out32 = nulls.ap_nulls(CONFS, 64, seed=3, backend=backend)
+    out32 = nulls.ap_nulls(confs, 64, seed=3, backend=backend)
     np.testing.assert_array_equal(out32, ref.astype(np.float32))
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("num_pos,total", GUIDED)
-def test_guided_gap_search_matches_loop(backend, num_pos, total):
-    """The guided gap search reproduces Algorithm A's gaps bit for bit.
-
-    The scalar sampler takes the guided search on these configurations and the
-    NumPy backend the plain loop, so their samples agree only if the gaps do.
-    """
+def test_guided_gap_search_matches_loop(num_pos, total):
+    """The scalar guided gap search returns Algorithm A's gaps."""
     assert total - num_pos > sampler.GUIDED_RATIO * num_pos * (num_pos + 1)
-    ref = scalar_nulls([(num_pos, total)], 200, 8)
-    got = nulls.ap_nulls([[num_pos, total]], 200, seed=8, backend=backend, dtype=float)
-    np.testing.assert_array_equal(got.view(np.uint64), ref.view(np.uint64))
     rng = np.random.default_rng(num_pos)
     for u in np.concatenate([rng.random(200), [1e-300, 0.5, 1 - 2**-53]]):
         k = int(rng.integers(2, num_pos + 1))
@@ -250,11 +248,8 @@ def test_chunks_and_prefixes(backend):
     assert not np.array_equal(other_seed, whole[:, :100])
 
 
-def test_float64_rounds_to_float32():
-    """float32 output is the float64 sample rounded once."""
-    f64 = nulls.ap_nulls(CONFS, 500, seed=5, dtype=np.float64)
-    f32 = nulls.ap_nulls(CONFS, 500, seed=5)
-    np.testing.assert_array_equal(f64.astype(np.float32), f32)
+def test_dtype_must_be_float32_or_float64():
+    """Other output dtypes raise."""
     with pytest.raises(ValueError, match="dtype"):
         nulls.ap_nulls(CONFS, 5, seed=5, dtype=np.float16)
 
@@ -324,9 +319,14 @@ def test_ap_nulls_accepts_integral_floats():
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-@pytest.mark.parametrize("budget", [pvalues.DEFAULT_BUDGET, 8 * 700])
-def test_ap_pvalues_match_brute_force(backend, budget):
-    """Streamed AP p-values equal counting over the materialized null, ties included."""
+@pytest.mark.parametrize(
+    "budget,null_size", [(pvalues.DEFAULT_BUDGET, 2000), (8 * 700, 2000), (8, 300)]
+)
+def test_ap_pvalues_match_brute_force(backend, budget, null_size):
+    """Streamed AP p-values equal counting over the materialized null, ties included.
+
+    A budget of 8 bytes streams one sample per chunk.
+    """
     rng = np.random.default_rng(0)
     conf_ix = rng.integers(len(CONFS), size=300)
     scores = rng.random(300)
@@ -334,14 +334,14 @@ def test_ap_pvalues_match_brute_force(backend, budget):
     null = nulls.ap_nulls(CONFS, 50, seed=4, dtype=np.float64)
     scores[:50] = null[conf_ix[:50], np.arange(50)]
     got = nulls.ap_pvalues(
-        scores, conf_ix, CONFS, 2000, seed=4, backend=backend, budget_bytes=budget
+        scores, conf_ix, CONFS, null_size, seed=4, backend=backend, budget_bytes=budget
     )
     np.testing.assert_array_equal(
-        got, brute_ap_pvalues(scores, conf_ix, CONFS, 2000, 4)
+        got, brute_ap_pvalues(scores, conf_ix, CONFS, null_size, 4)
     )
     # Ties count: dropping the tolerance changes the tied scores' p-values.
     strict = (null[conf_ix[:50]] > scores[:50, None]).sum(axis=1)
-    assert (got[:50] > (strict + 1) / 2001).all()
+    assert (got[:50] > (strict + 1) / (null_size + 1)).all()
 
 
 def random_groups(rng, n_groups):
@@ -361,16 +361,9 @@ def test_map_pvalues_match_brute_force(backend, budget):
     """Streamed mAP p-values equal counting over materialized group nulls."""
     rng = np.random.default_rng(1)
     ptr, conf_ix, conf_cnt = random_groups(rng, 40)
-    null = nulls.ap_nulls(CONFS, 1500, seed=9, dtype=np.float64)
-    group_null = np.empty((40, 1500))
-    for g in range(40):
-        acc = np.zeros(1500)
-        for e in range(ptr[g], ptr[g + 1]):
-            acc += conf_cnt[e] * null[conf_ix[e]]
-        group_null[g] = acc / conf_cnt[ptr[g] : ptr[g + 1]].sum()
+    group_null = brute_group_nulls(ptr, conf_ix, conf_cnt, CONFS, 1500, 9)
     map_scores = rng.random(40) * 0.6
     map_scores[:10] = group_null[:10, 7]  # exact ties
-    num = (group_null >= map_scores[:, None] - common.TIE_TOL).sum(axis=1)
     got = nulls.map_pvalues(
         map_scores,
         ptr,
@@ -382,17 +375,17 @@ def test_map_pvalues_match_brute_force(backend, budget):
         backend=backend,
         budget_bytes=budget,
     )
-    np.testing.assert_array_equal(got, (num + 1) / 1501)
+    np.testing.assert_array_equal(
+        got, brute_map_pvalues(map_scores, ptr, conf_ix, conf_cnt, CONFS, 1500, 9)
+    )
 
 
 def test_backend_validation():
-    """Unknown backends raise ValueError; method names are checked too."""
+    """Unknown backends raise ValueError (unknown methods: test_unknown_method)."""
     with pytest.raises(ValueError, match="unknown backend"):
         nulls.resolve_backend("tpu")
     with pytest.raises(ValueError, match="unknown backend"):
         nulls.ap_nulls(CONFS, 4, seed=0, backend="cuda")
-    with pytest.raises(ValueError, match="unknown method"):
-        backend.check_method("exact")
     backend.check_method("legacy", "numba")  # valid names, whether installed or not
 
 
@@ -448,15 +441,6 @@ def test_pvalues_reject_invalid_null_size(null_size):
         nulls.ap_pvalues([0.1], [0], CONFS[:1], null_size, seed=0)
     with pytest.raises(ValueError, match="null_size"):
         nulls.map_pvalues([0.1], [0, 1], [0], [1], CONFS[:1], null_size, seed=0)
-
-
-def test_pvalues_tiny_budget_streams_lazily():
-    """A budget of one sample per chunk streams without building chunk lists."""
-    scores, conf_ix = np.array([0.2, 0.5]), np.array([0, 1])
-    got = nulls.ap_pvalues(scores, conf_ix, CONFS[3:5], 300, seed=2, budget_bytes=8)
-    np.testing.assert_array_equal(
-        got, brute_ap_pvalues(scores, conf_ix, CONFS[3:5], 300, 2)
-    )
 
 
 @pytest.mark.parametrize("budget", [2**18, 2**24])

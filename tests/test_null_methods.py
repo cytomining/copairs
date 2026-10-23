@@ -8,7 +8,7 @@ import pytest
 
 from copairs import nulls, compute
 from copairs.map import mean_average_precision, mean_average_precision_hierarchical
-from tests.helpers import brute_ap_pvalues
+from tests.helpers import brute_ap_pvalues, brute_map_pvalues
 from copairs.map.normalization import expected_ap
 from copairs.map.average_precision import p_values as frame_p_values
 
@@ -145,18 +145,26 @@ def test_map_fast_matches_brute_force(backend):
     confs, rev_ix = np.unique(
         frame[["n_pos_pairs", "n_total_pairs"]].values, axis=0, return_inverse=True
     )
-    null = nulls.ap_nulls(confs, 2000, seed=6, dtype=np.float64)
-    for _, row in result.iterrows():
-        ix = rev_ix.ravel()[row["indices"]]
-        group_null = np.zeros(2000)
-        for c in np.unique(ix):  # members sharing a configuration share samples
-            group_null += (ix == c).sum() * null[c]
-        group_null /= len(ix)
-        thr = nulls.tie_thresholds(np.array([row["mean_average_precision"]]))[0]
-        assert row["p_value"] == ((group_null >= thr).sum() + 1) / 2001
+    # Members sharing a configuration share samples.
+    members = [
+        np.unique(rev_ix.ravel()[ix], return_counts=True) for ix in result["indices"]
+    ]
+    ptr = np.cumsum([0] + [len(c) for c, _ in members])
+    conf_ix = np.concatenate([c for c, _ in members])
+    conf_cnt = np.concatenate([n for _, n in members])
+    expected = brute_map_pvalues(
+        result["mean_average_precision"].to_numpy(),
+        ptr,
+        conf_ix,
+        conf_cnt,
+        confs,
+        2000,
+        6,
+    )
+    np.testing.assert_array_equal(result["p_value"].to_numpy(), expected)
     tied_p = result.set_index("g").loc["tied", "p_value"]
-    strict = (null[np.flatnonzero((confs == [3, 10]).all(1))[0]] > tied).sum()
-    assert tied_p > (strict + 1) / 2001
+    null = nulls.ap_nulls([[3, 10]], 2000, seed=6, dtype=np.float64)[0]
+    assert tied_p > ((null > tied).sum() + 1) / 2001
 
 
 def test_backends_identical_through_public_api():
@@ -231,12 +239,11 @@ def test_float32_scores_count_ties(backend):
     assert fast["p_value"].iloc[0] == 1.0
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_map_fast_vs_legacy(backend, tmp_path):
+def test_map_fast_vs_legacy(tmp_path):
     """Fast and legacy mAP p-values agree within Monte Carlo error."""
     frame = random_ap_frame(np.random.default_rng(3))
     kwargs = dict(null_size=20_000, threshold=0.05, seed=0, progress_bar=False)
-    fast = mean_average_precision(frame, ["g"], backend=backend, **kwargs)
+    fast = mean_average_precision(frame, ["g"], **kwargs)
     legacy = mean_average_precision(
         frame, ["g"], cache_dir=tmp_path, method="legacy", **kwargs
     )
