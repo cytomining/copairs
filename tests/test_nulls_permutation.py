@@ -920,6 +920,10 @@ def test_label_guards():
     feats = np.random.default_rng(13).standard_normal((len(meta), 5))
     args = (["target"], 100, 0.05, 0)
     ap = multilabel_ap(meta, feats, PLATE_SPEC)
+    by_plate = (["plate"], *args[1:])  # groups holding several labels
+    with pytest.raises(ValueError, match="group by it, or pass null='joint'"):
+        mean_average_precision(ap, *by_plate, progress_bar=False)
+    assert len(mean_average_precision(ap, *by_plate, progress_bar=False, null="joint"))
     dropped = ap.drop(index=ap.index[ap["target"] == "A"][:1])
     with pytest.raises(ValueError, match="no row for it in the group.*null='joint'"):
         mean_average_precision(dropped, *args, progress_bar=False)

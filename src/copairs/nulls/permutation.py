@@ -1752,7 +1752,8 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
         if len(values) != 1:
             raise ValueError(
                 "the permutation null of multilabel APs needs each group to hold "
-                f"one {pairs.label_col!r} value; group by it"
+                f"one {pairs.label_col!r} value; group by it, or pass "
+                "null='joint' or null='copied'"
             )
         key = int(values[0])
         label = labels[key]
