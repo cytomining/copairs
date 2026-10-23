@@ -41,6 +41,7 @@ _PAIR_CHUNK = 2**20
 RANK_POOL = 2**12
 # Elements of the per-slot arrays of one vectorized chunk of draws.
 _CHUNK_ELEMENTS = 2**22
+_FULL_TABLE = 2**20  # largest (code, code) table a layout gathers from
 
 # Rank code of a NaN key: after every number.
 _NAN = np.uint32(0xFFFFFFFF)
@@ -367,6 +368,11 @@ class _Layout:
             rows[own, own] = _NAN
             rows.sort(axis=1)
             self.grow[self.gptr[codes][:, None] + np.arange(widths[b])] = rows
+        # The rows as one sorted array of (code, key) words, for one searchsorted.
+        code_of = np.repeat(
+            np.arange(len(widths[code_block]), dtype=np.uint64), widths[code_block]
+        )
+        self.gkeys = (code_of << np.uint64(32)) | self.grow.astype(np.uint64)
         if pool.ranked:
             self.rmu = _row_ranks(self.smr_ptr, self.smr, kmu)
             self.rcm = _row_ranks(
@@ -374,6 +380,12 @@ class _Layout:
             )
         else:
             self.rmu = self.rcm = np.zeros((0, 0), dtype=np.int32)
+        # Small layouts gather keys and ranks from one (code, code) table each.
+        self.full_keys = self.full_ranks = None
+        if (n + len(pool.refs)) ** 2 <= _FULL_TABLE:
+            self.full_keys = _full_table(n, kmu, kmu.T[n:], pool.krr)
+            if pool.ranked:
+                self.full_ranks = _full_table(n, self.rmu, self.rcm, pool.rrr)
         # Slots each slot's rank list counts: its positives and its block.
         self.counted = [
             np.flatnonzero(
@@ -477,6 +489,21 @@ def _pair_table(x, y, n, mu, cm, rr):
     return out
 
 
+def _full_table(n, mu, cm, rr):
+    """Return the ``(code, code)`` table ``_pair_table`` reads, as one array."""
+    m = n + len(rr)
+    out = np.empty((m, m), dtype=mu.dtype)
+    out[:n] = mu
+    out[n:, :n] = cm
+    out[n:, n:] = rr
+    return out
+
+
+def _gather(table, x, y):
+    """``table[x, y]`` elementwise, as one flat take."""
+    return table.ravel()[x * table.shape[1] + y]
+
+
 def _count_less_np(row, lo, hi, key):
     """``count_less`` elementwise: ``lo`` plus the entries of ``row[lo:hi]`` below ``key``."""
     lo, hi = lo.copy(), hi.copy()
@@ -501,7 +528,10 @@ def _group_maps_np(layout, pm):
         b = layout.slot_block[s]
         slots = layout.counted[s]
         x = pm[:, s][:, None]
-        keys = _pair_table(x, pm[:, slots], n, layout.kmu, kmu_t[n:], pool.krr)
+        if layout.full_keys is None:
+            keys = _pair_table(x, pm[:, slots], n, layout.kmu, kmu_t[n:], pool.krr)
+        else:
+            keys = _gather(layout.full_keys, x, pm[:, slots])
         ent = (keys.astype(np.uint64) << np.uint64(32)) | slots.astype(np.uint64)
         ent.sort(axis=1)
         k = ent >> np.uint64(32)
@@ -519,15 +549,16 @@ def _group_maps_np(layout, pm):
         tp = np.take_along_axis(t, cols, axis=1)
         yp = np.take_along_axis(pm, tp, axis=1)
         xp = np.broadcast_to(x, yp.shape)
-        if pool.ranked:
+        if layout.full_ranks is not None:
+            before = _gather(layout.full_ranks, xp, yp)
+        elif pool.ranked:
             before = _pair_table(xp, yp, n, layout.rmu, layout.rcm, pool.rrr)
         else:
             lo = layout.row_lo[xp]
             before = _count_less_np(layout.rows, lo, layout.row_hi[xp], kp) - lo
-        g0 = layout.gptr[xp]
-        before = before + (
-            _count_less_np(layout.grow, g0, layout.gptr[xp + 1], kp) - g0
-        )
+        # Block members x ranks before the key: count_less on its sorted g-row.
+        word = (xp.astype(np.uint64) << np.uint64(32)) | kp
+        before = before + (np.searchsorted(layout.gkeys, word) - layout.gptr[xp])
         before = before - np.take_along_axis(drawn, cols, axis=1)
         acc = np.zeros(size)
         for d in range(deg):

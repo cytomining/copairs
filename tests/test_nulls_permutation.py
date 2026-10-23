@@ -95,14 +95,22 @@ def scalar_draws(layout, start, size, k0, k1):
     return np.array(pms), np.array(maps)
 
 
-@pytest.mark.parametrize("ranked", [True, False], ids=["rank-table", "search"])
+@pytest.mark.parametrize(
+    "tables", ["full", "ranked", "search"], ids=["full-table", "rank-table", "search"]
+)
 @pytest.mark.parametrize("ties", [False, True], ids=["distinct", "tied"])
 @pytest.mark.parametrize("plates, reps, ctrls, spec", LAYOUTS, ids=LAYOUT_IDS)
 def test_vectorized_matches_scalar_draws(
-    plates, reps, ctrls, spec, ties, ranked, monkeypatch
+    plates, reps, ctrls, spec, ties, tables, monkeypatch
 ):
-    """The NumPy draws and mAPs equal the scalar functions', bit for bit."""
-    if not ranked:
+    """The NumPy draws and mAPs equal the scalar functions', bit for bit.
+
+    Small layouts gather from one (code, code) table; larger ones read the
+    rank tables, and pools above RANK_POOL search sorted rows.
+    """
+    if tables != "full":
+        monkeypatch.setattr(permutation, "_FULL_TABLE", 0)
+    if tables == "search":
         monkeypatch.setattr(permutation, "RANK_POOL", 0)
     meta = layout_meta(plates, reps, ctrls)
     feats = np.random.default_rng(plates + ctrls).standard_normal((len(meta), 6))
@@ -111,7 +119,8 @@ def test_vectorized_matches_scalar_draws(
     observed, members, pairs = group_of_q(meta, feats, spec)
     pool = permutation._Pool(members[2], pairs.similarity)
     layout = permutation._Layout(*members, pairs.similarity, pool)
-    assert pool.ranked == ranked
+    assert pool.ranked == (tables != "search")
+    assert (layout.full_keys is not None) == (tables == "full")
     k0, k1 = permutation.group_key(3, members[0])
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
     pm, maps = scalar_draws(layout, start, 300, k0, k1)
