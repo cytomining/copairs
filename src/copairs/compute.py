@@ -501,6 +501,8 @@ def random_map(
     np.ndarray
         `null_size` samples of the group's mAP under the null.
     """
+    if int(chunk) != chunk or chunk < 1:
+        raise ValueError(f"chunk must be a positive integer, got {chunk}")
     n = len(members)
     members = [(int(num_pos), int(num_neg)) for num_pos, num_neg in members]
     edges = sorted({(min(int(i), int(j)), max(int(i), int(j))) for i, j in edges})
