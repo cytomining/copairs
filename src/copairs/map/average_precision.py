@@ -1,7 +1,8 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Callable
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,87 @@ from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_inp
 from .normalization import normalize_ap
 
 logger = logging.getLogger("copairs")
+
+
+# Key of the pairs an AP function attaches to the frame it returns.
+PAIRS_ATTR = "copairs_pairs"
+
+
+class _AttachedPairs(dict):
+    """A frame's pairs, carried in ``DataFrame.attrs``.
+
+    pandas deep-copies ``attrs`` on every operation and writes them to parquet
+    as JSON. This handle is shared by copies, serializes as ``{}`` and pickles
+    to an empty handle, so frames stay cheap to copy and safe to save, and a
+    reloaded frame has no pairs. Handles are equal only to themselves, so
+    pandas drops them when concatenating frames of different AP calls.
+    """
+
+    __slots__ = ("pairs",)
+
+    def __init__(self, pairs=None):
+        super().__init__()
+        self.pairs = pairs
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __reduce__(self):
+        return (_AttachedPairs, ())
+
+    def __eq__(self, other):
+        return self is other
+
+    def __ne__(self, other):
+        return self is not other
+
+
+def attach_pairs(frame: pd.DataFrame, pairs) -> pd.DataFrame:
+    """Attach ``pairs`` to ``frame`` (in place) and return it."""
+    frame.attrs[PAIRS_ATTR] = _AttachedPairs(pairs)
+    return frame
+
+
+def attached_pairs(frame: pd.DataFrame):
+    """Return the pairs an AP function attached to ``frame``, or None."""
+    handle = frame.attrs.get(PAIRS_ATTR)
+    return handle.pairs if isinstance(handle, _AttachedPairs) else None
+
+
+class _FeatureSimilarity:
+    """``pairs -> similarities`` of an AP call's features, as its AP stage computed them."""
+
+    def __init__(self, feats, distance, batch_size):
+        self.feats = feats
+        self.batch_size = batch_size
+        self._fn = compute.get_similarity_fn(distance, progress_bar=False)
+
+    def __call__(self, pairs):
+        return self._fn(self.feats, np.asarray(pairs), self.batch_size)
+
+
+@dataclass(frozen=True)
+class RankPairs:
+    """The pairs behind an AP table, for mAP nulls that re-rank profiles.
+
+    Attached to the frame :func:`average_precision` returns (and returned with
+    it by ``return_pairs=True``); indices are rows of that frame.
+
+    Attributes
+    ----------
+    pos, neg : np.ndarray
+        ``(n, 2)`` positive and negative pairs.
+    similarity : callable
+        ``pairs -> similarities`` (NumPy), the function the APs were computed
+        with.
+    """
+
+    pos: np.ndarray
+    neg: np.ndarray
+    similarity: Callable[[np.ndarray], np.ndarray]
 
 
 def build_rank_lists(
@@ -92,6 +174,7 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
     progress_bar: bool = True,
+    return_pairs: bool = False,
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -143,10 +226,23 @@ def average_precision(
     distance : str
         The distance function used for computing similarities. Default is "cosine".
 
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
+
+    return_pairs : bool
+        Also return the :class:`RankPairs` the APs were computed from, which
+        ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
+        needs. They are attached to the returned frame either way, in
+        ``frame.attrs["copairs_pairs"]``, and follow it through filtering
+        and copies (not saving, pickling or concatenating with other AP
+        calls' frames). They hold a reference to ``feats``; drop them with
+        ``frame.attrs.pop("copairs_pairs")``.
+
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the following columns:
+        A DataFrame (with ``return_pairs``, a ``(DataFrame, RankPairs)``
+        tuple) containing the following columns:
         - 'average_precision': The calculated average precision score for each profile.
         - 'normalized_average_precision': The normalized AP score (scale-independent).
         - 'n_pos_pairs': The number of positive pairs for each profile.
@@ -231,7 +327,11 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
-    return meta
+    pairs = RankPairs(
+        pos_pairs, neg_pairs, _FeatureSimilarity(feats, distance, batch_size)
+    )
+    attach_pairs(meta, pairs)
+    return (meta, pairs) if return_pairs else meta
 
 
 def p_values(

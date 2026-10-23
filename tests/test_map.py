@@ -1,5 +1,8 @@
 """Tests for (mean) Average Precision calculation."""
 
+import copy
+import json
+import pickle
 import warnings
 import itertools
 
@@ -14,6 +17,7 @@ from copairs.map import average_precision, mean_average_precision
 from tests.helpers import simulate_random_dframe
 from copairs.matching import UnpairedException
 from copairs.map.multilabel import average_precision as multilabel_average_precision
+from copairs.map.average_precision import attached_pairs
 
 SEED = 0
 
@@ -387,16 +391,25 @@ def test_map_pvalue_replicates_use_the_joint_null():
     rng = np.random.default_rng(SEED)
     meta = pd.DataFrame({"g": ["query"] * 4 + [f"control{i}" for i in range(30)]})
     feats = rng.standard_normal((len(meta), 10))
-    ap_scores = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
-    inferred = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, progress_bar=False)
+    ap_scores, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    kwargs = dict(progress_bar=False, null="joint")
+    bare = ap_scores.copy()
+    bare.attrs.clear()  # no attached pairs: positives are inferred
+    inferred = get_map_pvalue(bare, ["g"], 20_000, SEED, **kwargs)
+    attached = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, **kwargs)
+    given = get_map_pvalue(bare, ["g"], 20_000, SEED, pairs=pairs, **kwargs)
     explicit = get_map_pvalue(
-        ap_scores,
+        bare,
         ["g"],
         20_000,
         SEED,
-        progress_bar=False,
         pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+        **kwargs,
     )
+    assert attached["p_value"].tolist() == explicit["p_value"].tolist()
+    assert given["p_value"].tolist() == explicit["p_value"].tolist()
     assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
     assert ((inferred["p_value"] > 0) & (inferred["p_value"] <= 1)).all()
 
@@ -452,3 +465,30 @@ def test_map_pvalue_one_profile_groups_use_their_ap_null():
     null = np.array([np.mean(np.arange(1, 4) / (np.array(r) + 1)) for r in ranks])
     exact = [(null >= m - 1e-9).mean() for m in inferred["mean_average_precision"]]
     np.testing.assert_allclose(inferred["p_value"], exact, atol=0.01)
+
+
+def test_ap_frames_carry_their_pairs():
+    """AP frames carry their pairs through copies and filters, not saving or merging."""
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame({"g": ["q"] * 3 + [f"c{i}" for i in range(6)]})
+    feats = rng.standard_normal((len(meta), 5))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    assert attached_pairs(ap) is pairs
+    assert attached_pairs(ap[ap["g"] == "q"].copy()) is pairs
+    assert attached_pairs(copy.deepcopy(ap)) is pairs
+    assert attached_pairs(pd.concat([ap.iloc[:4], ap.iloc[4:]])) is pairs
+    assert json.loads(json.dumps(ap.attrs)) == {"copairs_pairs": {}}  # as to_parquet
+    assert attached_pairs(pickle.loads(pickle.dumps(ap))) is None
+    other = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    assert attached_pairs(pd.concat([ap, other])) is None
+    # The pairs index the frame's rows and rank with the AP stage's similarities.
+    ap_again = average_precision(
+        meta.set_axis(range(10, 19)), feats, ["g"], [], [], ["g"], progress_bar=False
+    )
+    np.testing.assert_array_equal(attached_pairs(ap_again).pos, pairs.pos)
+    similarity = compute.get_similarity_fn("cosine", progress_bar=False)
+    np.testing.assert_array_equal(
+        pairs.similarity(pairs.neg), similarity(feats, pairs.neg, 20000)
+    )

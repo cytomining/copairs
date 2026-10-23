@@ -18,6 +18,7 @@ from copairs.map.hierarchical_fdr import (
     check_hierarchical_by,
     apply_hierarchical_fdr_correction,
 )
+from copairs.map.average_precision import RankPairs
 
 logger = logging.getLogger("copairs")
 
@@ -32,6 +33,7 @@ def get_map_pvalue(
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "joint",
+    pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
@@ -68,7 +70,7 @@ def get_map_pvalue(
         assumed to be its other members, which is the replicate-retrieval case
         (`n_pos_pairs == len(group) - 1`), and a group of one profile gets
         that profile's AP null. Other groups fall back to the copied null with
-        a warning. Joint null only.
+        a warning. Joint null only; taken from ``pairs`` when given.
     null : str
         Null of the group mAP. ``"joint"`` (default) samples the members' APs
         together (`copairs.nulls.joint`): a positive pair inside the group is
@@ -78,6 +80,11 @@ def get_map_pvalue(
         configuration and the group's null averages them, so members with
         equal pair counts share one draw and the null does not narrow as
         replicates are added.
+    pairs : RankPairs, optional
+        The pairs the AP scores were computed with, as
+        ``average_precision(..., return_pairs=True)`` returns them; their
+        indices are rows of that call's frame, so ``ap_scores`` must keep its
+        index. The joint null takes its positive pairs from them.
 
     Returns
     -------
@@ -93,6 +100,8 @@ def get_map_pvalue(
     null = check_null(null)
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
+    if null == "joint" and pos_pairs is None and pairs is not None:
+        pos_pairs = pairs.pos
 
     # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
@@ -250,6 +259,7 @@ def mean_average_precision(
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "joint",
+    pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -283,6 +293,9 @@ def mean_average_precision(
     null : str
         Null of the group mAP, ``"joint"`` (default) or ``"copied"``; see
         `get_map_pvalue`.
+    pairs : RankPairs, optional
+        Pairs of the AP scores, from ``average_precision(...,
+        return_pairs=True)``; see `get_map_pvalue`.
 
     Returns
     -------
@@ -311,6 +324,7 @@ def mean_average_precision(
         cache_dir=cache_dir,
         pos_pairs=pos_pairs,
         null=null,
+        pairs=pairs,
     )
 
     # Step 2: Apply multiple testing correction
@@ -335,6 +349,7 @@ def mean_average_precision_hierarchical(
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "joint",
+    pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -381,6 +396,9 @@ def mean_average_precision_hierarchical(
     null : str
         Null of the group mAP, ``"joint"`` (default) or ``"copied"``; see
         `get_map_pvalue`.
+    pairs : RankPairs, optional
+        Pairs of the AP scores, from ``average_precision(...,
+        return_pairs=True)``; see `get_map_pvalue`.
 
     Returns
     -------
@@ -413,6 +431,7 @@ def mean_average_precision_hierarchical(
         cache_dir=cache_dir,
         pos_pairs=pos_pairs,
         null=null,
+        pairs=pairs,
     )
 
     # Step 2: Apply hierarchical multiple testing correction

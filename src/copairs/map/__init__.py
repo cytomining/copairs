@@ -7,7 +7,7 @@ from .map import (
     mean_average_precision_hierarchical,
 )
 from .hierarchical_fdr import apply_fdr_correction, apply_hierarchical_fdr_correction
-from .average_precision import average_precision
+from .average_precision import RankPairs, average_precision
 
 __all__ = [
     "mean_average_precision",
@@ -17,4 +17,5 @@ __all__ = [
     "apply_hierarchical_fdr_correction",
     "multilabel",
     "average_precision",
+    "RankPairs",
 ]
