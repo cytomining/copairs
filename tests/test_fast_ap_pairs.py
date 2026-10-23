@@ -11,6 +11,7 @@ from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import _numba
 from tests.markers import AP_BACKENDS, needs_gpu
 from copairs._backend import backend_module
+from copairs.map.average_precision import attached_pairs
 
 NULL = dict(
     null_size=2000, threshold=0.05, seed=3, progress_bar=False, null="permutation"
@@ -190,3 +191,33 @@ def test_pairs_check_the_gpu_before_every_kernel_call(monkeypatch):
     monkeypatch.setattr("copairs._cuda.require", forked)  # imports CuPy
     with pytest.raises(RuntimeError, match="forked"):
         pairs.similarity(pairs.neg[:4])
+
+
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_null_releases_the_kernel_it_built(backend, monkeypatch):
+    """Each permutation null drops the AP stage's kernel when it returns.
+
+    The kernel holds its own copy of the features (on the GPU under
+    "cuda"), which the frame's pairs would otherwise keep; the next null
+    builds it again.
+    """
+    feats = np.random.default_rng(7).standard_normal((96, 8)).astype(np.float32)
+    frames = (
+        (plate_ap(feats, backend), "g"),
+        (shared_labels(label_ap(feats, backend)), "target"),
+    )
+    kernels = backend_module(backend)
+    builds = []
+    build = kernels.pair_similarity
+
+    def counted(*args, **kwargs):
+        builds.append(args[1])
+        return build(*args, **kwargs)
+
+    monkeypatch.setattr(kernels, "pair_similarity", counted)
+    for ap, sameby in frames:
+        similarity = attached_pairs(ap).similarity
+        for _ in range(2):
+            mean_average_precision(ap, [sameby], backend="numba", **NULL)
+            assert similarity._kernel is None
+    assert builds == ["cosine"] * 4

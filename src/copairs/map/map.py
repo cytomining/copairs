@@ -22,6 +22,7 @@ from copairs.map.average_precision import (
     RankPairs,
     LabelPairs,
     attached_pairs,
+    release_kernel,
     check_recomputable,
 )
 
@@ -271,15 +272,21 @@ def get_map_pvalue(
             stop_after=stop_after,
             backend=backend,
         )
-        if isinstance(pairs, LabelPairs):
-            map_scores["p_value"] = permutation.label_permutation_pvalues(
-                groups, profile, *counts, pairs, null_size, seed, **options
-            )
-        else:
-            map_scores["p_value"] = permutation.permutation_pvalues(
-                groups, profile, *counts, pairs.pos, pairs.neg, pairs.similarity,
-                null_size, seed, pos_diffby=pairs.pos_diffby, **options,
-            )  # fmt: skip
+        try:
+            if isinstance(pairs, LabelPairs):
+                map_scores["p_value"] = permutation.label_permutation_pvalues(
+                    groups, profile, *counts, pairs, null_size, seed, **options
+                )
+            else:
+                map_scores["p_value"] = permutation.permutation_pvalues(
+                    groups, profile, *counts, pairs.pos, pairs.neg,
+                    pairs.similarity, null_size, seed,
+                    pos_diffby=pairs.pos_diffby, **options,
+                )  # fmt: skip
+        finally:
+            # The kernel's copy of the features (on the GPU under "cuda")
+            # lives for one null, not with the frame.
+            release_kernel(pairs.similarity)
         return map_scores
 
     num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)

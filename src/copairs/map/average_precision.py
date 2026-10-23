@@ -76,9 +76,11 @@ class _FeatureSimilarity:
     With ``kernel_backend``, the backend (``"numba"`` or ``"cuda"``) whose
     kernel computed the AP stage's similarities, the same kernel: built on
     first use, with its own copy of the features (on the GPU under
-    ``"cuda"``), and kept with this object. The nulls call it from their
-    worker threads, so its launches run one at a time, as their parallel
-    kernels' do (:func:`copairs.nulls._numba._launch`). Otherwise batches
+    ``"cuda"``), and kept until :meth:`release`, which
+    :func:`copairs.map.get_map_pvalue` calls when its null returns. The
+    nulls call it from their worker threads, so its launches run one at a
+    time, as their parallel kernels' do
+    (:func:`copairs.nulls._numba._launch`). Otherwise batches
     of ``batch_size`` pairs go through the same pairwise function as in
     :func:`copairs.compute.get_similarity_fn`, one after another in the
     calling thread.
@@ -110,9 +112,20 @@ class _FeatureSimilarity:
         # Looked up on every call: under "cuda" this checks the GPU (and that
         # this process was not forked from one that used it) before a launch.
         kernels = backend_module(self.kernel_backend)
-        if self._kernel is None:
-            self._kernel = kernels.pair_similarity(self.feats, self.distance)
-        return self._kernel(pairs)
+        kernel = self._kernel  # one read: release() may clear it meanwhile
+        if kernel is None:
+            kernel = self._kernel = kernels.pair_similarity(self.feats, self.distance)
+        return kernel(pairs)
+
+    def release(self) -> None:
+        """Drop the kernel and its copy of the features; a later call rebuilds them."""
+        self._kernel = None
+
+
+def release_kernel(similarity) -> None:
+    """Drop the kernel a null built in ``similarity`` (a :class:`_FeatureSimilarity`)."""
+    if isinstance(similarity, _FeatureSimilarity):
+        similarity.release()
 
 
 def check_recomputable(similarity) -> None:
@@ -367,8 +380,8 @@ def average_precision(
         pair (8 bytes per pair) alive with the frame, whichever null is used;
         drop them with ``frame.attrs.pop("copairs_pairs")``. The permutation
         null recomputes similarities with the AP stage's kernel when it had
-        one, which then keeps its copy of ``feats`` (on the GPU for
-        ``"cuda"``) with them.
+        one, which keeps its own copy of ``feats`` (on the GPU for
+        ``"cuda"``) until the null returns.
 
     Returns
     -------
