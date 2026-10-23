@@ -68,7 +68,8 @@ def test_float32_scores_count_ties(null, tmp_path):
     """float32-rounded scores still tie with the null atoms they round from.
 
     With one positive among 3, AP is 1, 1/2 or 1/3, so every null value is
-    ``>= 1/3`` and the p-value of an mAP of 1/3 is exactly 1.
+    ``>= 1/3`` and the p-value of an mAP of 1/3 is exactly 1. pandas 2 averages
+    float32 APs to float32 and pandas 3 to float64; ties hold under both.
     """
     scores = pd.DataFrame(
         {

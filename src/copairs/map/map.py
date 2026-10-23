@@ -151,7 +151,12 @@ def get_map_pvalue(
         "mean_normalized_average_precision",
     ]
     groups = map_scores["indices"].tolist()
-    scores = map_scores["mean_average_precision"].to_numpy()
+    # Ties carry the APs' rounding, so keep their dtype: pandas 2 averages
+    # float32 APs to float32, pandas 3 to float64.
+    ap_dtype = ap_scores["average_precision"].to_numpy().dtype
+    scores = map_scores["mean_average_precision"].to_numpy(
+        dtype=ap_dtype if ap_dtype.kind == "f" else np.float64
+    )
     copied = dict(
         null_size=null_size,
         seed=seed,
