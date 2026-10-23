@@ -246,8 +246,7 @@ def test_draws_do_not_depend_on_chunks(backend, monkeypatch):
     feats = np.random.default_rng(22).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
     full = draws_of(meta, feats, spec, 1000, backend=backend)
-    monkeypatch.setattr(permutation._NumpyTables, "chunk", lambda self: 77)
-    monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)
+    monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)  # caps every chunk
     monkeypatch.setattr(permutation, "_PAIR_CHUNK", 7)
     monkeypatch.setattr(permutation, "_CHUNK_ELEMENTS", 5)
     chunked = draws_of(meta, feats, spec, 1000, backend=backend)
@@ -746,9 +745,7 @@ def test_split_draws_do_not_change_pvalues(stop_after, backend, monkeypatch):
         calls.append(self.key)  # one key per group
         return maps_of(self, start, size)
 
-    monkeypatch.setattr(permutation._NumpyTables, "chunk", lambda self: 32)
-    monkeypatch.setattr(permutation._LabelNumpyTables, "chunk", lambda self: 32)
-    monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 32)
+    monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 32)  # chunks and rounds
     monkeypatch.setattr(permutation._Run, "maps_of", counted)
     for workers, budget in ((1, 2**32), (4, 2**32), (4, 1)):
         monkeypatch.setattr(permutation, "POOL_BUDGET", budget)
@@ -770,8 +767,8 @@ def test_large_groups_spread_their_numba_draws(parallel, monkeypatch):
 
     The tasks are as large as NumPy's chunks (2**22 // 30**2 = 4660 draws
     for 30 members), so threads share them; on Numba's threads each launch
-    keeps up to _NUMBA_CHUNK draws. Rounds of stop_after, which run one at
-    a time, double up to _NUMBA_CHUNK either way. P-values match NumPy's.
+    keeps up to _NUMBA_CHUNK draws. Rounds of stop_after double up to
+    _NUMBA_CHUNK either way and run in such tasks. P-values match NumPy's.
     """
     pytest.importorskip("numba")
     from copairs.nulls import _numba
@@ -795,14 +792,15 @@ def test_large_groups_spread_their_numba_draws(parallel, monkeypatch):
     got = mean_average_precision(*args, backend="numba", **kwargs)
     assert got["p_value"].tolist() == expected["p_value"].tolist()
     assert calls == {30: 1 if parallel else 3, 3: 2}
-    # 20000 draws that never stop: rounds of 256, 512, ..., 8192, then 3872.
+    # 20000 draws that never stop: rounds of 256, 512, ..., 8192, then 3872;
+    # off Numba's threads the round of 8192 runs as 4660 + 3532.
     kwargs["stop_after"] = 10**6
     args = (args[0], ["g"], 20000, 0.05, 0)
     expected = mean_average_precision(*args, backend="numpy", **kwargs)
     calls.clear()
     got = mean_average_precision(*args, backend="numba", **kwargs)
     assert got["p_value"].tolist() == expected["p_value"].tolist()
-    assert calls == {30: 7, 3: 14}
+    assert calls == {30: 7 if parallel else 8, 3: 14}
 
 
 PLATE_SPEC = dict(ML_SPEC, neg_sameby=["plate"])
@@ -1295,9 +1293,10 @@ def test_stop_after_follows_the_draw_sequence(stop_after, backend, monkeypatch):
     kwargs = dict(progress_bar=False, stop_after=stop_after, backend=backend)
     res = mean_average_precision(*args, **kwargs)
     assert res["p_value"].iloc[0] == got
+    # Rounds of 7, 14, ..., 77 draws, in tasks of 5 off Numba's threads.
     monkeypatch.setattr(permutation, "_FIRST_ROUND", 7)
-    monkeypatch.setattr(permutation._NumpyTables, "chunk", lambda self: 77)
     monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)
+    monkeypatch.setattr(permutation, "_draw_chunk", lambda n: 5)
     rounds = mean_average_precision(*args, **kwargs)
     assert rounds["p_value"].iloc[0] == got
 
@@ -1327,6 +1326,74 @@ def test_count_hits_at_round_edges(hits_at):
                 assert got == (len(hits), null_size)
 
 
+def test_split_rounds_count_in_draw_order():
+    """A round's tasks may arrive in any order; hits are counted in draw order.
+
+    Rounds of 256, 512, ... draws run as tasks of 7, which arrive here last
+    first; the run still stops at the stop_after-th hit of the sequence.
+    """
+    null_size = 3000
+    seq = (np.random.default_rng(17).random(null_size) < 0.01).astype(float)
+    hits_at = np.flatnonzero(seq)
+    for stop_after in (1, 5, 10, len(hits_at), len(hits_at) + 1):
+        hits = permutation._Hits(null_size, 0.5, 7, stop_after)
+        rounds = []
+        while not hits.done:
+            assert hits.round_done
+            todo = hits.tasks()
+            rounds.append(sum(size for _, size in todo))
+            for start, size in reversed(todo):
+                if hits.add(start, seq[start : start + size]):
+                    break
+        if stop_after <= len(hits_at):
+            assert (hits.count, hits.draws) == (stop_after, hits_at[stop_after - 1] + 1)
+        else:
+            assert (hits.count, hits.draws) == (len(hits_at), null_size)
+            assert rounds == [256, 512, 1024, 1208]
+    assert len(hits_at) > 10
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("stop_after", [None, 3])
+def test_draw_tasks_in_flight_are_bounded(stop_after, backend, monkeypatch):
+    """Groups split into many tasks keep few in flight, with the same p-values.
+
+    Tasks of 7 draws split each group's 3000 draws (or stop_after's rounds
+    of 256, 512, ...) into hundreds; at most _TASKS_PER_WORKER per thread
+    wait or run at once, and the tasks of a group that stopped mid-round
+    are dropped.
+    """
+    ap = shared_pool_aps()
+    args = (ap, ["g"], 3000, 0.05, 0)
+    kwargs = dict(progress_bar=False, max_workers=2, stop_after=stop_after)
+    expected = mean_average_precision(*args, backend="numpy", **kwargs)
+    lock, pending, peak = threading.Lock(), set(), [0]
+
+    def done(future):
+        with lock:
+            pending.discard(future)
+
+    class CountingExecutor(permutation.ThreadPoolExecutor):
+        def submit(self, fn, *args):
+            future = super().submit(fn, *args)
+            if getattr(fn, "__name__", "") == "maps_of":
+                with lock:
+                    pending.add(future)
+                    peak[0] = max(peak[0], len(pending))
+                future.add_done_callback(done)
+            return future
+
+    monkeypatch.setattr(permutation, "ThreadPoolExecutor", CountingExecutor)
+    monkeypatch.setattr(permutation, "_draw_chunk", lambda n: 7)
+    if backend == "numba":
+        from copairs.nulls import _numba
+
+        monkeypatch.setattr(_numba, "threads", lambda: 1)  # draws on pool threads
+    got = mean_average_precision(*args, backend=backend, **kwargs)
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    assert 2 < peak[0] <= permutation._TASKS_PER_WORKER * 2
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_stop_after_on_multilabel_groups(backend, monkeypatch):
     """Multilabel groups stop the same way, whatever the rounds.
@@ -1344,13 +1411,14 @@ def test_stop_after_on_multilabel_groups(backend, monkeypatch):
         assert count >= 10  # the run stopped
         expected = sequential_expected(full, identity, 3000, 10)
         assert res.set_index("target").loc[label, "p_value"] == expected
-    # Rounds of 7, 14, ... draws (at most 77): every stopped label stops
-    # past its first round.
+    # Rounds of 7, 14, ... draws (at most 77), in tasks of 5 off Numba's
+    # threads: every stopped label stops past its first round.
     monkeypatch.setattr(permutation, "_FIRST_ROUND", 7)
-    monkeypatch.setattr(permutation._LabelNumpyTables, "chunk", lambda self: 77)
     monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)
-    rounds = mean_average_precision(ap, *args, **kwargs)
-    assert rounds["p_value"].tolist() == res["p_value"].tolist()
+    monkeypatch.setattr(permutation, "_draw_chunk", lambda n: 5)
+    for workers in (1, 4):
+        rounds = mean_average_precision(ap, *args, max_workers=workers, **kwargs)
+        assert rounds["p_value"].tolist() == res["p_value"].tolist()
 
 
 def test_stop_after_arguments():
