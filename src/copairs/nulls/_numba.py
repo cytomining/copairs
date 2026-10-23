@@ -3,7 +3,9 @@
 Imported only through :func:`copairs.nulls.backend._import_numba_backend`. The
 sampler compiles the scalar reference functions of
 :mod:`copairs.nulls.sampler` unchanged, so its samples are bitwise identical to
-the NumPy backend's.
+the NumPy backend's. The counts' binary search is the AP kernels'
+:func:`copairs.fastap.ranking.upper_bound` (nulls may import fastap, not the
+reverse).
 """
 
 import numba
@@ -11,6 +13,7 @@ import numpy as np
 
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
+from copairs.fastap.ranking import upper_bound
 
 _gap_loop_nb = numba.njit(cache=True)(gap_loop)
 _ap_sample_nb = numba.njit(cache=True)(
@@ -31,20 +34,6 @@ def ap_nulls(num_pos, total, k0, k1, start, out):
         c = flat // size
         t = flat - c * size
         out[c, t] = _ap_sample_nb(num_pos[c], total[c], start + t, k0[c], k1[c])
-
-
-@numba.njit(inline="always")
-def upper_bound(vals, lo, hi, key):
-    """First index in sorted ``vals[lo:hi]`` after ``key`` (NumPy order, NaN last)."""
-    key_nan = np.isnan(key)
-    while lo < hi:
-        mid = (lo + hi) >> 1
-        v = vals[mid]
-        if key_nan or (not np.isnan(v) and v <= key):
-            lo = mid + 1
-        else:
-            hi = mid
-    return lo
 
 
 # Upper bound on the per-block histograms of count_ge.
