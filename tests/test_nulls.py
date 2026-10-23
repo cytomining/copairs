@@ -15,8 +15,8 @@ import pytest
 from scipy.stats import chisquare
 
 import copairs
-from copairs import nulls
-from copairs.nulls import common, philox, backend, pvalues, sampler
+from copairs import nulls, methods
+from copairs.nulls import common, philox, pvalues, sampler
 from tests.helpers import (
     without_modules,
     brute_ap_pvalues,
@@ -177,6 +177,26 @@ def test_available_backends():
     assert cpu == (["numba", "numpy"] if HAS_NUMBA else ["numpy"])
     assert BACKENDS in (cpu, ["cuda", *cpu])
     assert nulls.resolve_backend("auto") == cpu[0]  # never "cuda"
+
+
+def test_auto_looks_for_numba_once(monkeypatch):
+    """Backend "auto" finds the backends once per process, not per call.
+
+    Looking for an uninstalled Numba (``find_spec``) costs about 80 us, and
+    the nulls resolve their backend per group or chunk.
+    """
+    looked = []
+    find_spec = importlib.util.find_spec
+
+    def recorded(name, *args):
+        looked.append(name)
+        return find_spec(name, *args)
+
+    monkeypatch.setattr(importlib.util, "find_spec", recorded)
+    for _ in range(3):
+        assert nulls.resolve_backend("auto") == BACKENDS[0]
+        assert nulls.available_backends() == BACKENDS
+    assert looked == []
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -402,7 +422,7 @@ def test_backend_validation():
     with pytest.raises(ValueError, match="unknown backend"):
         nulls.ap_nulls(CONFS, 4, seed=0, backend="gpu")
     for name in ("numba", "cuda"):  # valid names, whether installed or not
-        backend.check_method("legacy", name)
+        methods.check_method("legacy", name)
 
 
 def test_ap_pvalues_validates_conf_ix():
@@ -562,9 +582,39 @@ p = compute.p_values(np.array([0.5, 1.0]), np.array([[2, 10], [1, 4]]), 100, 0,
 frame = pd.DataFrame({"g": ["a", "a"], "average_precision": [0.5, 0.6],
                       "normalized_average_precision": 0.0, "n_pos_pairs": 1,
                       "n_total_pairs": 10})
-m = mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False)
+m = mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False,
+                           null="copied")
+# The default (permutation) and joint nulls of real APs run on NumPy.
+meta = pd.DataFrame({"g": ["q"] * 3 + [f"c{i}" for i in range(8)]})
+feats = np.random.default_rng(0).standard_normal((len(meta), 4))
+ap = copairs.map.average_precision(meta, feats, ["g"], [], [], ["g"],
+                                   progress_bar=False)
+ap = ap[ap["g"] == "q"]
+perm = mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False)
+joint = mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False,
+                               null="joint")
+# And the permutation null of multilabel APs.
+targets = pd.DataFrame({"target": [["A"], ["A", "B"], ["B"], ["A"], ["B"], []]})
+targets["target"] = [t + [f"own{i}"] for i, t in enumerate(targets["target"])]
+labelled = copairs.map.multilabel.average_precision(
+    targets, feats[:6], ["target"], [], [], ["target"], multilabel_col="target",
+    progress_bar=False,
+)
+labelled = labelled[labelled["target"].isin(["A", "B"])]
+label = mean_average_precision(labelled, ["target"], 100, 0.05, 0,
+                               progress_bar=False)
 assert "numba" not in sys.modules
-print(list(p), list(m["p_value"]))
+for null, frame, by in (("permutation", ap, "g"), ("joint", ap, "g"),
+                        ("permutation", labelled, "target")):
+    try:
+        mean_average_precision(frame, [by], 100, 0.05, 0, progress_bar=False,
+                               null=null, backend="numba")
+    except ImportError as exc:
+        assert "copairs[numba]" in str(exc), exc
+    else:
+        raise AssertionError(f"backend='numba' ran the {null} null without numba")
+print(list(p), list(m["p_value"]), list(perm["p_value"]), list(joint["p_value"]),
+      list(label["p_value"]))
 """
     )
     assert out.strip()
@@ -597,7 +647,8 @@ with warnings.catch_warnings(record=True) as caught:
     assert nulls.resolve_backend("auto") == "numpy"
     p = compute.p_values(np.array([0.5, 1.0]), [[2, 10], [1, 4]], 100, 0,
                          progress_bar=False)
-    m = mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False)
+    m = mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False,
+                               null="copied")
 shown = [str(w.message) for w in caught if w.category is RuntimeWarning]
 assert len(shown) == 1 and "simulated broken numba" in shown[0], shown
 expected = compute.p_values(np.array([0.5, 1.0]), [[2, 10], [1, 4]], 100, 0,
@@ -621,6 +672,7 @@ def test_import_does_not_load_numba():
     out = run_python(
         "import sys\nimport copairs, copairs.map, copairs.compute, copairs.nulls\n"
         "import copairs.map.multilabel, copairs.nulls.sampler, copairs.nulls.pvalues\n"
+        "import copairs.nulls.joint, copairs.nulls.permutation\n"
         "print('numba' in sys.modules)"
     )
     assert out.strip() == "False"
@@ -678,7 +730,7 @@ assert copairs.__file__.startswith(sys.argv[1]), copairs.__file__
 confs = np.array([[1, 7], [3, 10], [9, 49], [3, 1000]])
 nb = nulls.ap_nulls(confs, 50, 0, backend="numba", dtype=np.float64)
 ref = nulls.ap_nulls(confs, 50, 0, backend="numpy", dtype=np.float64)
-hits = sum(_numba.ap_nulls.stats.cache_hits.values())
+hits = sum(_numba._ap_nulls.stats.cache_hits.values())
 print(json.dumps({"numba": nb.tolist(), "numpy": ref.tolist(), "hits": hits}))
 """
 

@@ -37,7 +37,7 @@ def test_default_path_does_not_import_numba():
         "rng = np.random.default_rng(0)\n"
         "meta = simulate_random_dframe(60, {'p': 3, 'l': 6}, ['l'], ['p'], rng)\n"
         "feats = rng.normal(size=(len(meta), 4))\n"
-        "ap = map.average_precision(meta, feats, ['l'], ['p'], [], ['l'],\n"
+        "ap = map.average_precision(meta, feats, ['l'], [], [], ['l'],\n"
         "                           progress_bar=False)\n"
         "map.mean_average_precision(ap, ['l'], null_size=10, threshold=0.05,\n"
         "                           seed=None, progress_bar=False,\n"

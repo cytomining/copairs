@@ -1,6 +1,7 @@
 """Functions to compute mean average precision."""
 
 import logging
+import warnings
 from os import cpu_count
 from typing import List, Union, Optional
 from pathlib import Path
@@ -10,11 +11,18 @@ import numpy as np
 import pandas as pd
 
 from copairs import nulls, compute
-from copairs.nulls.backend import check_method
+from copairs.nulls import joint, permutation
+from copairs.methods import check_null, check_method
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     check_hierarchical_by,
     apply_hierarchical_fdr_correction,
+)
+from copairs.map.average_precision import (
+    RankPairs,
+    LabelPairs,
+    attached_pairs,
+    check_recomputable,
 )
 
 logger = logging.getLogger("copairs")
@@ -30,12 +38,20 @@ def get_map_pvalue(
     cache_dir: Optional[Union[str, Path]] = None,
     method: str = "fast",
     backend: str = "auto",
+    pos_pairs: Optional[np.ndarray] = None,
+    null: str | None = None,
+    pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
     This function groups AP scores by the specified columns, computes the mean
     Average Precision (mAP) for each group, and calculates p-values by comparing
-    against null distributions.
+    against the null distribution of the group's mAP chosen by `null`. Under
+    ``method="fast"`` a null mAP counts against the group when it is ``>=``
+    the group's mAP, so an mAP equal to an atom of the null (e.g. perfect
+    retrieval) counts the atom; values within the scores' rounding count as
+    ties (`copairs.nulls.tie_thresholds`).
 
     Parameters
     ----------
@@ -51,29 +67,112 @@ def get_map_pvalue(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of threads: of the legacy method's p-value loop (default defined
-        by tqdm's `thread_map`), and of the fast method's NumPy backend
-        (default: the CPUs this process may run on). The Numba backend uses
-        Numba's threads, set by ``NUMBA_NUM_THREADS`` or
-        ``numba.set_num_threads``. P-values do not depend on the threads.
+        Threads that run the permutation null's draws or the fast copied
+        null's NumPy backend (default: the CPUs this process may run on, at
+        most 32 for the permutation null), or that compute the legacy copied
+        null's p-values (default: tqdm's `thread_map`'s). Numba's kernels run
+        on Numba's threads (``NUMBA_NUM_THREADS`` or
+        ``numba.set_num_threads``), except that the permutation null runs a
+        group's draws on its own thread when the threads run as many groups
+        at once as Numba has threads. P-values do not depend on the threads.
     cache_dir : str or Path
-        Location to save the cache (``method="legacy"`` only).
+        Location to save the cache of the copied null's AP samples
+        (``method="legacy"`` only).
     method : str
-        Both methods average the members' AP nulls, members with equal pair
-        counts sharing samples, as copairs 0.5.5 did. ``"fast"`` (default)
-        samples them exactly and streams them in bounded memory, without a
-        cache (:func:`copairs.nulls.map_pvalues`), and counts group nulls
-        ``>= mAP``, treating values within the scores' rounding as ties (see
-        :func:`copairs.nulls.tie_thresholds`). ``"legacy"`` materializes the
-        nulls of :func:`copairs.compute.get_null_dists` and counts group nulls
-        ``> mAP``, as copairs 0.5.5 did, which gives too small p-values when
-        the mAP equals an atom of the null (e.g. perfect retrieval).
+        ``"fast"`` (default) offers every null, defaults to
+        ``null="permutation"`` and counts ties as above; its copied null
+        samples the members' AP nulls exactly and streams them in bounded
+        memory, without a cache (:func:`copairs.nulls.map_pvalues`).
+        ``"legacy"`` reproduces copairs <= 0.5.5, with each configuration's
+        null seeded by its pair counts: the copied null only, averaging the
+        cached nulls of :func:`copairs.compute.get_null_dists` and counting
+        group nulls ``> mAP``, which gives too small p-values when the mAP
+        equals an atom of the null (e.g. perfect retrieval). Other nulls
+        raise under it.
     backend : str
-        Backend of the fast method: ``"auto"`` (default), ``"cuda"``,
-        ``"numba"`` or ``"numpy"``. ``"auto"`` picks Numba when installed,
-        else NumPy, which give identical p-values. ``"cuda"`` (``pip install
+        Backend of the fast method's nulls: ``"auto"`` (default), ``"cuda"``,
+        ``"numba"`` or ``"numpy"``. ``"numba"`` compiles the scalar functions
+        that define each null's draws (the copied null's AP samples, the
+        joint null's samples, the permutation null's relabellings, or label
+        moves on multilabel APs, and their mAPs), and ``"numpy"`` computes the
+        same draws vectorized. The two give bitwise-identical draws and
+        p-values, so ``"auto"`` picks Numba when it imports
+        (:func:`copairs.nulls.resolve_backend`). ``"cuda"`` (``pip install
         'copairs[gpu]'``) runs only when asked for (see
-        :func:`copairs.nulls.ap_nulls`).
+        :func:`copairs.nulls.ap_nulls`). Ignored by ``method="legacy"``.
+    pos_pairs : np.ndarray, optional
+        The `(n_pairs, 2)` positive pairs used to compute the AP scores,
+        indexing the rows of the frame `average_precision` returned (its
+        `return_pairs=True` gives them, as `pairs.pos`); `ap_scores` must keep
+        that frame's index. Pairs whose counts disagree with `n_pos_pairs`
+        raise. When omitted, they are taken from ``pairs`` or, failing that,
+        from the pairs `average_precision` attached to ``ap_scores`` (for
+        multilabel APs, the `LabelPairs` as pairs of AP rows). Frames
+        without either assume each group's positives are its other members,
+        which is the replicate-retrieval case
+        (`n_pos_pairs == len(group) - 1`), and a group of one profile gets
+        that profile's AP null. Other groups fall back to the copied null with
+        a warning. Joint null only.
+    null : str, optional
+        Null of the group mAP; by default the method's: ``"permutation"``
+        under ``method="fast"``, ``"copied"`` under ``method="legacy"``.
+        ``"permutation"`` relabels profiles
+        (`copairs.nulls.permutation`): in each block of members ranked against
+        the same references (e.g. a plate's replicates and controls), any of
+        the block's profiles could have carried the group's label, and each
+        draw recomputes the group's mAP from the observed similarities. Each
+        group's positives must be its other members (for groups of one
+        profile with positives in other groups, use ``"joint"``: there it is
+        that profile's AP null), and its smallest p-value is about one over
+        its number of distinct relabellings. On multilabel APs
+        (`multilabel.average_precision`, whose `LabelPairs` it reads), each
+        group holds one label, and a draw moves that label to as many
+        profiles of each component of the negative-pair graph as hold it
+        there, keeping their other labels
+        (`copairs.nulls.permutation.label_permutation_pvalues`); the group
+        needs every AP row of its label. It recomputes similarities, so
+        APs computed with a distance that estimates its scale per batch
+        (``"seuclidean"``, ``"mahalanobis"``) raise. ``"joint"`` samples
+        the members' APs together (`copairs.nulls.joint`): a positive pair
+        inside the group is one random number in both members' rank lists,
+        and other similarities are independent, which real profiles are not
+        (members share references, and some profiles are close to many
+        others), so it can give too small p-values for groups of many
+        replicates. ``"copied"`` is the null of copairs <= 0.5.5 (the only
+        null of ``method="legacy"``): each
+        member's AP null is sampled per `(n_pos_pairs, n_total_pairs)`
+        configuration and the group's null averages them, so members with
+        equal pair counts share one draw and the null does not narrow as
+        replicates are added.
+    pairs : RankPairs, optional
+        The pairs the AP scores were computed with, as
+        ``average_precision(..., return_pairs=True)`` returns them; their
+        indices are rows of that call's frame, so ``ap_scores`` must keep its
+        index. For multilabel APs they are the `LabelPairs` of
+        ``multilabel.average_precision(..., return_pairs=True)``. The
+        permutation null needs them and, when not given, takes them from
+        ``ap_scores.attrs["copairs_pairs"]``, where both functions attach
+        them; frames that lost them (built, reloaded, pickled, or
+        concatenated from several AP calls) need ``pairs=`` or another null.
+        The joint null takes its positive pairs from ``pairs`` too, or from
+        the attached pairs (see ``pos_pairs``; a `LabelPairs` pair joins two
+        AP rows of the label it shares), and pairs to rows dropped from
+        ``ap_scores`` join a member to a profile outside its group.
+    stop_after : int, optional
+        Permutation null only: stop a group's draws at its ``stop_after``-th
+        draw whose mAP reaches the group's, and report ``stop_after / draws``
+        (Besag and Clifford's sequential p-value, valid like the fixed-size
+        one). Groups with large p-values then need few draws, while groups
+        that never reach ``stop_after`` hits run all ``null_size`` draws and
+        keep the usual p-value, so small p-values keep their resolution.
+        Draw ``j`` is the same either way: a stopped run is a prefix of the
+        full one. Near a decision threshold, though, a stopped p-value has
+        about ``1 / sqrt(stop_after)`` relative Monte Carlo error whatever
+        ``null_size`` is, so borderline calls change with the seed (on the
+        paper's cellhealth data, ``stop_after=10`` flipped 8 of ~210 calls
+        between seeds where full runs flipped none, at 3-6x the speed). Use
+        it to screen, or with a larger value for final calls. Default: run
+        all draws.
 
     Returns
     -------
@@ -87,8 +186,34 @@ def get_map_pvalue(
 
     """
     check_method(method, backend)
-    # Filter out invalid or incomplete AP scores
+    null = check_null(method, null)
+    if null != "joint" and pos_pairs is not None:
+        raise ValueError("pos_pairs is used by the joint null only")
+    if null != "permutation" and stop_after is not None:
+        raise ValueError("stop_after is used by the permutation null only")
+    if null != "copied" and pos_pairs is None and pairs is None:
+        pairs = attached_pairs(ap_scores)
+    if null == "joint" and pos_pairs is None and pairs is not None:
+        pos_pairs = pairs.pos
+    if null == "permutation" and pairs is None:
+        raise ValueError(
+            "null='permutation' (the fast method's default) needs the pairs "
+            "the APs were computed from. average_precision and "
+            "multilabel.average_precision attach them to the frame they "
+            "return, and these AP scores have none: they were built, loaded "
+            "from disk, pickled or concatenated from several AP calls. "
+            "Recompute the APs, pass pairs=, or choose "
+            "null='joint' or null='copied'."
+        )
+    if null == "permutation":
+        check_recomputable(pairs.similarity)
+
+    if null == "permutation" or pos_pairs is not None:
+        _check_row_index(ap_scores.index)
+
+    # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
+    profile = ap_scores.index.to_numpy()
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
     # Average the APs in float64 and round the means to the APs' dtype: ties
@@ -114,10 +239,9 @@ def get_map_pvalue(
     map_scores["mean_average_precision"] = map_scores["mean_average_precision"].astype(
         score_dtype
     )
-    map_scores["p_value"] = _copied_pvalues(
-        map_scores["mean_average_precision"].to_numpy(),
-        map_scores["indices"].tolist(),
-        ap_scores,
+    groups = map_scores["indices"].tolist()
+    scores = map_scores["mean_average_precision"].to_numpy()
+    copied = dict(
         null_size=null_size,
         seed=seed,
         cache_dir=cache_dir,
@@ -126,7 +250,67 @@ def get_map_pvalue(
         method=method,
         backend=backend,
     )
+
+    if null == "copied":
+        map_scores["p_value"] = _copied_pvalues(scores, groups, ap_scores, **copied)
+        return map_scores
+
+    if null == "permutation":
+        logger.info("Computing p-values...")
+        counts = (
+            ap_scores["n_pos_pairs"].to_numpy(),
+            ap_scores["n_total_pairs"].to_numpy(),
+        )
+        options = dict(
+            observed=scores,
+            progress_bar=progress_bar,
+            max_workers=max_workers,
+            stop_after=stop_after,
+            backend=backend,
+        )
+        if isinstance(pairs, LabelPairs):
+            map_scores["p_value"] = permutation.label_permutation_pvalues(
+                groups, profile, *counts, pairs, null_size, seed, **options
+            )
+        else:
+            map_scores["p_value"] = permutation.permutation_pvalues(
+                groups, profile, *counts, pairs.pos, pairs.neg, pairs.similarity,
+                null_size, seed, pos_diffby=pairs.pos_diffby, **options,
+            )  # fmt: skip
+        return map_scores
+
+    num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
+    num_neg = ap_scores["n_total_pairs"].to_numpy().astype(np.int64) - num_pos
+    logger.info("Computing p-values...")
+    p_values, fallback = joint.group_pvalues(
+        scores, groups, num_pos, num_neg, null_size, seed, profile, pos_pairs,
+        progress_bar=progress_bar, backend=backend,
+    )  # fmt: skip
+    if fallback:
+        warnings.warn(
+            f"{len(fallback)} group(s) have positives that are not their other "
+            "members; pass pos_pairs to sample their mAP null jointly. Falling "
+            "back to the copied null, which copies one draw across members with "
+            "equal pair counts.",
+            stacklevel=2,
+        )
+        p_values[fallback] = _copied_pvalues(
+            scores[fallback], [groups[k] for k in fallback], ap_scores, **copied
+        )
+    map_scores["p_value"] = p_values
     return map_scores
+
+
+def _check_row_index(index: pd.Index) -> None:
+    """Raise unless ``index`` holds row numbers, which AP pairs can index."""
+    if index.dtype.kind not in "iu" or (len(index) and index.min() < 0):
+        raise ValueError(
+            "the AP scores' index must hold the row numbers of the frame "
+            "average_precision returned, which the pairs index; got an index "
+            f"of dtype {index.dtype}"
+            + ("" if index.dtype.kind not in "iu" else " with negative labels")
+            + ". Keep that frame's index (no set_index or reset_index)."
+        )
 
 
 def _copied_pvalues(
@@ -138,8 +322,8 @@ def _copied_pvalues(
     cache_dir,
     progress_bar,
     max_workers,
-    method="fast",
-    backend="auto",
+    method,
+    backend,
 ):
     """P-values against the mean of the members' AP nulls, as in copairs <= 0.5.5.
 
@@ -216,6 +400,10 @@ def mean_average_precision(
     cache_dir: Optional[Union[str, Path]] = None,
     method: str = "fast",
     backend: str = "auto",
+    pos_pairs: Optional[np.ndarray] = None,
+    null: str | None = None,
+    pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -240,13 +428,28 @@ def mean_average_precision(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of threads, see :func:`get_map_pvalue`.
+        Number of threads, see `get_map_pvalue`.
     cache_dir : str or Path
-        Location to save the cache (``method="legacy"`` only).
+        Location to save the cache of the copied null's AP samples
+        (``method="legacy"`` only).
     method : str
-        ``"fast"`` (default) or ``"legacy"`` null, see :func:`get_map_pvalue`.
+        ``"fast"`` (default) or ``"legacy"``, see `get_map_pvalue`.
     backend : str
-        Backend of the fast method, see :func:`get_map_pvalue`.
+        Backend of the fast method's nulls, see `get_map_pvalue`.
+    pos_pairs : np.ndarray, optional
+        Positive pairs used to compute the AP scores, for ``null="joint"``;
+        see `get_map_pvalue`. Needed there when a group's positives are not
+        its other members.
+    null : str, optional
+        Null of the group mAP: ``"permutation"`` (the fast method's default),
+        ``"joint"`` or ``"copied"`` (the legacy method's); see
+        `get_map_pvalue`.
+    pairs : RankPairs, optional
+        Pairs of the AP scores, needed by ``null="permutation"`` and attached
+        to AP frames; see `get_map_pvalue`.
+    stop_after : int, optional
+        Stop each group's permutation draws at its ``stop_after``-th draw
+        reaching its mAP; see `get_map_pvalue`.
 
     Returns
     -------
@@ -275,6 +478,10 @@ def mean_average_precision(
         cache_dir=cache_dir,
         method=method,
         backend=backend,
+        pos_pairs=pos_pairs,
+        null=null,
+        pairs=pairs,
+        stop_after=stop_after,
     )
 
     # Step 2: Apply multiple testing correction
@@ -299,6 +506,10 @@ def mean_average_precision_hierarchical(
     cache_dir: Optional[Union[str, Path]] = None,
     method: str = "fast",
     backend: str = "auto",
+    pos_pairs: Optional[np.ndarray] = None,
+    null: str | None = None,
+    pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -336,13 +547,28 @@ def mean_average_precision_hierarchical(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of threads, see :func:`get_map_pvalue`.
+        Number of threads, see `get_map_pvalue`.
     cache_dir : str or Path
-        Location to save the cache (``method="legacy"`` only).
+        Location to save the cache of the copied null's AP samples
+        (``method="legacy"`` only).
     method : str
-        ``"fast"`` (default) or ``"legacy"`` null, see :func:`get_map_pvalue`.
+        ``"fast"`` (default) or ``"legacy"``, see `get_map_pvalue`.
     backend : str
-        Backend of the fast method, see :func:`get_map_pvalue`.
+        Backend of the fast method's nulls, see `get_map_pvalue`.
+    pos_pairs : np.ndarray, optional
+        Positive pairs used to compute the AP scores, for ``null="joint"``;
+        see `get_map_pvalue`. Needed there when a group's positives are not
+        its other members.
+    null : str, optional
+        Null of the group mAP: ``"permutation"`` (the fast method's default),
+        ``"joint"`` or ``"copied"`` (the legacy method's); see
+        `get_map_pvalue`.
+    pairs : RankPairs, optional
+        Pairs of the AP scores, needed by ``null="permutation"`` and attached
+        to AP frames; see `get_map_pvalue`.
+    stop_after : int, optional
+        Stop each group's permutation draws at its ``stop_after``-th draw
+        reaching its mAP; see `get_map_pvalue`.
 
     Returns
     -------
@@ -375,6 +601,10 @@ def mean_average_precision_hierarchical(
         cache_dir=cache_dir,
         method=method,
         backend=backend,
+        pos_pairs=pos_pairs,
+        null=null,
+        pairs=pairs,
+        stop_after=stop_after,
     )
 
     # Step 2: Apply hierarchical multiple testing correction

@@ -70,3 +70,23 @@ def config_key_arrays(seed: int, num_pos: np.ndarray, total: np.ndarray):
         SALT1,
     )
     return w[0], w[1]
+
+
+def make_uniform_pair(philox=philox4x32, uniform=uniform53, jit=lambda f: f):
+    """Build ``uniform_pair`` around ``philox`` and ``uniform``.
+
+    ``jit`` compiles it (e.g. ``numba.njit``, with compiled ``philox`` and
+    ``uniform``) or leaves it Python, which also runs elementwise on arrays.
+    """
+
+    @jit
+    def uniform_pair(c0, c1, block, stream, k0, k1):
+        """Return the two uniforms of Philox block ``(c0, c1, block, stream)``."""
+        w0, w1, w2, w3 = philox(c0, c1, np.uint64(block), np.uint64(stream), k0, k1)
+        return uniform(w0, w1), uniform(w2, w3)
+
+    return uniform_pair
+
+
+# In Python, on scalars or arrays.
+uniform_pair = make_uniform_pair()

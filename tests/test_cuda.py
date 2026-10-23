@@ -60,8 +60,9 @@ CALLS = [
     " backend='cuda')",
     "compute.p_values(np.array([]), np.empty((0, 2)), 10, 0, backend='cuda')",
     "mean_average_precision(FRAME, ['g'], 10, 0.05, 0, progress_bar=False,"
+    " null='copied', backend='cuda')",
+    "mean_average_precision(FRAME.iloc[:0], ['g'], 10, 0.05, 0, null='copied',"
     " backend='cuda')",
-    "mean_average_precision(FRAME.iloc[:0], ['g'], 10, 0.05, 0, backend='cuda')",
 ]
 META = pd.DataFrame({"l": list("aabb"), "p": list("xyxy")})
 LABELS = META.assign(l=[["a"], ["a", "b"], ["b"], ["b"]])
@@ -225,7 +226,7 @@ def test_import_does_not_load_cupy():
         "rng = np.random.default_rng(0)\n"
         "meta = simulate_random_dframe(60, {'p': 3, 'l': 6}, ['l'], ['p'], rng)\n"
         "feats = rng.normal(size=(len(meta), 4))\n"
-        "ap = map.average_precision(meta, feats, ['l'], ['p'], [], ['l'],\n"
+        "ap = map.average_precision(meta, feats, ['l'], [], [], ['l'],\n"
         "                           progress_bar=False)\n"
         "map.mean_average_precision(ap, ['l'], null_size=10, threshold=0.05,\n"
         "                           seed=0, progress_bar=False)\n"
@@ -537,7 +538,9 @@ def test_auto_never_runs_cuda(host_cuda):
     )
     compute.get_null_dists(confs, 50, 1, progress_bar=False)
     compute.p_values(scores[:5], confs[conf_ix[:5]], 200, 1, progress_bar=False)
-    mean_average_precision(frame, ["g"], 200, 0.05, 1, progress_bar=False)
+    mean_average_precision(
+        frame, ["g"], 200, 0.05, 1, progress_bar=False, null="copied"
+    )
     assert not host_cuda.calls
 
 

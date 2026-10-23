@@ -12,8 +12,8 @@ from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
 
 from copairs import nulls
+from copairs.methods import check_method
 from copairs.nulls.common import resolve_seed, check_null_size
-from copairs.nulls.backend import check_method
 
 
 def parallel_map(
@@ -318,6 +318,16 @@ def get_similarity_fn(
     >>> distance_fn = get_distance_fn("cosine")
     >>> similarity_scores = distance_fn(x_sample, y_sample)
     """
+    # Wrap the distance function for efficient batch processing
+    return batch_processing(pairwise_similarity_fn(distance), progress_bar=progress_bar)
+
+
+def pairwise_similarity_fn(distance: Union[str, Callable]) -> Callable:
+    """Return the ``(x_sample, y_sample) -> similarities`` function of ``distance``.
+
+    The unbatched function :func:`get_similarity_fn` wraps; ``distance`` is
+    as there.
+    """
     # Dictionary of supported similarity functions
     similarity_functions = {
         "abs_cosine": pairwise_abs_cosine,
@@ -346,9 +356,7 @@ def get_similarity_fn(
     else:
         # Raise an error if neither a string nor a callable is provided
         raise ValueError("Distance must be either a string or a callable object.")
-
-    # Wrap the distance function for efficient batch processing
-    return batch_processing(similarity_fn, progress_bar=progress_bar)
+    return similarity_fn
 
 
 def random_binary_matrix(n, m, k, rng):
@@ -576,7 +584,8 @@ def get_null_dists(
     backend : str
         Backend of the fast method: ``"auto"`` (default), ``"cuda"``,
         ``"numba"`` or ``"numpy"``. ``"auto"`` picks Numba when installed,
-        else NumPy, which return identical values. ``"cuda"`` (``pip install
+        else NumPy, with identical values
+        (:func:`copairs.nulls.resolve_backend`). ``"cuda"`` (``pip install
         'copairs[gpu]'``) runs only when asked for (see
         :func:`copairs.nulls.ap_nulls`).
 

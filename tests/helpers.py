@@ -223,6 +223,24 @@ def create_dframe(n_options, n_rows):
     return dframe
 
 
+def ap_frame(rows):
+    """Build an ``ap_scores`` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
+    frame = pd.DataFrame(
+        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
+    )
+    frame["normalized_average_precision"] = 0.0
+    return frame
+
+
+def query_meta(others: int = 0) -> pd.DataFrame:
+    """Four replicates of group "query" among 30 one-profile controls.
+
+    ``others`` profiles of group "other" follow the controls.
+    """
+    groups = ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * others
+    return pd.DataFrame({"g": groups})
+
+
 def brute_ap_pvalues(scores, conf_ix, confs, null_size, seed):
     """Count null values >= each score over the materialized nulls."""
     null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
@@ -252,3 +270,20 @@ def brute_map_pvalues(map_scores, ptr, conf_ix, conf_cnt, confs, null_size, seed
     group_null = brute_group_nulls(ptr, conf_ix, conf_cnt, confs, null_size, seed)
     num = (group_null >= nulls.tie_thresholds(map_scores)[:, None]).sum(axis=1)
     return (num + 1) / (null_size + 1)
+
+
+# Multilabel APs' usual rules: positives share a label, negatives share none.
+ML_SPEC = dict(
+    pos_sameby=["target"], pos_diffby=[], neg_sameby=[], neg_diffby=["target"]
+)
+
+
+def label_meta() -> pd.DataFrame:
+    """Compounds with overlapping targets; c1 and c8 share two of them.
+
+    Each compound also has a label of its own, so none is left without one
+    when a label moves away; such labels make no pairs.
+    """
+    targets = [["A"], ["A", "B"], ["B"], ["A", "C"], ["C"], ["B", "C"], ["D"]]
+    targets += [["D", "A"], ["A", "B"]]
+    return pd.DataFrame({"target": [t + [f"own{i}"] for i, t in enumerate(targets)]})

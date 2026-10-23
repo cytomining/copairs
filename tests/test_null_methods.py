@@ -7,13 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import copairs.map.map as map_module
 from copairs import nulls, compute
-from copairs.map import (
-    get_map_pvalue,
-    mean_average_precision,
-    mean_average_precision_hierarchical,
-)
+from copairs.map import mean_average_precision, mean_average_precision_hierarchical
 from copairs.nulls import sampler
 from tests.helpers import brute_ap_pvalues, brute_map_pvalues
 from copairs.map.normalization import expected_ap
@@ -21,6 +16,10 @@ from copairs.map.average_precision import p_values as frame_p_values
 
 BACKENDS = nulls.available_backends()
 CONFS = np.array([[1, 7], [3, 10], [5, 20], [9, 49], [99, 1099], [3, 1000]])
+# The mAP tests here are about the copied null, which methods' AP nulls feed;
+# under the fast method it must be named, as its default is the permutation
+# null, which mock AP frames (no pairs) cannot run.
+COPIED = dict(null="copied")
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +92,7 @@ def test_fast_is_the_default(backend, tmp_path):
     )
     np.testing.assert_array_equal(nulls_fast, nulls.ap_nulls(CONFS, 300, seed=4))
     frame = random_ap_frame(np.random.default_rng(0), n=50, n_groups=8)
-    kwargs = dict(null_size=300, threshold=0.05, seed=4, progress_bar=False)
+    kwargs = dict(null_size=300, threshold=0.05, seed=4, progress_bar=False, **COPIED)
     default = mean_average_precision(frame, ["g"], cache_dir=tmp_path, **kwargs)
     fast = mean_average_precision(frame, ["g"], method="fast", **kwargs)
     pd.testing.assert_frame_equal(default, fast)
@@ -147,7 +146,7 @@ def test_map_fast_matches_brute_force(backend):
     tied = nulls.ap_nulls([[3, 10]], 1, seed=6, dtype=np.float64)[0, 0]
     frame.loc[:2, "average_precision"] = tied
     result = mean_average_precision(
-        frame, ["g"], 2000, 0.05, seed=6, progress_bar=False, backend=backend
+        frame, ["g"], 2000, 0.05, seed=6, progress_bar=False, backend=backend, **COPIED
     )
     confs, rev_ix = np.unique(
         frame[["n_pos_pairs", "n_total_pairs"]].values, axis=0, return_inverse=True
@@ -178,7 +177,7 @@ def test_backends_identical_through_public_api():
     """NumPy and Numba give identical AP and mAP p-values."""
     pytest.importorskip("numba")
     frame = random_ap_frame(np.random.default_rng(4))
-    kwargs = dict(null_size=5000, threshold=0.05, seed=1, progress_bar=False)
+    kwargs = dict(null_size=5000, threshold=0.05, seed=1, progress_bar=False, **COPIED)
     a = mean_average_precision(frame, ["g"], backend="numpy", **kwargs)
     b = mean_average_precision(frame, ["g"], backend="numba", **kwargs)
     pd.testing.assert_frame_equal(a, b)
@@ -212,7 +211,7 @@ def test_map_pvalue_counts_ties(tmp_path):
     """
     kwargs = dict(null_size=100_000, threshold=0.05, seed=0, progress_bar=False)
     expected = np.array([0.01, 0.02])
-    fast = mean_average_precision(perfect_retrieval_scores(), ["g"], **kwargs)
+    fast = mean_average_precision(perfect_retrieval_scores(), ["g"], **COPIED, **kwargs)
     se = np.sqrt(expected * (1 - expected) / kwargs["null_size"])
     assert (np.abs(fast["p_value"].to_numpy() - expected) < 5 * se).all()
     legacy = mean_average_precision(
@@ -244,43 +243,9 @@ def test_float32_scores_count_ties(backend):
             "n_total_pairs": 3,
         }
     )
-    fast = mean_average_precision(scores, ["g"], threshold=0.05, **kwargs)
+    fast = mean_average_precision(scores, ["g"], threshold=0.05, **COPIED, **kwargs)
     assert fast["p_value"].iloc[0] == 1.0
     assert fast["mean_average_precision"].dtype == np.float32
-
-
-@pytest.mark.parametrize("keys", [str, int])
-def test_map_column_is_the_score(keys, monkeypatch):
-    """The mAP column is the float64 mean in the APs' dtype, and the nulls' score.
-
-    pandas averages float32 APs to float32 or float64 depending on its version
-    and the keys' dtype (pandas 3 string keys give float64), and its float32
-    mean can differ in the last bit from the rounded float64 mean.
-    """
-    rng = np.random.default_rng(0)
-    frame = pd.DataFrame(
-        {
-            "g": rng.integers(0, 50, 400).astype(keys),
-            "average_precision": rng.random(400).astype(np.float32),
-            "normalized_average_precision": 0.0,
-            "n_pos_pairs": 3,
-            "n_total_pairs": 30,
-        }
-    )
-    seen = []
-
-    def copied(scores, *args, **kwargs):
-        seen.append(scores)
-        return np.ones(len(scores))
-
-    monkeypatch.setattr(map_module, "_copied_pvalues", copied)
-    got = get_map_pvalue(frame, ["g"], 10, 0, progress_bar=False)
-    mean = frame.astype({"average_precision": np.float64}).groupby("g")
-    expected = mean["average_precision"].mean().astype(np.float32)
-    column = got.set_index("g")["mean_average_precision"]
-    assert column.dtype == np.float32
-    np.testing.assert_array_equal(column.loc[expected.index], expected)
-    assert seen[0].tobytes() == got["mean_average_precision"].to_numpy().tobytes()
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -305,7 +270,7 @@ def test_max_workers_sets_numpy_threads(backend, monkeypatch):
     runs = {
         "ap": lambda w: compute.p_values(scores, confs, max_workers=w, **kwargs),
         "map": lambda w: mean_average_precision(
-            frame, ["g"], threshold=0.05, max_workers=w, **kwargs
+            frame, ["g"], threshold=0.05, max_workers=w, **COPIED, **kwargs
         )["p_value"].to_numpy(),
     }
     for name, run in runs.items():
@@ -336,7 +301,7 @@ def test_map_fast_vs_legacy(tmp_path):
     """Fast and legacy mAP p-values agree within Monte Carlo error."""
     frame = random_ap_frame(np.random.default_rng(3))
     kwargs = dict(null_size=20_000, threshold=0.05, seed=0, progress_bar=False)
-    fast = mean_average_precision(frame, ["g"], **kwargs)
+    fast = mean_average_precision(frame, ["g"], **COPIED, **kwargs)
     legacy = mean_average_precision(
         frame, ["g"], cache_dir=tmp_path, method="legacy", **kwargs
     )
@@ -366,7 +331,7 @@ def test_ap_fast_vs_legacy():
 def test_map_fast_independent_of_other_groups():
     """A group's fast mAP p-value does not depend on the other groups."""
     frame = random_ap_frame(np.random.default_rng(6), n=80, n_groups=6)
-    kwargs = dict(sameby=["g"], null_size=500, threshold=0.05, seed=0)
+    kwargs = dict(sameby=["g"], null_size=500, threshold=0.05, seed=0, **COPIED)
     both = mean_average_precision(frame, progress_bar=False, **kwargs)
     only = frame[frame["g"] == both["g"].iloc[0]]
     alone = mean_average_precision(only, progress_bar=False, **kwargs)
@@ -418,7 +383,7 @@ def empty_ap_frame():
 def test_map_empty_input(method, hierarchical, tmp_path):
     """No valid AP scores give an empty result with the usual columns."""
     empty = empty_ap_frame()
-    kwargs = dict(progress_bar=False, method=method, cache_dir=tmp_path)
+    kwargs = dict(progress_bar=False, method=method, cache_dir=tmp_path, **COPIED)
     if hierarchical:
         result = mean_average_precision_hierarchical(
             empty, ["g", "h"], 100, 0.05, 0, ["g"], **kwargs
@@ -471,7 +436,9 @@ def test_empty_input_still_validates(bad, match):
         with pytest.raises(ValueError, match=match):
             compute.p_values(np.zeros(len(confs)), confs, **kwargs)
     with pytest.raises(ValueError, match=match):
-        mean_average_precision(empty_ap_frame(), ["g"], threshold=0.05, **kwargs)
+        mean_average_precision(
+            empty_ap_frame(), ["g"], threshold=0.05, **COPIED, **kwargs
+        )
 
 
 def test_unknown_method():
@@ -512,7 +479,9 @@ def test_numba_backend_without_numba_names_the_extra():
         compute.p_values(np.array([]), np.empty((0, 2)), 10, 0, backend="numba")
     with pytest.raises(ImportError, match=r"copairs\[numba\]"):
         mean_average_precision(
-            perfect_retrieval_scores(), ["g"], 10, 0.05, 0, backend="numba"
+            perfect_retrieval_scores(), ["g"], 10, 0.05, 0, backend="numba", **COPIED
         )
     with pytest.raises(ImportError, match=r"copairs\[numba\]"):
-        mean_average_precision(empty_ap_frame(), ["g"], 10, 0.05, 0, backend="numba")
+        mean_average_precision(
+            empty_ap_frame(), ["g"], 10, 0.05, 0, backend="numba", **COPIED
+        )

@@ -11,27 +11,8 @@ import warnings
 import importlib.util
 from functools import cache
 
+from copairs.methods import check_backend
 from copairs._backend import import_backend
-
-METHODS = ("fast", "legacy")
-BACKENDS = ("auto", "cuda", "numba", "numpy")
-
-
-def _check_backend(backend: str) -> None:
-    """Raise ValueError unless ``backend`` names a known backend."""
-    if backend not in BACKENDS:
-        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
-
-
-def check_method(method: str, backend: str = "auto") -> None:
-    """Raise ValueError unless ``method`` and ``backend`` name known choices.
-
-    The backend name is checked under ``method="legacy"`` too, which ignores
-    it, so a misspelled backend fails whichever method is used.
-    """
-    if method not in METHODS:
-        raise ValueError(f"unknown method {method!r}; expected one of {METHODS}")
-    _check_backend(backend)
 
 
 def available_backends() -> list[str]:
@@ -73,7 +54,7 @@ def _numba_imports() -> bool:
             f"Numba is installed but the Numba backend failed to import ({exc!r}); "
             "backend='auto' uses NumPy, which gives identical results.",
             RuntimeWarning,
-            stacklevel=3,
+            stacklevel=4,
         )
         return False
     return True
@@ -103,17 +84,20 @@ def _cuda_usable() -> bool:
 def resolve_backend(backend: str) -> str:
     """Return a concrete backend name for ``backend``.
 
-    ``"auto"`` picks ``"numba"`` when the Numba backend imports, else
-    ``"numpy"``. That choice cannot change results: the two return
-    bitwise-identical null samples and counts (tested). ``"auto"`` never
-    picks ``"cuda"``, which runs only when asked for: its samples equal
-    NumPy's by error bounds rather than by identical arithmetic (see
-    :mod:`copairs.nulls.cuda`), and it has not been tested bit for bit on a
-    GPU. ``"numba"`` and ``"cuda"`` raise an ImportError naming the extra
-    when their package is missing, and ``"cuda"`` a RuntimeError when no
-    GPU is usable.
+    ``"auto"`` picks ``"numba"`` when the Numba backend imports and
+    ``"numpy"`` otherwise, including when an installed Numba fails to import.
+    That choice cannot change results: for every null (AP, copied, joint and
+    permutation) both backends return bitwise-identical samples, draws and
+    counts (tested). It is made once per process. A Numba that imports but
+    cannot compile a kernel raises from the first call that needs it, under
+    ``"auto"`` too. ``"auto"`` never picks ``"cuda"``, which runs only when
+    asked for: its samples equal NumPy's by error bounds rather than by
+    identical arithmetic (see :mod:`copairs.nulls.cuda`), and it has not been
+    tested bit for bit on a GPU. ``"numba"`` and ``"cuda"`` raise an
+    ImportError naming the extra when their package is missing, and
+    ``"cuda"`` a RuntimeError when no GPU is usable.
     """
-    _check_backend(backend)
+    check_backend(backend)
     if backend == "auto":
         return _cpu_backends()[0]
     if backend == "numba":

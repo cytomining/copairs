@@ -362,12 +362,12 @@ def ap_nulls(
         Index of the first sample, so a null can be generated in chunks.
     backend : str
         ``"auto"``, ``"cuda"``, ``"numba"`` or ``"numpy"``. ``"auto"`` picks
-        Numba when installed, else NumPy, which return identical values.
-        ``"cuda"`` runs only when asked for: it also steps long gaps in
-        float32, which is faster on GPUs with few float64 units, and error
-        bounds rather than identical arithmetic make its samples NumPy's
-        (see :mod:`copairs.nulls.cuda`). It holds at most 1 GiB of samples
-        on the GPU at a time.
+        Numba when it imports, else NumPy, with identical values
+        (:func:`~copairs.nulls.resolve_backend`). ``"cuda"`` runs only when
+        asked for: it also steps long gaps in float32, which is faster on
+        GPUs with few float64 units, and error bounds rather than identical
+        arithmetic make its samples NumPy's (see :mod:`copairs.nulls.cuda`).
+        It holds at most 1 GiB of samples on the GPU at a time.
     dtype : np.float32 or np.float64
         Output precision. Samples are computed in float64 and rounded once.
 
