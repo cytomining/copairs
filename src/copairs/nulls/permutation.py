@@ -329,7 +329,7 @@ class _Layout:
     its slot) and then the pool's references.
     """
 
-    def __init__(self, members, edges, block_of, similarity, pool):
+    def __init__(self, members, edges, block_of, similarity, pool, draws=0):
         members = np.asarray(members, dtype=np.int64)
         block_of = np.asarray(block_of, dtype=np.int64)
         self.n = n = len(members)
@@ -386,12 +386,23 @@ class _Layout:
             )
         else:
             self.rmu = self.rcm = np.zeros((0, 0), dtype=np.int32)
-        # Small layouts gather keys and ranks from one (code, code) table each.
-        self.full_keys = self.full_ranks = None
-        if (n + len(pool.refs)) ** 2 <= _FULL_TABLE:
+        # Small layouts gather keys from one (code, code) table. A positive y
+        # of x is ranked after full_before[x, y] pool profiles (x's rank of y
+        # among references plus its block members before y); that table is
+        # built when ``draws`` draws gather more positives than it has
+        # entries, else ranks are gathered from a (code, code) rank table.
+        self.full_keys = self.full_ranks = self.full_before = None
+        m = n + len(pool.refs)
+        if m**2 <= _FULL_TABLE:
             self.full_keys = _full_table(n, kmu, kmu.T[n:], pool.krr)
             if pool.ranked:
                 self.full_ranks = _full_table(n, self.rmu, self.rcm, pool.rrr)
+            if pool.ranked and m**2 <= draws * int(self.deg.sum()):
+                x = np.repeat(np.arange(m), m)
+                word = (x.astype(np.uint64) << np.uint64(32)) | self.full_keys.ravel()
+                members_before = np.searchsorted(self.gkeys, word) - self.gptr[x]
+                before = self.full_ranks.ravel() + members_before
+                self.full_before, self.full_ranks = before.reshape(m, m), None
         # Slots each slot's rank list counts: its positives and its block.
         self.counted = [
             np.flatnonzero(
@@ -549,20 +560,23 @@ def _group_maps_np(layout, pm):
         # The positives, in rank order.
         deg = layout.deg[s]
         cols = np.nonzero(layout.adjm[s][t])[1].reshape(size, deg)
-        kp = np.take_along_axis(k, cols, axis=1)
         tp = np.take_along_axis(t, cols, axis=1)
         yp = np.take_along_axis(pm, tp, axis=1)
         xp = np.broadcast_to(x, yp.shape)
-        if layout.full_ranks is not None:
-            before = _gather(layout.full_ranks, xp, yp)
-        elif pool.ranked:
-            before = _pair_table(xp, yp, n, layout.rmu, layout.rcm, pool.rrr)
+        if layout.full_before is not None:
+            before = _gather(layout.full_before, xp, yp)
         else:
-            lo = layout.row_lo[xp]
-            before = _count_less_np(layout.rows, lo, layout.row_hi[xp], kp) - lo
-        # Block members x ranks before the key: count_less on its sorted g-row.
-        word = (xp.astype(np.uint64) << np.uint64(32)) | kp
-        before = before + (np.searchsorted(layout.gkeys, word) - layout.gptr[xp])
+            kp = np.take_along_axis(k, cols, axis=1)
+            if layout.full_ranks is not None:
+                before = _gather(layout.full_ranks, xp, yp)
+            elif pool.ranked:
+                before = _pair_table(xp, yp, n, layout.rmu, layout.rcm, pool.rrr)
+            else:
+                lo = layout.row_lo[xp]
+                before = _count_less_np(layout.rows, lo, layout.row_hi[xp], kp) - lo
+            # Block members x ranks before the key: count_less on its sorted g-row.
+            word = (xp.astype(np.uint64) << np.uint64(32)) | kp
+            before = before + (np.searchsorted(layout.gkeys, word) - layout.gptr[xp])
         before = before - np.take_along_axis(drawn, cols, axis=1)
         acc = np.zeros(size)
         for d in range(deg):
@@ -690,7 +704,7 @@ def permutation_null(
     """
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
-    layout = _Layout(members, edges, block_of, similarity, pool)
+    layout = _Layout(members, edges, block_of, similarity, pool, int(null_size))
     k0, k1 = group_key(seed, members)
     identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
     thr = float(tie_thresholds(identity))

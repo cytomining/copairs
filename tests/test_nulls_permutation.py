@@ -97,9 +97,7 @@ def scalar_draws(layout, start, size, k0, k1):
     return np.array(pms), np.array(maps)
 
 
-@pytest.mark.parametrize(
-    "tables", ["full", "ranked", "search"], ids=["full-table", "rank-table", "search"]
-)
+@pytest.mark.parametrize("tables", ["full", "full-ranks", "ranked", "search"])
 @pytest.mark.parametrize("ties", [False, True], ids=["distinct", "tied"])
 @pytest.mark.parametrize("plates, reps, ctrls, spec", LAYOUTS, ids=LAYOUT_IDS)
 def test_vectorized_matches_scalar_draws(
@@ -107,10 +105,12 @@ def test_vectorized_matches_scalar_draws(
 ):
     """The NumPy draws and mAPs equal the scalar functions', bit for bit.
 
-    Small layouts gather from one (code, code) table; larger ones read the
-    rank tables, and pools above RANK_POOL search sorted rows.
+    Small layouts gather keys from one (code, code) table, and ranks from one
+    too ("full-ranks") or, given enough draws, the ranks plus the drawn block
+    members before them ("full"); larger ones read the rank tables, and pools
+    above RANK_POOL search sorted rows.
     """
-    if tables != "full":
+    if tables not in ("full", "full-ranks"):
         monkeypatch.setattr(permutation, "_FULL_TABLE", 0)
     if tables == "search":
         monkeypatch.setattr(permutation, "RANK_POOL", 0)
@@ -120,9 +120,14 @@ def test_vectorized_matches_scalar_draws(
         feats = np.round(feats)
     observed, (members, edges, blocks, block_of), pairs = group_of_q(meta, feats, spec)
     pool = permutation._Pool(blocks, pairs.similarity)
-    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    draws = 0 if tables == "full-ranks" else 300
+    layout = permutation._Layout(
+        members, edges, block_of, pairs.similarity, pool, draws=draws
+    )
     assert pool.ranked == (tables != "search")
-    assert (layout.full_keys is not None) == (tables == "full")
+    assert (layout.full_keys is not None) == tables.startswith("full")
+    assert (layout.full_ranks is not None) == (tables == "full-ranks")
+    assert (layout.full_before is not None) == (tables == "full")
     k0, k1 = permutation.group_key(3, members)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
     pm, maps = scalar_draws(layout, start, 300, k0, k1)
