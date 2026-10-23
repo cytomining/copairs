@@ -1,6 +1,12 @@
 """Tests for the Numba similarity kernels and counting-based average precision."""
 
+import os
+import sys
+import json
+import shutil
+import subprocess
 import tracemalloc
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -8,6 +14,7 @@ import pytest
 
 pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
+import copairs
 from copairs import fastap, compute
 from copairs.map import average_precision
 from tests.helpers import run_isolated, simulate_random_dframe
@@ -475,3 +482,72 @@ def test_draw_average_precisions_check_drawn_rows():
         fastap.draw_average_precisions(feats, [[0, 2]], [[4, 3]], normalized=True)
     got = fastap.draw_average_precisions(feats, [[0, 2]], [[3, 5]])
     np.testing.assert_array_equal(got, [[1.0, 1.0]])
+
+
+# APs of the kernels that compile ranking.py's functions, and their cache hits,
+# for a copy of copairs in the directory argv[1].
+_CACHE_PROBE = """
+import sys, json
+import numpy as np
+import copairs
+from copairs import fastap
+from copairs.fastap import draws, multilabel
+
+assert copairs.__file__.startswith(sys.argv[1]), copairs.__file__
+rng = np.random.default_rng(0)
+feats = rng.normal(size=(40, 8))
+queries = np.array([rng.choice(40, 4, replace=False) for _ in range(20)])
+refs = np.array([rng.choice(40, 6, replace=False) for _ in range(20)])
+pos = np.array([[0, 1], [1, 2], [2, 3], [0, 3]])
+neg = np.array([[0, 4], [1, 5], [2, 6], [3, 7], [0, 5]])
+pos_sims, neg_sims = rng.random(4), rng.random(5)
+out = {
+    "draws": fastap.draw_average_precisions(feats, queries, refs).tolist(),
+    "multilabel": multilabel.multilabel_ap(pos, pos_sims, [2, 2], neg, neg_sims, 8)[
+        2
+    ].tolist(),
+    "hits": [
+        sum(k.stats.cache_hits.values()) for k in (draws._row_ap, multilabel._rows_ap)
+    ],
+}
+print(json.dumps(out))
+"""
+
+
+def test_numba_cache_follows_edits_to_compiled_files(tmp_path):
+    """Cached kernels follow edits to ranking.py, whose functions they compile.
+
+    Numba checks a cached kernel only against its own file; the draw and
+    multilabel AP kernels live elsewhere. An edit to ``ap_from_counts`` must
+    reach them in the next process, while a process after an unchanged one
+    still loads them from the cache.
+    """
+    shutil.copytree(
+        Path(copairs.__file__).parent,
+        tmp_path / "copairs",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "numba_cache")}
+
+    def run():
+        done = subprocess.run(
+            [sys.executable, "-c", _CACHE_PROBE, str(tmp_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    before = run()
+    assert run()["hits"] == [1, 1]
+    source = tmp_path / "copairs" / "fastap" / "ranking.py"
+    old = "    return acc / num_pos\n"
+    text = source.read_text()
+    assert text.count(old) == 1
+    source.write_text(text.replace(old, "    return 0.5 * acc / num_pos\n"))
+    after = run()
+    for key in ("draws", "multilabel"):
+        np.testing.assert_array_equal(after[key], 0.5 * np.array(before[key]))

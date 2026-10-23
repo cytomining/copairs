@@ -12,6 +12,8 @@ each of its sorted positives, so no row is fully sorted.
 import numba
 import numpy as np
 
+from copairs.fastap import ranking
+from copairs._numba_cache import cached_njit
 from copairs.fastap.ranking import _rank_key, upper_bound, ap_from_counts
 from copairs.fastap.similarity import _ROW_BLOCK, _unit_rows
 
@@ -35,7 +37,9 @@ def unit_rows(feats, normalized: bool = False) -> np.ndarray:
     return x
 
 
-@numba.njit(parallel=True, cache=True)
+# _row_ap compiles functions of ranking.py, which Numba's cache would not see
+# (see copairs._numba_cache).
+@cached_njit((__file__, ranking.__file__), parallel=True)
 def _row_ap(sims, k, out, n_tasks):
     """AP of each ``(draw, query)`` row of ``sims`` with shape ``(n_rows, k + m)``.
 
