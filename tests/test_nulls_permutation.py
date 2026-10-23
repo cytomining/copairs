@@ -4,6 +4,7 @@ import os
 import json
 import time
 import pickle
+import inspect
 import itertools
 import threading
 from collections import Counter
@@ -232,7 +233,7 @@ def test_numba_matches_numpy_draws(
     out = {b: np.empty(2000) for b in ("numpy", "numba")}
     runs = {
         b: permutation.permutation_null(
-            *group, pairs.similarity, 2000, 3, pool, out=out[b], backend=b
+            *group, pairs.similarity, 2000, 3, pool=pool, out=out[b], backend=b
         )[:2]
         for b in out
     }
@@ -1511,6 +1512,25 @@ def test_stop_after_on_multilabel_groups(backend, monkeypatch):
     for workers in (1, 4):
         rounds = mean_average_precision(ap, *args, max_workers=workers, **kwargs)
         assert rounds["p_value"].tolist() == res["p_value"].tolist()
+
+
+@pytest.mark.parametrize(
+    "func",
+    [
+        permutation.permutation_null,
+        permutation.permutation_pvalues,
+        permutation.label_permutation_pvalues,
+    ],
+)
+def test_options_are_keyword_only(func):
+    """The permutation nulls take every option after the seed by keyword.
+
+    A merge had reordered permutation_pvalues' trailing options, which then
+    bound positional arguments to other parameters without an error.
+    """
+    params = list(inspect.signature(func).parameters.values())
+    after = params[[p.name for p in params].index("seed") + 1 :]
+    assert after and all(p.kind is p.KEYWORD_ONLY for p in after)
 
 
 def test_stop_after_arguments():

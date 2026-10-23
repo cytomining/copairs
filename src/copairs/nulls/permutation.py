@@ -1048,7 +1048,7 @@ class _Run:
 
 
 def permutation_null(
-    members, edges, blocks, block_of, similarity, null_size, seed, pool=None,
+    members, edges, blocks, block_of, similarity, null_size, seed, *, pool=None,
     out=None, backend="auto", parallel=True,
 ):  # fmt: skip
     """Run ``null_size`` label permutations of one group.
@@ -1241,7 +1241,7 @@ def _check_identity(g, identity, observed):
 
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
-    null_size, seed, observed=None, progress_bar=False, max_workers=None,
+    null_size, seed, *, observed=None, progress_bar=False, max_workers=None,
     pos_diffby=None, stop_after=None, backend="auto",
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
@@ -1960,7 +1960,7 @@ def _label_run(
 
 
 def label_permutation_pvalues(
-    groups, rows, num_pos, num_total, pairs, null_size, seed, observed=None,
+    groups, rows, num_pos, num_total, pairs, null_size, seed, *, observed=None,
     progress_bar=False, max_workers=None, stop_after=None, backend="auto",
 ):  # fmt: skip
     """P-value of each multilabel group's mAP against moves of its label.
