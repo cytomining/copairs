@@ -264,11 +264,13 @@ def _ap_null_numpy(num_pos, total, start, size, k0, k1):
             gap = np.minimum(np.floor(rem * u).astype(np.int64), rem - 1)
         else:
             gap = np.empty(live.size, dtype=np.int64)
-            guided = (u > 0) & (rem < GUIDED_MAX_TOTAL)
-            if k <= _GUIDED_MAX_K:
-                guided &= rem - k > NUMPY_GUIDED_RATIO * k * (k + 1)
-            else:
-                guided[:] = False
+            # Checked first, the k bound also keeps k * (k + 1) inside int64.
+            wide = (
+                rem - k > NUMPY_GUIDED_RATIO * k * (k + 1)
+                if k <= _GUIDED_MAX_K
+                else False
+            )
+            guided = (u > 0) & (rem < GUIDED_MAX_TOTAL) & wide
             gap[guided] = _gap_bisect_numpy(rem[guided], k, u[guided])
             gap[~guided] = _gap_loop_numpy(rem[~guided], k, u[~guided])
         rank[live] += gap + 1
