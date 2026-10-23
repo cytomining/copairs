@@ -12,15 +12,16 @@ import numba
 import numpy as np
 
 from copairs.nulls import philox, sampler
+from copairs.fastap import ranking
 from copairs._numba_cache import cached_njit
 from copairs.nulls.common import split_segments, segment_batches
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
 from copairs.fastap.ranking import upper_bound
 
-# The kernels compile functions of these files; Numba's cache would only see
-# this one (see copairs._numba_cache).
-_SOURCES = (__file__, philox.__file__, sampler.__file__)
+# The kernels compile functions of these files (the counts' upper_bound is in
+# ranking.py); Numba's cache would only see this one (see copairs._numba_cache).
+_SOURCES = (__file__, philox.__file__, sampler.__file__, ranking.__file__)
 
 _gap_loop_nb = cached_njit(_SOURCES)(gap_loop)
 _ap_sample_nb = cached_njit(_SOURCES)(

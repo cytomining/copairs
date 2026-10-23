@@ -728,3 +728,60 @@ def test_numba_cache_follows_edits_to_compiled_files(tmp_path, name, old, new):
     assert after["numba"] != before["numba"]
     if name == "philox.py":  # the NumPy sampler shares Philox, not gap_loop
         assert after["numba"] == after["numpy"] != before["numpy"]
+
+
+# Numba p-values and the cache hits of the count kernel, for a copy of copairs
+# in the directory argv[1].
+_COUNT_CACHE_PROBE = """
+import sys, json
+import numpy as np
+import copairs
+from copairs import nulls
+from copairs.nulls import _numba
+
+assert copairs.__file__.startswith(sys.argv[1]), copairs.__file__
+confs = np.array([[1, 7], [3, 10], [9, 49], [3, 1000]])
+scores = np.linspace(0.05, 0.95, 12)
+p = nulls.ap_pvalues(scores, np.arange(12) % 4, confs, 200, 0, backend="numba")
+hits = sum(_numba._count_ge_kernel.stats.cache_hits.values())
+print(json.dumps({"pvalues": p.tolist(), "hits": hits}))
+"""
+
+
+def test_numba_count_cache_follows_edits_to_upper_bound(tmp_path):
+    """The Numba counts follow edits to the binary search they compile.
+
+    The count kernel inlines ``upper_bound``, defined in another file. After
+    an edit to it, the next process must count as one with an empty cache
+    does, while a process after an unchanged one loads the kernel from the
+    cache.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    package = Path(copairs.__file__).parent
+    defined_in = Path(_numba.upper_bound.py_func.__code__.co_filename)
+    shutil.copytree(
+        package, tmp_path / "copairs", ignore=shutil.ignore_patterns("__pycache__")
+    )
+
+    def run(cache):
+        done = subprocess.run(
+            [sys.executable, "-c", _COUNT_CACHE_PROBE, str(tmp_path)],
+            cwd=tmp_path,
+            env={**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / cache)},
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    before = run("cache")
+    assert run("cache")["hits"] == 1
+    source = tmp_path / "copairs" / defined_in.relative_to(package)
+    text = source.read_text()
+    assert text.count("v <= key)") == 1
+    source.write_text(text.replace("v <= key)", "v <= key + 0.25)"))
+    after = run("cache")
+    assert after["pvalues"] == run("empty_cache")["pvalues"] != before["pvalues"]
