@@ -706,14 +706,15 @@ def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
     assert len(set(alone)) > 1
 
 
+@pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("stop_after", [None, 20])
-def test_split_draws_do_not_change_pvalues(stop_after, monkeypatch):
+def test_split_draws_do_not_change_pvalues(stop_after, backend, monkeypatch):
     """A group's draws run as several tasks, on any threads, with the same p-values.
 
     Chunks of 32 split each group's 300 draws into 10 tasks (rounds of 32
     with stop_after, which here stops after 1 to 9 rounds), on 1 or 4
-    threads and with POOL_BUDGET = 1; the p-values match a run with the
-    default chunks on one thread.
+    threads and with POOL_BUDGET = 1; the p-values match a NumPy run with
+    the default chunks on one thread.
     """
     meta = plate_label_meta()
     feats = np.random.default_rng(15).standard_normal((len(meta), 5))
@@ -722,16 +723,16 @@ def test_split_draws_do_not_change_pvalues(stop_after, monkeypatch):
         (multilabel_ap(meta, feats, PLATE_SPEC), ["target"]),
     ]
 
-    def pvalues(workers):
+    def pvalues(workers, backend=backend):
         return [
             mean_average_precision(
                 ap, by, 300, 0.05, 0, progress_bar=False, max_workers=workers,
-                stop_after=stop_after,
+                stop_after=stop_after, backend=backend,
             )["p_value"].tolist()
             for ap, by in frames
         ]  # fmt: skip
 
-    expected = pvalues(1)
+    expected = pvalues(1, "numpy")
     calls, maps_of = [], permutation._Run.maps_of
 
     def counted(self, start, size):
@@ -825,11 +826,11 @@ def label_group(meta, feats, label, spec=ML_SPEC):
     return ap["average_precision"].mean(), layouts[0], pool, pairs
 
 
-def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0):
+def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0, backend="numpy"):
     """Observed mAP of ``label`` and the null's draws for it."""
     observed, layout, pool, _ = label_group(meta, feats, label, spec)
     out = np.empty(null_size)
-    run = permutation._label_run(*layout, pool, seed)
+    run = permutation._label_run(*layout, pool, seed, backend=backend)
     count, draws = run.count(null_size, out=out)
     assert draws == null_size
     return observed, run.identity, count, out
@@ -889,6 +890,64 @@ def test_label_vectorized_matches_scalar_draws(
     )
     assert permutation._label_maps_np(np_tables, identity[None])[0] == scalar
     assert scalar == pytest.approx(observed, abs=1e-12)
+
+
+@pytest.mark.parametrize("ranked", [True, False], ids=["ranked", "search"])
+@pytest.mark.parametrize("ties", [False, True], ids=["distinct", "tied"])
+@pytest.mark.parametrize("design, label", [
+    ("one-component", "A"), ("one-component", "B"), ("plates", "A"), ("plates", "C"),
+])  # fmt: skip
+def test_label_numba_matches_numpy_draws(design, label, ties, ranked, monkeypatch):
+    """Numba's label moves, mAPs and hits equal NumPy's, bit for bit, also stopped.
+
+    Pools up to RANK_POOL read a rank table, larger ones search sorted rows.
+    A run that stops at its stop_after-th hit ran the full run's first draws.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    if not ranked:
+        monkeypatch.setattr(permutation, "RANK_POOL", 0)
+    make_meta, spec, _ = LABEL_DESIGNS[design]
+    meta = make_meta()
+    feats = np.random.default_rng(len(meta) + ord(label)).standard_normal(
+        (len(meta), 6)
+    )
+    if ties:  # rounding ties many similarities and zeroes some profiles (NaN)
+        feats = np.round(feats)
+    _, group, pool, _ = label_group(meta, feats, label, spec)
+    members, edges, lone, _, block_of, key = group
+    assert pool.ranked == ranked
+    layout = permutation._LabelLayout(members, edges, lone, block_of, pool)
+    np_tables = permutation._LabelNumpyTables(layout, 300)
+    k0, k1 = permutation._label_key(3, members, key)
+    start = 2**32 - 50  # draws on both sides of the counter's word boundary
+    pm = permutation._draws_pool_np(layout, start, 300, k0, k1)
+    expected = permutation._label_maps_np(np_tables, pm)
+    kernels = (_numba._draw_pool_nb, _numba._label_group_map_nb)
+    got_pm, got_maps = scalar_draws(
+        layout, start, 300, k0, k1, label=True, kernels=kernels
+    )
+    np.testing.assert_array_equal(got_pm, pm)
+    np.testing.assert_array_equal(got_maps, expected)
+    for parallel in (True, False):  # on Numba's threads or the caller's
+        maps = _numba.label_maps(layout, start, 300, k0, k1, parallel)
+        np.testing.assert_array_equal(maps, expected)
+    identity = permutation._label_maps_np(np_tables, layout.member_code[None])[0]
+    assert _numba.label_identity(layout) == identity
+    full = np.empty(2000)
+    expected = permutation._label_run(*group, pool, 3).count(2000, out=full)
+    for backend, parallel in (("numpy", True), ("numba", True), ("numba", False)):
+        run = permutation._label_run(*group, pool, 3, 2000, backend, parallel)
+        assert run.identity == identity
+        out = np.full(2000, np.nan)
+        assert run.count(2000, out=out) == expected
+        np.testing.assert_array_equal(out, full)
+        out[:] = np.nan
+        count, draws = run.count(2000, 3, out)
+        hits = np.flatnonzero(full >= run.thr)
+        assert (count, draws) == ((3, hits[2] + 1) if len(hits) >= 3 else expected)
+        np.testing.assert_array_equal(out[:draws], full[:draws])
 
 
 @pytest.mark.parametrize("design, label", [
@@ -1071,13 +1130,19 @@ def test_labels_with_one_holder_set_draw_independently():
     )
 
 
-def test_label_pools_are_shared_and_workers_do_not_matter(monkeypatch):
-    """Labels on the same components share one pool; threads do not change p-values."""
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_label_pools_are_shared_and_workers_do_not_matter(backend, monkeypatch):
+    """Labels on the same components share one pool; threads do not change p-values.
+
+    Under the Numba backend, given 2 Numba threads, one thread runs each
+    label's draws on Numba's threads (the parallel kernel) and 4 threads
+    run the 3 labels' on their own.
+    """
     meta = plate_label_meta()
     feats = np.random.default_rng(15).standard_normal((len(meta), 5))
     ap = multilabel_ap(meta, feats, PLATE_SPEC)
     args = (["target"], 300, 0.05, 0)
-    built = []
+    built, parallel, launched = [], [], []
 
     class CountedPool(permutation._LabelPool):
         def __init__(self, comps, *args):
@@ -1085,18 +1150,40 @@ def test_label_pools_are_shared_and_workers_do_not_matter(monkeypatch):
             super().__init__(comps, *args)
 
     monkeypatch.setattr(permutation, "_LabelPool", CountedPool)
-    p = [
-        mean_average_precision(ap, *args, progress_bar=False, max_workers=w)[
-            "p_value"
-        ].tolist()
-        for w in (1, 4)
-    ]
+    if backend == "numba":
+        from copairs.nulls import _numba
+
+        maps, launch = _numba.label_maps, _numba._launch
+
+        def recorded(*args):
+            parallel.append(args[-1])
+            return maps(*args)
+
+        def recorded_launch(kernel, *args):
+            launched.append(kernel is _numba._label_maps_parallel)
+            return launch(kernel, *args)
+
+        monkeypatch.setattr(_numba, "threads", lambda: 2)
+        monkeypatch.setattr(_numba, "label_maps", recorded)
+        monkeypatch.setattr(_numba, "_launch", recorded_launch)
+    p, kernels = [], []
+    for w in (1, 4):
+        parallel.clear()
+        launched.clear()
+        p.append(
+            mean_average_precision(
+                ap, *args, progress_bar=False, max_workers=w, backend=backend
+            )["p_value"].tolist()
+        )
+        kernels.append((set(parallel), set(launched)))
     assert p[0] == p[1]
     assert built == [(0, 5)] * 2  # one pool of both plates per call
+    if backend == "numba":  # (draws in parallel, parallel kernels launched)
+        assert kernels == [({True}, {True}), ({False}, set())]
     alone = [
-        mean_average_precision(ap[ap["target"] == t], *args, progress_bar=False)[
-            "p_value"
-        ].item()
+        mean_average_precision(
+            ap[ap["target"] == t], *args, progress_bar=False, backend=backend
+        )["p_value"].item()
         for t in ("A", "B", "C")
     ]
     assert alone == p[0]
@@ -1124,22 +1211,24 @@ def sequential_expected(draws, identity, null_size, stop_after):
     return (len(hits) + 1) / (null_size + 1)
 
 
+@pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("stop_after", [1, 10, 400, 10**6])
-def test_stop_after_follows_the_draw_sequence(stop_after, monkeypatch):
+def test_stop_after_follows_the_draw_sequence(stop_after, backend, monkeypatch):
     """Stopped runs give stop_after / (draw of that hit), from the same draws.
 
-    The draws run are a prefix of the full run's, whatever the rounds; a
-    run that never reaches stop_after hits keeps the fixed-size p-value.
+    The draws run are a prefix of the full run's (on NumPy), whatever the
+    rounds; a run that never reaches stop_after hits keeps the fixed-size
+    p-value.
     """
     null_size = 5000
     meta = layout_meta(2, 2, 6)
     feats = np.random.default_rng(13).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
-    _, identity, _, full = draws_of(meta, feats, spec, null_size)
+    _, identity, _, full = draws_of(meta, feats, spec, null_size, backend="numpy")
     _, (members, edges, blocks, block_of), pairs = group_of_q(meta, feats, spec)
     pool = permutation._Pool(blocks, pairs.similarity)
     layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
-    run = permutation._Run(layout, permutation.group_key(0, members))
+    run = permutation._Run(layout, permutation.group_key(0, members), backend)
     assert run.identity == identity
     out = np.full(null_size, np.nan)
     count, draws = run.count(null_size, stop_after, out)
@@ -1152,15 +1241,14 @@ def test_stop_after_follows_the_draw_sequence(stop_after, monkeypatch):
         assert draws == null_size
     ap = average_precision(meta, feats, progress_bar=False, **spec)
     ap = ap.query("n_pos_pairs > 0 and g == 'q'")
-    res = mean_average_precision(
-        ap, ["g"], null_size, 0.05, 0, progress_bar=False, stop_after=stop_after
-    )
+    args = (ap, ["g"], null_size, 0.05, 0)
+    kwargs = dict(progress_bar=False, stop_after=stop_after, backend=backend)
+    res = mean_average_precision(*args, **kwargs)
     assert res["p_value"].iloc[0] == got
     monkeypatch.setattr(permutation, "_FIRST_ROUND", 7)
     monkeypatch.setattr(permutation._NumpyTables, "chunk", lambda self: 77)
-    rounds = mean_average_precision(
-        ap, ["g"], null_size, 0.05, 0, progress_bar=False, stop_after=stop_after
-    )
+    monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)
+    rounds = mean_average_precision(*args, **kwargs)
     assert rounds["p_value"].iloc[0] == got
 
 
@@ -1189,13 +1277,18 @@ def test_count_hits_at_round_edges(hits_at):
                 assert got == (len(hits), null_size)
 
 
-def test_stop_after_on_multilabel_groups(monkeypatch):
-    """Multilabel groups stop the same way, whatever the rounds."""
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_stop_after_on_multilabel_groups(backend, monkeypatch):
+    """Multilabel groups stop the same way, whatever the rounds.
+
+    The p-values follow the sequence of NumPy's draws.
+    """
     meta = label_meta()
     feats = np.random.default_rng(14).standard_normal((len(meta), 5))
     ap = multilabel_ap(meta, feats)
     args = (["target"], 3000, 0.05, 0)
-    res = mean_average_precision(ap, *args, progress_bar=False, stop_after=10)
+    kwargs = dict(progress_bar=False, stop_after=10, backend=backend)
+    res = mean_average_precision(ap, *args, **kwargs)
     for label in ("A", "B"):
         _, identity, count, full = label_draws(meta, feats, label, 3000)
         assert count >= 10  # the run stopped
@@ -1205,7 +1298,8 @@ def test_stop_after_on_multilabel_groups(monkeypatch):
     # past its first round.
     monkeypatch.setattr(permutation, "_FIRST_ROUND", 7)
     monkeypatch.setattr(permutation._LabelNumpyTables, "chunk", lambda self: 77)
-    rounds = mean_average_precision(ap, *args, progress_bar=False, stop_after=10)
+    monkeypatch.setattr(permutation, "_NUMBA_CHUNK", 77)
+    rounds = mean_average_precision(ap, *args, **kwargs)
     assert rounds["p_value"].tolist() == res["p_value"].tolist()
 
 

@@ -1,15 +1,16 @@
 """Numba kernels of the nulls and their p-value counts (optional dependency).
 
 Imported only through :func:`copairs.nulls.backend._import_numba_backend`. The
-AP null sampler, the joint mAP null and the label-permutation mAP null compile
-the scalar reference functions of :mod:`copairs.nulls.sampler`,
-:mod:`copairs.nulls.joint` and :mod:`copairs.nulls.permutation` unchanged, so
-their samples are bitwise identical to the NumPy backend's.
+AP null sampler, the joint mAP null and the label-permutation mAP null (of
+single-label and multilabel groups) compile the scalar reference functions of
+:mod:`copairs.nulls.sampler`, :mod:`copairs.nulls.joint` and
+:mod:`copairs.nulls.permutation` unchanged, so their samples are bitwise
+identical to the NumPy backend's.
 
 Callers may run these kernels from several threads (user threads, the
 permutation null's pool of groups). Parallel kernels launch one at a time
-(:func:`_launch`); the permutation null also has a serial kernel that runs
-on the calling thread without the GIL, so threads can run groups at once.
+(:func:`_launch`); the permutation null also has serial kernels that run on
+the calling thread without the GIL, so threads can run groups at once.
 """
 
 import threading
@@ -45,6 +46,9 @@ _joint_sample_nb, _, _ = joint._make_sampler(
     _philox_nb, _uniform_nb, cached_njit(_JOINT_SOURCES)
 )
 _draw_nb, _group_map_nb = permutation._make_kernels(
+    _philox_nb, _uniform_nb, cached_njit(_PERMUTATION_SOURCES)
+)
+_draw_pool_nb, _label_group_map_nb = permutation._make_label_kernels(
     _philox_nb, _uniform_nb, cached_njit(_PERMUTATION_SOURCES)
 )
 # Samples or draws per parallel task; each task allocates its scratch once.
@@ -310,4 +314,70 @@ def permutation_maps(layout, start, size, k0, k1, parallel=True):
         _launch(_permutation_maps_parallel, *args)
     else:
         _permutation_maps(*args, 0, size)
+    return out
+
+
+@cached_njit(_PERMUTATION_SOURCES, nogil=True)
+def _label_maps(
+    n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, n, adjm, deg, keys,
+    rank_table, ranked, nptr, nrow, nbits, loc, lone, gptr, grow, start, out,
+    lo, hi,
+):  # fmt: skip
+    """Fill ``out[t]``, ``lo <= t < hi``, with the mAP of multilabel draw ``start + t``."""
+    max_k = max(1, np.max(np.diff(bm_ptr)))
+    pm = np.empty(n, dtype=np.int64)
+    chosen = np.empty(max_k, dtype=np.int64)
+    ent = np.empty(n, dtype=np.uint64)
+    rank = np.empty(n, dtype=np.int32)
+    inb = np.empty(n, dtype=np.bool_)
+    term = np.empty(n, dtype=np.float64)
+    for t in range(lo, hi):
+        _draw_pool_nb(
+            start + t, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen
+        )
+        out[t] = _label_group_map_nb(
+            pm, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits, loc,
+            lone, gptr, grow, ent, rank, inb, term,
+        )  # fmt: skip
+
+
+@cached_njit(_PERMUTATION_SOURCES, parallel=True, nogil=True)
+def _label_maps_parallel(
+    n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, n, adjm, deg, keys,
+    rank_table, ranked, nptr, nrow, nbits, loc, lone, gptr, grow, start, out,
+):  # fmt: skip
+    """:func:`_label_maps` of all of ``out``, in parallel over its draws."""
+    size = len(out)
+    n_tasks = (size + _PERMUTATION_TASK - 1) // _PERMUTATION_TASK
+    for task in numba.prange(n_tasks):
+        t0 = task * _PERMUTATION_TASK
+        _label_maps(
+            n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, n, adjm, deg, keys,
+            rank_table, ranked, nptr, nrow, nbits, loc, lone, gptr, grow, start,
+            out, t0, min(size, t0 + _PERMUTATION_TASK),
+        )  # fmt: skip
+
+
+def label_identity(layout):
+    """Return the mAP of ``layout``'s multilabel group under its observed labels."""
+    n = layout.n
+    scratch = (
+        np.empty(n, np.uint64), np.empty(n, np.int32), np.empty(n, np.bool_),
+        np.empty(n, np.float64),
+    )  # fmt: skip
+    identity = np.asarray(layout.identity, dtype=np.int64)
+    return float(_label_group_map_nb(identity, *layout.map_args(), *scratch))
+
+
+def label_maps(layout, start, size, k0, k1, parallel=True):
+    """float64 mAPs of multilabel draws ``start, ..., start + size - 1``.
+
+    ``parallel`` as in :func:`permutation_maps`.
+    """
+    out = np.empty(size, dtype=np.float64)
+    args = (*layout.draw_args(), k0, k1, *layout.map_args(), start, out)
+    if parallel:
+        _launch(_label_maps_parallel, *args)
+    else:
+        _label_maps(*args, 0, size)
     return out

@@ -600,16 +600,28 @@ ap = ap[ap["g"] == "q"]
 perm = mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False)
 joint = mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False,
                                null="joint")
+# And the permutation null of multilabel APs.
+targets = pd.DataFrame({"target": [["A"], ["A", "B"], ["B"], ["A"], ["B"], []]})
+targets["target"] = [t + [f"own{i}"] for i, t in enumerate(targets["target"])]
+labelled = copairs.map.multilabel.average_precision(
+    targets, feats[:6], ["target"], [], [], ["target"], multilabel_col="target",
+    progress_bar=False,
+)
+labelled = labelled[labelled["target"].isin(["A", "B"])]
+label = mean_average_precision(labelled, ["target"], 100, 0.05, 0,
+                               progress_bar=False)
 assert "numba" not in sys.modules
-for null in ("permutation", "joint"):
+for null, frame, by in (("permutation", ap, "g"), ("joint", ap, "g"),
+                        ("permutation", labelled, "target")):
     try:
-        mean_average_precision(ap, ["g"], 100, 0.05, 0, progress_bar=False,
+        mean_average_precision(frame, [by], 100, 0.05, 0, progress_bar=False,
                                null=null, backend="numba")
     except ImportError as exc:
         assert "copairs[numba]" in str(exc), exc
     else:
         raise AssertionError(f"backend='numba' ran the {null} null without numba")
-print(list(p), list(m["p_value"]), list(perm["p_value"]), list(joint["p_value"]))
+print(list(p), list(m["p_value"]), list(perm["p_value"]), list(joint["p_value"]),
+      list(label["p_value"]))
 """
     )
     assert out.strip()

@@ -93,8 +93,9 @@ def get_map_pvalue(
         Backend of the fast method's nulls: ``"auto"`` (default), ``"numba"``
         or ``"numpy"``. ``"numba"`` compiles the scalar functions that define
         each null's draws (the copied null's AP samples, the joint null's
-        samples, the permutation null's relabellings and their mAPs), and
-        ``"numpy"`` computes the same draws vectorized. The two give
+        samples, the permutation null's relabellings, or label moves on
+        multilabel APs, and their mAPs), and ``"numpy"`` computes the same
+        draws vectorized. The two give
         bitwise-identical draws and p-values, so ``"auto"`` picks Numba
         when it imports (:func:`copairs.nulls.resolve_backend`). Ignored by
         ``method="legacy"``.
@@ -264,6 +265,7 @@ def get_map_pvalue(
             progress_bar=progress_bar,
             max_workers=max_workers,
             stop_after=stop_after,
+            backend=backend,
         )
         if isinstance(pairs, LabelPairs):
             map_scores["p_value"] = permutation.label_permutation_pvalues(
@@ -272,8 +274,7 @@ def get_map_pvalue(
         else:
             map_scores["p_value"] = permutation.permutation_pvalues(
                 groups, profile, *counts, pairs.pos, pairs.neg, pairs.similarity,
-                null_size, seed, pos_diffby=pairs.pos_diffby, backend=backend,
-                **options,
+                null_size, seed, pos_diffby=pairs.pos_diffby, **options,
             )  # fmt: skip
         return map_scores
 

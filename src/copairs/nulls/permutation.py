@@ -31,8 +31,8 @@ A multilabel group (:func:`label_permutation_pvalues`) holds one label of a
 multilabel column, and its pools are whole components of the graph of
 negative pairs, members included: a draw moves the label to as many of each
 component's profiles as hold it there. :func:`_make_label_kernels` defines
-its draws, and :func:`_draws_pool_np` and :func:`_label_maps_np` are their
-vectorized twins.
+its draws, :func:`_draws_pool_np` and :func:`_label_maps_np` are their
+vectorized twins, and Numba compiles them as it does the single-label ones.
 """
 
 from typing import NamedTuple
@@ -1647,6 +1647,11 @@ class _LabelLayout:
         """Return the NumPy backend's :class:`_LabelNumpyTables` for ``draws`` draws."""
         return _LabelNumpyTables(self, draws)
 
+    @staticmethod
+    def compiled(kernels):
+        """``(identity, maps)`` of the Numba backend, from :mod:`copairs.nulls._numba`."""
+        return kernels.label_identity, kernels.label_maps
+
 
 class _LabelNumpyTables:
     """The tables :func:`_label_maps_np` gathers from besides its layout's.
@@ -1896,18 +1901,23 @@ def _local_pairs(found, segments, key, local, label):
     return ends
 
 
-def _label_run(members, edges, lone, comps, block_of, key, pool, seed, draws=0):
+def _label_run(
+    members, edges, lone, comps, block_of, key, pool, seed, draws=0,
+    backend="numpy", parallel=True,
+):  # fmt: skip
     """Return a multilabel group's ``_Run`` on ``pool``, the ``_LabelPool`` of its ``comps``.
 
-    ``draws`` is the number of draws it will run (:class:`_LabelNumpyTables`).
+    ``draws`` is the number of draws it will run (:class:`_LabelNumpyTables`);
+    ``backend`` and ``parallel`` as in :class:`_Run`.
     """
     layout = _LabelLayout(members, edges, lone, block_of, pool)
-    return _Run(layout, _label_key(seed, members, key), draws=draws)
+    key = _label_key(seed, members, key)
+    return _Run(layout, key, backend, draws, parallel)
 
 
 def label_permutation_pvalues(
     groups, rows, num_pos, num_total, pairs, null_size, seed, observed=None,
-    progress_bar=False, max_workers=None, stop_after=None,
+    progress_bar=False, max_workers=None, stop_after=None, backend="auto",
 ):  # fmt: skip
     """P-value of each multilabel group's mAP against moves of its label.
 
@@ -1926,7 +1936,7 @@ def label_permutation_pvalues(
     rows : np.ndarray
         The AP table's index (rows of ``pairs.profile``), which also gives
         each row's label (``pairs.row_key``).
-    num_pos, num_total, null_size, seed, observed, progress_bar, max_workers, stop_after
+    num_pos, num_total, null_size, seed, observed, progress_bar, max_workers, stop_after, backend
         As in :func:`permutation_pvalues`; pools are components' profiles.
     pairs : copairs.map.LabelPairs
         The pairs the APs were computed from. Layouts whose draws could
@@ -1940,6 +1950,7 @@ def label_permutation_pvalues(
     null_size = check_null_size(null_size)
     seed = resolve_seed(seed)
     stop_after = check_stop_after(stop_after)
+    backend = resolve_backend(backend)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
@@ -1965,7 +1976,7 @@ def label_permutation_pvalues(
         return _LabelPool(comps, comp_profiles, nbr_ptr, nbr, pairs.similarity, table)
 
     def start(g, pool, parallel):
-        run = _label_run(*layouts[g], pool, seed, null_size)
+        run = _label_run(*layouts[g], pool, seed, null_size, backend, parallel)
         _check_identity(g, run.identity, observed)
         return run
 
@@ -1975,5 +1986,5 @@ def label_permutation_pvalues(
     }
     return _run_groups(
         keys, refs, pairs.similarity, build, pool_bytes, start, null_size,
-        stop_after, progress_bar, max_workers, "numpy",
+        stop_after, progress_bar, max_workers, backend,
     )  # fmt: skip

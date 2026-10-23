@@ -16,6 +16,7 @@ import copairs
 import copairs.map.map as map_module
 from copairs import compute
 from copairs.map import (
+    multilabel,
     get_map_pvalue,
     average_precision,
     mean_average_precision,
@@ -234,6 +235,32 @@ def plate_aps(groups=12, reps=3, ctrls=15, plates=3, seed=0):
     return ap[~ap["ctrl"]]
 
 
+def plate_label_aps(compounds=20, labels=6, plates=3, seed=0):
+    """Multilabel APs of ``labels`` targets, ranked against the same plate.
+
+    Holders of the first two targets share a shift; each compound also has
+    a label of its own, which makes no pairs.
+    """
+    rng = np.random.default_rng(seed)
+    has = rng.random((compounds * plates, labels)) < 0.15
+    meta = pd.DataFrame(
+        {
+            "target": [
+                [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"]
+                for i, h in enumerate(has)
+            ],
+            "plate": np.repeat(np.arange(plates), compounds),
+        }
+    )
+    feats = rng.standard_normal((len(meta), 8))
+    feats += 0.8 * has[:, :2] @ rng.standard_normal((2, 8))
+    ap = multilabel.average_precision(
+        meta, feats, ["target"], [], ["plate"], ["target"], multilabel_col="target",
+        progress_bar=False,
+    )  # fmt: skip
+    return ap[ap["target"].str.startswith("L")]
+
+
 @pytest.mark.parametrize("null", ["permutation", "joint"])
 def test_backends_give_identical_pvalues(null):
     """The mAP nulls' p-values are bitwise identical on NumPy and Numba.
@@ -251,13 +278,51 @@ def test_backends_give_identical_pvalues(null):
     assert 0 < got["numpy"]["below_p"].sum() < len(got["numpy"])
 
 
+@pytest.mark.parametrize("stop_after", [None, 10])
+def test_backends_give_identical_label_pvalues(stop_after, monkeypatch):
+    """Multilabel groups' permutation p-values are bitwise identical on both backends.
+
+    Also when runs stop at their stop_after-th hit; the Numba backend runs
+    its label kernels.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    calls, maps = [], _numba.label_maps
+
+    def spy(*args):
+        calls.append(args[-1])
+        return maps(*args)
+
+    monkeypatch.setattr(_numba, "label_maps", spy)
+    ap = plate_label_aps()
+    kwargs = dict(
+        null_size=3000, threshold=0.05, seed=7, progress_bar=False,
+        stop_after=stop_after,
+    )  # fmt: skip
+    got = {
+        b: mean_average_precision(ap, ["target"], backend=b, **kwargs)
+        for b in ("numpy", "numba")
+    }
+    pd.testing.assert_frame_equal(got["numba"], got["numpy"])
+    assert len(got["numpy"]) == 6
+    assert 0 < got["numpy"]["below_p"].sum() < len(got["numpy"])
+    assert calls  # the Numba run's draws ran in its label kernels
+    if stop_after is not None:  # some labels stopped: p is not (hits + 1) / 3001
+        scaled = got["numpy"]["p_value"].to_numpy() * 3001
+        assert not np.allclose(scaled, np.round(scaled), rtol=0, atol=1e-6)
+
+
 def test_auto_backend_runs_numba_kernels(monkeypatch):
-    """With Numba importable, backend="auto" runs the joint and permutation kernels."""
+    """With Numba importable, backend="auto" runs the joint and permutation kernels.
+
+    Multilabel groups run the permutation null's label kernels.
+    """
     pytest.importorskip("numba")
     from copairs.nulls import _numba
 
     calls = []
-    for name in ("joint_nulls", "permutation_maps"):
+    for name in ("joint_nulls", "permutation_maps", "label_maps"):
 
         def spy(*args, _real=getattr(_numba, name), _name=name):
             calls.append(_name)
@@ -266,11 +331,14 @@ def test_auto_backend_runs_numba_kernels(monkeypatch):
         monkeypatch.setattr(_numba, name, spy)
     ap = plate_aps(groups=4)
     kwargs = dict(null_size=500, threshold=0.05, seed=0, progress_bar=False)
+    labelled = plate_label_aps()
     for null in ("joint", "permutation"):
         mean_average_precision(ap, ["g"], null=null, **kwargs)
-    assert set(calls) == {"joint_nulls", "permutation_maps"}
+    mean_average_precision(labelled, ["target"], **kwargs)
+    assert set(calls) == {"joint_nulls", "permutation_maps", "label_maps"}
     calls.clear()
     mean_average_precision(ap, ["g"], null="permutation", backend="numpy", **kwargs)
+    mean_average_precision(labelled, ["target"], backend="numpy", **kwargs)
     assert calls == []
 
 
@@ -288,7 +356,7 @@ import numba
 import numpy as np
 import pandas as pd
 from copairs import compute
-from copairs.map import average_precision, mean_average_precision
+from copairs.map import multilabel, average_precision, mean_average_precision
 
 rows = []
 for p in range(3):
@@ -302,6 +370,18 @@ ap = average_precision(
 )
 ap = ap[~ap["ctrl"]]
 confs = ap[["n_pos_pairs", "n_total_pairs"]].to_numpy()
+targets = [sorted({f"L{(i * 7 + p) % 6}", f"L{(i * 5 + 2 * p) % 6}"}) + [f"own{p}.{i}"]
+           for p in range(3) for i in range(20)]
+# Negatives on any plate: the label null takes its lone pairs from the
+# positives. Under other negative rules it finds them with DuckDB
+# (find_pairs_multilabel), whose default connection hangs when threads
+# query it at once.
+labelled = multilabel.average_precision(
+    pd.DataFrame({"target": targets}),
+    np.random.default_rng(1).standard_normal((60, 8)), ["target"], [], [],
+    ["target"], multilabel_col="target", progress_bar=False,
+)
+labelled = labelled[labelled["target"].str.startswith("L")]
 kw = dict(threshold=0.05, seed=0, progress_bar=False, backend="numba")
 calls = {
     "joint": lambda: mean_average_precision(ap, ["g"], 20000, null="joint", **kw),
@@ -312,6 +392,11 @@ calls = {
         ap, ["g"], 20000, max_workers=1, **kw
     ),
     "copied": lambda: mean_average_precision(ap, ["g"], 20000, null="copied", **kw),
+    # 6 labels on 2 Numba threads, then one at a time, as "permutation"
+    "label": lambda: mean_average_precision(labelled, ["target"], 20000, **kw),
+    "label-1": lambda: mean_average_precision(
+        labelled, ["target"], 20000, max_workers=1, **kw
+    ),
     "ap": lambda: compute.p_values(
         ap["average_precision"].to_numpy(), confs, 20000, 0, progress_bar=False,
         backend="numba",
