@@ -27,11 +27,11 @@ import hashlib
 import numpy as np
 
 from copairs.nulls.common import (
-    TIE_TOL,
     chunks,
     progress,
     group_edges,
     resolve_seed,
+    tie_thresholds,
     check_null_size,
     check_pair_counts,
 )
@@ -691,7 +691,8 @@ def permutation_null(
     """Run ``null_size`` label permutations of one group.
 
     Returns ``(count, identity, pool)``: the draws whose mAP ties or exceeds
-    the observed labels' (``identity``, within :data:`TIE_TOL`), that mAP,
+    the observed labels' (``identity``, within
+    :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP,
     and the reference pool, reusable by groups ranking the same references.
     ``out`` receives the draws' mAPs if given.
     """
@@ -700,13 +701,14 @@ def permutation_null(
     layout = _Layout(members, edges, blocks, block_of, similarity, pool)
     k0, k1 = group_key(seed, members)
     identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
+    thr = float(tie_thresholds(identity))
     count = 0
     chunk = layout.chunk()
     for start, size in chunks(int(null_size), chunk):
         maps = _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
         if out is not None:
             out[start : start + size] = maps
-        count += int((maps >= identity - TIE_TOL).sum())
+        count += int((maps >= thr).sum())
     return count, identity, pool
 
 
@@ -730,9 +732,10 @@ def permutation_pvalues(
     similarity : callable
         The ``pairs -> similarities`` function the APs were computed with.
     null_size, seed
-        Draws per group and seed. ``p = (1 + #{draw >= mAP - tol}) /
-        (null_size + 1)``, with the mAP of the observed labels recomputed from
-        the pairs and ``tol`` = :data:`TIE_TOL`.
+        Draws per group and seed. ``p = (1 + #{draw >= thr}) /
+        (null_size + 1)``, with ``thr`` the
+        :func:`~copairs.nulls.common.tie_thresholds` of the observed labels'
+        mAP, recomputed from the pairs.
     observed : np.ndarray, optional
         Each group's mAP from the AP table; a group whose recomputed mAP
         differs by more than 1e-6 raises, since then its pairs or similarity

@@ -10,7 +10,7 @@ import pytest
 from scipy import stats
 
 from copairs.map import average_precision, mean_average_precision
-from copairs.nulls import permutation
+from copairs.nulls import permutation, tie_thresholds
 
 SPEC = dict(pos_sameby=["g"], pos_diffby=[], neg_sameby=[], neg_diffby=["g"])
 LAYOUTS = [
@@ -159,7 +159,7 @@ def test_hits_match_scalar_draws():
     )
     layout = permutation._Layout(*members, pairs.similarity, pool)
     _, maps = scalar_draws(layout, 0, 700, *permutation.group_key(5, members[0]))
-    assert count == (maps >= identity - permutation.TIE_TOL).sum()
+    assert count == (maps >= tie_thresholds(identity)).sum()
     assert 0 < count < 700
 
 
