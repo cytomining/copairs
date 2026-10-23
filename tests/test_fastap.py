@@ -71,8 +71,11 @@ def test_ap_from_pairs_histogram_chunks():
     neg_sims = rng.random(len(neg)).astype(np.float32)
     whole = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims, budget_bytes=1)
     split = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)
-    for w, s in zip(whole, split):
+    # More profiles than the pairs index: the extra ones have no pairs
+    sized = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims, n=130)
+    for w, s, z in zip(whole, split, sized):
         np.testing.assert_array_equal(w, s)
+        np.testing.assert_array_equal(z, s)
 
 
 def test_ap_from_pairs_accepts_series_similarities():

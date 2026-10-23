@@ -74,14 +74,7 @@ def pair_csr(pairs, sims, n):
 @numba.njit(parallel=True, cache=True)
 def _sort_segments(ptr, vals):
     for i in numba.prange(len(ptr) - 1):
-        vals[ptr[i] : ptr[i + 1]] = np.sort(vals[ptr[i] : ptr[i + 1]])
-
-
-def _positive_csr(pairs, sims, n):
-    """Positive rank keys of each profile, sorted, in CSR layout."""
-    ptr, vals = pair_csr(pairs, sims, n)
-    _sort_segments(ptr, vals)
-    return ptr, vals
+        vals[ptr[i] : ptr[i + 1]].sort()
 
 
 @numba.njit(inline="always")
@@ -96,16 +89,16 @@ def ap_from_counts(hist, base, num_pos):
 
 
 @numba.njit(parallel=True, cache=True)
-def _negative_hist(neg_pairs, neg_sims, ptr, vals, n, n_chunks):
+def _negative_hist(neg_pairs, neg_sims, ptr, vals, hist, n_neg):
     """Per-profile histograms of negatives over the gaps between positive keys.
 
     Bin ``ptr[i] + i + q`` counts the negatives of profile ``i`` whose key lies
     between its ``q``-th and ``q + 1``-th smallest positive keys (ties go after
-    the positive). Each chunk of pairs fills its own histogram row.
+    the positive). Each chunk of pairs fills its own row of the zeroed
+    ``hist`` and ``n_neg``.
     """
     size = len(neg_pairs)
-    hist = np.zeros((n_chunks, ptr[n] + n), dtype=np.int64)
-    n_neg = np.zeros((n_chunks, n), dtype=np.int64)
+    n_chunks = len(hist)
     step = (size + n_chunks - 1) // n_chunks
     for c in numba.prange(n_chunks):
         for p in range(c * step, min(size, (c + 1) * step)):
@@ -114,7 +107,6 @@ def _negative_hist(neg_pairs, neg_sims, ptr, vals, n, n_chunks):
                 i = neg_pairs[p, side]
                 hist[c, upper_bound(vals, ptr[i], ptr[i + 1], key) + i] += 1
                 n_neg[c, i] += 1
-    return hist.sum(axis=0), n_neg.sum(axis=0)
 
 
 @numba.njit(parallel=True, cache=True)
@@ -135,6 +127,7 @@ def ap_from_pairs(
     pos_sims: np.ndarray,
     neg_sims: np.ndarray,
     budget_bytes: int = 2**30,
+    n: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Average precision of every profile that appears in a pair.
 
@@ -149,6 +142,9 @@ def ap_from_pairs(
         Similarities of the pairs, ranked by their float32 ``1 - similarity``.
     budget_bytes : int
         Upper bound on the per-thread negative histograms.
+    n : int, optional
+        Number of profiles, more than any index in the pairs; found from the
+        pairs when not given.
 
     Returns
     -------
@@ -159,17 +155,23 @@ def ap_from_pairs(
     null_confs : np.ndarray
         ``(n, 2)`` uint32 ``(num_pos, total)`` of each profile in ``paired_ix``.
     """
-    n = 1 + max(
-        int(pairs.max()) if pairs.size else -1 for pairs in (pos_pairs, neg_pairs)
-    )
+    if n is None:
+        n = 1 + max(
+            int(pairs.max()) if pairs.size else -1 for pairs in (pos_pairs, neg_pairs)
+        )
     pos_pairs, neg_pairs = index_pairs(pos_pairs), index_pairs(neg_pairs)
-    ptr, vals = _positive_csr(pos_pairs, np.asarray(pos_sims), n)
+    ptr, vals = pair_csr(pos_pairs, np.asarray(pos_sims), n)
+    _sort_segments(ptr, vals)
     bins = int(ptr[n]) + n
-    n_chunks = budget_bytes // (8 * (bins + n))
+    # A bin or count of one chunk is at most 2 per negative pair (a self-pair).
+    dtype = np.int32 if 2 * len(neg_pairs) <= np.iinfo(np.int32).max else np.int64
+    n_chunks = budget_bytes // (np.dtype(dtype).itemsize * (bins + n))
     n_chunks = max(1, min(numba.get_num_threads(), n_chunks))
-    hist, n_neg = _negative_hist(
-        neg_pairs, np.asarray(neg_sims), ptr, vals, n, n_chunks
-    )
+    hist = np.zeros((n_chunks, bins), dtype=dtype)
+    n_neg = np.zeros((n_chunks, n), dtype=dtype)
+    _negative_hist(neg_pairs, np.asarray(neg_sims), ptr, vals, hist, n_neg)
+    # Summed in int64
+    hist, n_neg = hist.sum(axis=0, dtype=np.int64), n_neg.sum(axis=0, dtype=np.int64)
     ap = _ap_from_hist(ptr, hist, n)
     num_pos = np.diff(ptr)
     total = num_pos + n_neg

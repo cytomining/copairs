@@ -228,7 +228,7 @@ def average_precision(
         # Count each positive's preceding negatives instead of sorting
         logger.info("Computing average precision...")
         paired_ix, ap_scores, null_confs = fastap.ap_from_pairs(
-            pos_pairs, neg_pairs, pos_sims, neg_sims
+            pos_pairs, neg_pairs, pos_sims, neg_sims, n=len(meta)
         )
     else:
         # Build rank lists for calculating average precision
