@@ -287,8 +287,8 @@ def _copied_pvalues(
     cache_dir,
     progress_bar,
     max_workers,
-    method="fast",
-    backend="auto",
+    method,
+    backend,
 ):
     """P-values against the mean of the members' AP nulls, as in copairs <= 0.5.5.
 
