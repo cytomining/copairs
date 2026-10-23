@@ -136,4 +136,5 @@ def draw_average_precisions(
         sims = sims.reshape(-1, k + m)
         n_tasks = max(1, min(len(sims), 4 * numba.get_num_threads()))
         _row_ap(sims, k, out[sl].reshape(-1), n_tasks)
+        del rows, sims  # free this chunk before gathering the next one
     return out

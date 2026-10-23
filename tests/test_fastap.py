@@ -389,6 +389,36 @@ def test_draw_average_precisions_large_norms():
     np.testing.assert_array_equal(got, expected)
 
 
+def test_draw_average_precisions_chunks_do_not_overlap():
+    """Each chunk's gathered rows are freed before the next chunk's are built.
+
+    The peak with 40 chunks exceeds the peak with one chunk only by the
+    index and output arrays that grow with the number of draws.
+    """
+    rng = np.random.default_rng(11)
+    feats = rng.normal(size=(50, 256)).astype(np.float32)
+    feats /= np.linalg.norm(feats, axis=1, keepdims=True)
+    k, m, step = 4, 46, 10
+    budget = step * 4 * (k + m) * (feats.shape[1] + k)
+
+    def peak(n_draws):
+        q = np.stack([rng.choice(50, k, replace=False) for _ in range(n_draws)])
+        r = np.stack([rng.choice(50, m, replace=False) for _ in range(n_draws)])
+        args = (feats, q, r)
+        fastap.draw_average_precisions(*args, normalized=True, budget_bytes=budget)
+        tracemalloc.start()
+        try:
+            fastap.draw_average_precisions(*args, normalized=True, budget_bytes=budget)
+            return tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+    one, many = peak(step), peak(40 * step)
+    rows = step * (k + m) * feats.shape[1] * 4  # one chunk's gathered features
+    grown = 39 * step * (k + m + k) * 8  # idx and out of the extra draws
+    assert many - one < grown + rows / 2, (one, many, grown, rows)
+
+
 def test_draw_average_precisions_nonfinite_normalized():
     """Pre-normalized features are still checked: NaN would break the ranking."""
     feats = np.eye(4, dtype=np.float32)
