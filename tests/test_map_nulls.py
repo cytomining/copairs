@@ -32,9 +32,57 @@ def test_copied_null_averages_configuration_nulls(tmp_path):
     )
     for g, p in zip(got["g"], got["p_value"]):
         rows = np.flatnonzero(frame["g"] == g)
-        null = null_dists[rev_ix.ravel()[rows]].mean(axis=0)
+        null = null_dists[rev_ix.ravel()[rows]].mean(axis=0, dtype=np.float64)
         score = frame["average_precision"].iloc[rows].mean()
-        assert p == ((null > score).sum() + 1) / 501
+        assert p == ((null >= score - 1e-6 * score).sum() + 1) / 501
+
+
+def perfect_retrieval_scores():
+    """Return two groups of two replicates (one positive each) among 100 profiles."""
+    return ap_frame([("a", 1.0, 1, 100)] * 2 + [("b", 0.5, 1, 100)] * 2)
+
+
+def test_map_pvalue_counts_ties(tmp_path):
+    """An mAP equal to a null atom counts the atom.
+
+    Under the copied null P(mAP >= 1) = P(AP >= 1) = 1/100. Under the joint
+    null, given the shared similarity u each member's rank - 1 is
+    Binomial(99, 1 - u): both APs are 1 with probability int u^198 = 1/199, and
+    mAP >= 0.5 needs one rank of 1 or both of 2.
+    """
+    kwargs = dict(null_size=100_000, threshold=0.05, seed=0, progress_bar=False)
+    both_two = 99**2 * 2 / (197 * 198 * 199)  # int (99 (1 - u) u^98)^2 du
+    for null, expected in (
+        ("copied", np.array([0.01, 0.02])),
+        ("joint", np.array([1 / 199, 2 / 100 - 1 / 199 + both_two])),
+    ):
+        got = mean_average_precision(
+            perfect_retrieval_scores(), ["g"], null=null, cache_dir=tmp_path, **kwargs
+        )
+        se = np.sqrt(expected * (1 - expected) / kwargs["null_size"])
+        assert (np.abs(got["p_value"].to_numpy() - expected) < 5 * se).all()
+
+
+@pytest.mark.parametrize("null", ["copied", "joint"])
+def test_float32_scores_count_ties(null, tmp_path):
+    """float32-rounded scores still tie with the null atoms they round from.
+
+    With one positive among 3, AP is 1, 1/2 or 1/3, so every null value is
+    ``>= 1/3`` and the p-value of an mAP of 1/3 is exactly 1.
+    """
+    scores = pd.DataFrame(
+        {
+            "g": ["a", "a"],
+            "average_precision": np.float32([1 / 3, 1 / 3]),
+            "normalized_average_precision": 0.0,
+            "n_pos_pairs": 1,
+            "n_total_pairs": 3,
+        }
+    )
+    got = mean_average_precision(
+        scores, ["g"], 1000, 0.05, 0, progress_bar=False, null=null, cache_dir=tmp_path
+    )
+    assert got["p_value"].iloc[0] == 1.0
 
 
 def test_unknown_null():

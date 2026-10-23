@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs.nulls import tie_thresholds
 from copairs.methods import check_null
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
@@ -36,7 +37,10 @@ def get_map_pvalue(
 
     This function groups AP scores by the specified columns, computes the mean
     Average Precision (mAP) for each group, and calculates p-values by comparing
-    against the null distribution of the group's mAP chosen by `null`.
+    against the null distribution of the group's mAP chosen by `null`. A null
+    mAP counts against the group when it is ``>=`` the group's mAP, so an mAP
+    equal to an atom of the null (e.g. perfect retrieval) counts the atom; values
+    within the scores' rounding count as ties (`copairs.nulls.tie_thresholds`).
 
     Parameters
     ----------
@@ -142,9 +146,11 @@ def get_map_pvalue(
     if unique:
         compute.parallel_map(par_func, np.arange(len(unique)), progress_bar)
 
+    thresholds = tie_thresholds(scores)
+
     def get_p_value(k):
         null_dist = null_of[signatures[k]]
-        num = null_size - np.searchsorted(null_dist, scores[k] - 1e-9, side="left")
+        num = null_size - np.searchsorted(null_dist, thresholds[k], side="left")
         return (num + 1) / (null_size + 1)  # Add 1 for stability
 
     logger.info("Computing p-values...")
@@ -205,7 +211,9 @@ def _copied_pvalues(
 
     ``groups`` lists each group's rows of ``ap_scores``. Each configuration's
     AP null comes from :func:`compute.get_null_dists`, so members with equal
-    pair counts share samples.
+    pair counts share samples. Null mAPs count when ``>=`` the score, within
+    float32 rounding: the AP samples are float32, so a null mAP equal to the
+    score can lie up to that rounding below it.
     """
     if not groups:
         return np.zeros(0, dtype=np.float64)
@@ -220,9 +228,11 @@ def _copied_pvalues(
         null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
     )
 
+    thresholds = tie_thresholds(np.asarray(scores, dtype=np.float32))
+
     def get_p_value(k):
-        null_dist = null_dists[rev_ix[groups[k]]].mean(axis=0)
-        num = (null_dist > scores[k]).sum()
+        null_dist = null_dists[rev_ix[groups[k]]].mean(axis=0, dtype=np.float64)
+        num = (null_dist >= thresholds[k]).sum()
         return (num + 1) / (null_size + 1)  # Add 1 for stability
 
     logger.info("Computing p-values...")
