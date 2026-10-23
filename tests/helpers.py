@@ -6,6 +6,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
+from copairs import nulls
 from copairs.matching import ColumnList
 
 SEED = 0
@@ -77,3 +78,10 @@ def create_dframe(n_options, n_rows):
     dframe = pd.DataFrame((product(colc, colp, colw)), columns=list("cpw"))
     dframe = dframe.sample(n_rows, random_state=SEED).reset_index(drop=True)
     return dframe
+
+
+def brute_ap_pvalues(scores, conf_ix, confs, null_size, seed):
+    """Count null values >= each score over the materialized nulls."""
+    null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
+    num = (null[conf_ix] >= nulls.tie_thresholds(scores)[:, None]).sum(axis=1)
+    return (num + 1) / (null_size + 1)

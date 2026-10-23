@@ -1,9 +1,26 @@
-"""Tests for the counter-based random stream and the shared null helpers."""
+"""Tests for the counter-based random stream, the AP null sampler and p-values."""
+
+import sys
+import itertools
+import subprocess
+import importlib.util
 
 import numpy as np
 import pytest
+from scipy.stats import chisquare
 
-from copairs.nulls import common, philox
+from copairs import nulls
+from copairs.nulls import common, philox, backend, pvalues, sampler
+from tests.helpers import brute_ap_pvalues
+from copairs.map.normalization import expected_ap
+
+BACKENDS = nulls.available_backends()
+HAS_NUMBA = importlib.util.find_spec("numba") is not None
+CONFS = np.array(
+    [[1, 1], [1, 7], [2, 2], [3, 10], [5, 20], [9, 49], [40, 45], [99, 1099], [3, 1000]]
+)
+# Configurations where the scalar sampler (and Numba) take the guided gap search.
+GUIDED = [(2, 5000), (3, 3000), (8, 20000), (4, 70000)]
 
 
 @pytest.mark.parametrize(
@@ -118,3 +135,407 @@ def test_tie_thresholds():
     ints = common.tie_thresholds(np.array([1, 2]))
     assert ints.dtype == np.float64
     np.testing.assert_array_equal(ints, np.array([1.0, 2.0]) - common.TIE_TOL)
+
+
+def exact_null(num_pos, total):
+    """Every AP value of a (num_pos, total) rank list, one per placement of positives."""
+    ranks = np.array(list(itertools.combinations(range(1, total + 1), num_pos)))
+    return (np.arange(1, num_pos + 1) / ranks).sum(axis=1) / num_pos
+
+
+def scalar_nulls(confs, null_size, seed):
+    """AP nulls from the plain-Python scalar sampler, the reference of every backend."""
+    _, _, k0, k1 = sampler.null_plan(np.asarray(confs), seed)
+    return np.array(
+        [
+            [
+                sampler._ap_sample(int(p), int(t), j, k0[c], k1[c])
+                for j in range(null_size)
+            ]
+            for c, (p, t) in enumerate(confs)
+        ]
+    )
+
+
+def test_available_backends():
+    """NumPy is always available; Numba exactly when it is installed, and first."""
+    assert BACKENDS == (["numba", "numpy"] if HAS_NUMBA else ["numpy"])
+    assert nulls.resolve_backend("auto") == BACKENDS[0]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_backends_bitwise_identical(backend):
+    """Every backend returns the scalar reference's float64 values bit for bit."""
+    ref = scalar_nulls(CONFS, 64, 3)
+    out = nulls.ap_nulls(CONFS, 64, seed=3, backend=backend, dtype=np.float64)
+    np.testing.assert_array_equal(out.view(np.uint64), ref.view(np.uint64))
+    out32 = nulls.ap_nulls(CONFS, 64, seed=3, backend=backend)
+    np.testing.assert_array_equal(out32, ref.astype(np.float32))
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("num_pos,total", GUIDED)
+def test_guided_gap_search_matches_loop(backend, num_pos, total):
+    """The guided gap search reproduces Algorithm A's gaps bit for bit.
+
+    The scalar sampler takes the guided search on these configurations and the
+    NumPy backend the plain loop, so their samples agree only if the gaps do.
+    """
+    assert total - num_pos > sampler.GUIDED_RATIO * num_pos * (num_pos + 1)
+    ref = scalar_nulls([(num_pos, total)], 200, 8)
+    got = nulls.ap_nulls([[num_pos, total]], 200, seed=8, backend=backend, dtype=float)
+    np.testing.assert_array_equal(got.view(np.uint64), ref.view(np.uint64))
+    rng = np.random.default_rng(num_pos)
+    for u in np.concatenate([rng.random(200), [1e-300, 0.5, 1 - 2**-53]]):
+        k = int(rng.integers(2, num_pos + 1))
+        assert sampler._gap_guided(total, k, u) == sampler.gap_loop(total, k, u)
+
+
+@pytest.mark.parametrize(
+    "remaining,k", [(30, 2), (1000, 3), (5000, 2), (3000, 7), (70_000, 4), (500, 20)]
+)
+def test_numpy_bisection_matches_loop(remaining, k):
+    """The NumPy bisection returns Algorithm A's gap, also for u on its products.
+
+    A u equal to the product at some gap, or one ulp either side, is where the
+    closed form cannot decide and the probe replays the exact product.
+    """
+    rng = np.random.default_rng(remaining + k)
+    products, quot, top = [], (remaining - k) / remaining, remaining - k
+    for gap in range(1, remaining - k + 1):
+        products.append(quot)
+        top -= 1
+        quot = quot * (top / (remaining - gap))
+    products = np.array(products)
+    picks = products[rng.integers(len(products), size=300)]
+    picks = picks[picks > 0]
+    u = np.concatenate(
+        [
+            rng.random(300),
+            picks,
+            np.nextafter(picks, 0),
+            np.nextafter(picks, 1),
+            [2.0**-53, 1e-300, 0.5, 1 - 2**-53],
+        ]
+    )
+    rem = np.full(len(u), remaining)
+    expected = [sampler.gap_loop(remaining, k, x) for x in u]
+    np.testing.assert_array_equal(sampler._gap_bisect_numpy(rem, k, u), expected)
+    np.testing.assert_array_equal(sampler._gap_loop_numpy(rem, k, u), expected)
+
+
+def test_numba_matches_numpy_at_scale():
+    """Numba and NumPy agree bitwise over many samples of large configurations."""
+    pytest.importorskip("numba")
+    confs = np.array([[2, 5000], [5, 300], [3, 100_000], [30, 3000], [1, 10**6]])
+    kwargs = dict(seed=2**63 + 5, start=2**40, dtype=np.float64)
+    a = nulls.ap_nulls(confs, 20_000, backend="numpy", **kwargs)
+    b = nulls.ap_nulls(confs, 20_000, backend="numba", **kwargs)
+    np.testing.assert_array_equal(a.view(np.uint64), b.view(np.uint64))
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_chunks_and_prefixes(backend):
+    """Sample j depends only on (seed, num_pos, total, j)."""
+    whole = nulls.ap_nulls(CONFS, 3000, seed=11, backend=backend)
+    parts = [
+        nulls.ap_nulls(CONFS, size, seed=11, start=start, backend=backend)
+        for start, size in [(0, 1000), (1000, 1500), (2500, 500)]
+    ]
+    np.testing.assert_array_equal(np.concatenate(parts, axis=1), whole)
+    alone = nulls.ap_nulls(CONFS[[4]], 100, seed=11, backend=backend)
+    np.testing.assert_array_equal(alone[0], whole[4, :100])
+    other_seed = nulls.ap_nulls(CONFS, 100, seed=12, backend=backend)
+    assert not np.array_equal(other_seed, whole[:, :100])
+
+
+def test_float64_rounds_to_float32():
+    """float32 output is the float64 sample rounded once."""
+    f64 = nulls.ap_nulls(CONFS, 500, seed=5, dtype=np.float64)
+    f32 = nulls.ap_nulls(CONFS, 500, seed=5)
+    np.testing.assert_array_equal(f64.astype(np.float32), f32)
+    with pytest.raises(ValueError, match="dtype"):
+        nulls.ap_nulls(CONFS, 5, seed=5, dtype=np.float16)
+
+
+@pytest.mark.parametrize("num_pos,total", [(1, 9), (3, 10), (5, 20), (2, 60)])
+def test_matches_exact_distribution(num_pos, total):
+    """Sample frequencies of each AP value match exact enumeration."""
+    exact = exact_null(num_pos, total)
+    atoms, weights = np.unique(np.round(exact, 9), return_counts=True)
+    null = nulls.ap_nulls([[num_pos, total]], 200_000, seed=1, dtype=np.float64)[0]
+    observed = np.bincount(
+        np.searchsorted(atoms, np.round(null, 9)), minlength=len(atoms)
+    )
+    assert observed.sum() == len(null)
+    expected = weights / weights.sum() * len(null)
+    big = expected >= 5
+    obs = np.append(observed[big], observed[~big].sum())
+    exp = np.append(expected[big], expected[~big].sum())
+    if exp[-1] == 0:
+        obs, exp = obs[:-1], exp[:-1]
+    assert chisquare(obs, exp).pvalue > 1e-3
+    # The upper tail, which decides small p-values, in particular.
+    q = np.quantile(exact, 0.99)
+    tail = np.mean(exact >= q)
+    se = np.sqrt(tail * (1 - tail) / len(null))
+    assert abs(np.mean(null >= q - common.TIE_TOL) - tail) < 5 * se
+
+
+@pytest.mark.parametrize("num_pos,total", [(10, 100), (99, 1099), (3, 5000)])
+def test_mean_matches_expected_ap(num_pos, total):
+    """The null mean matches the closed-form E[AP] within Monte Carlo error."""
+    null = nulls.ap_nulls([[num_pos, total]], 100_000, seed=2, dtype=np.float64)[0]
+    se = null.std() / np.sqrt(len(null))
+    assert abs(null.mean() - expected_ap(num_pos, total - num_pos)) < 5 * se
+
+
+def test_degenerate_configurations():
+    """All-positive lists have AP 1; a single positive has AP 1/rank, rank uniform."""
+    null = nulls.ap_nulls([[4, 4], [1, 1]], 100, seed=0)
+    assert (null == 1).all()
+    ap = nulls.ap_nulls([[1, 5]], 50_000, seed=0, dtype=np.float64)[0]
+    ranks = np.rint(1 / ap).astype(int)
+    np.testing.assert_allclose(1 / ranks, ap)
+    freq = np.bincount(ranks, minlength=6)[1:] / len(ap)
+    np.testing.assert_allclose(freq, 0.2, atol=0.01)
+
+
+def test_invalid_configurations():
+    """Configurations without positives, or with more positives than ranks, raise."""
+    for confs in ([[0, 5]], [[6, 5]], [1, 5]):
+        with pytest.raises(ValueError):
+            nulls.ap_nulls(confs, 10, seed=0)
+
+
+@pytest.mark.parametrize("confs", [[[1.9, 5.9]], [[2, 5.5]], [[np.nan, 5]]])
+def test_ap_nulls_rejects_fractional_configurations(confs):
+    """Counts are not truncated: (1.9, 5.9) is not a (1, 5) configuration."""
+    with pytest.raises(ValueError, match="integer"):
+        nulls.ap_nulls(confs, 10, seed=1)
+
+
+def test_ap_nulls_accepts_integral_floats():
+    """Integral floats, e.g. counts that went through a float column, are fine."""
+    np.testing.assert_array_equal(
+        nulls.ap_nulls([[2.0, 5.0]], 10, seed=1), nulls.ap_nulls([[2, 5]], 10, seed=1)
+    )
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("budget", [pvalues.DEFAULT_BUDGET, 8 * 700])
+def test_ap_pvalues_match_brute_force(backend, budget):
+    """Streamed AP p-values equal counting over the materialized null, ties included."""
+    rng = np.random.default_rng(0)
+    conf_ix = rng.integers(len(CONFS), size=300)
+    scores = rng.random(300)
+    # Include exact ties with null values.
+    null = nulls.ap_nulls(CONFS, 50, seed=4, dtype=np.float64)
+    scores[:50] = null[conf_ix[:50], np.arange(50)]
+    got = nulls.ap_pvalues(
+        scores, conf_ix, CONFS, 2000, seed=4, backend=backend, budget_bytes=budget
+    )
+    np.testing.assert_array_equal(
+        got, brute_ap_pvalues(scores, conf_ix, CONFS, 2000, 4)
+    )
+    # Ties count: dropping the tolerance changes the tied scores' p-values.
+    strict = (null[conf_ix[:50]] > scores[:50, None]).sum(axis=1)
+    assert (got[:50] > (strict + 1) / 2001).all()
+
+
+def random_groups(rng, n_groups):
+    """CSR (group -> configuration counts) with mixed and repeated configurations."""
+    ptr, conf_ix, conf_cnt = [0], [], []
+    for _ in range(n_groups):
+        confs = rng.choice(len(CONFS), size=rng.integers(1, 4), replace=False)
+        conf_ix.extend(sorted(confs))
+        conf_cnt.extend(rng.integers(1, 5, size=len(confs)))
+        ptr.append(len(conf_ix))
+    return np.array(ptr), np.array(conf_ix), np.array(conf_cnt)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("budget", [pvalues.DEFAULT_BUDGET, 8 * len(CONFS) * 300])
+def test_map_pvalues_match_brute_force(backend, budget):
+    """Streamed mAP p-values equal counting over materialized group nulls."""
+    rng = np.random.default_rng(1)
+    ptr, conf_ix, conf_cnt = random_groups(rng, 40)
+    null = nulls.ap_nulls(CONFS, 1500, seed=9, dtype=np.float64)
+    group_null = np.empty((40, 1500))
+    for g in range(40):
+        acc = np.zeros(1500)
+        for e in range(ptr[g], ptr[g + 1]):
+            acc += conf_cnt[e] * null[conf_ix[e]]
+        group_null[g] = acc / conf_cnt[ptr[g] : ptr[g + 1]].sum()
+    map_scores = rng.random(40) * 0.6
+    map_scores[:10] = group_null[:10, 7]  # exact ties
+    num = (group_null >= map_scores[:, None] - common.TIE_TOL).sum(axis=1)
+    got = nulls.map_pvalues(
+        map_scores,
+        ptr,
+        conf_ix,
+        conf_cnt,
+        CONFS,
+        1500,
+        seed=9,
+        backend=backend,
+        budget_bytes=budget,
+    )
+    np.testing.assert_array_equal(got, (num + 1) / 1501)
+
+
+def test_backend_validation():
+    """Unknown backends raise ValueError; method names are checked too."""
+    with pytest.raises(ValueError, match="unknown backend"):
+        nulls.resolve_backend("tpu")
+    with pytest.raises(ValueError, match="unknown backend"):
+        nulls.ap_nulls(CONFS, 4, seed=0, backend="cuda")
+    with pytest.raises(ValueError, match="unknown method"):
+        backend.check_method("exact")
+    backend.check_method("legacy", "numba")  # valid names, whether installed or not
+
+
+def test_ap_pvalues_validates_conf_ix():
+    """Scores pointing outside confs raise instead of being dropped."""
+    with pytest.raises(ValueError):
+        nulls.ap_pvalues([0.0], [5], CONFS[:2], 10, seed=1)
+    with pytest.raises(ValueError):
+        nulls.ap_pvalues([0.0, 0.5], [0], CONFS[:2], 10, seed=1)
+
+
+@pytest.mark.parametrize("ptr", [[0, 1, 1], [0, 0, 1], [1, 2], [0, 1]])
+def test_map_pvalues_validates_groups(ptr):
+    """Empty groups and inconsistent CSR pointers raise ValueError."""
+    with pytest.raises(ValueError):
+        nulls.map_pvalues(
+            [0.1] * (len(ptr) - 1), ptr, [0, 1], [1, 1], CONFS[:2], 10, seed=1
+        )
+
+
+@pytest.mark.parametrize(
+    "conf_ix,conf_cnt", [([0, 2], [1, 1]), ([-1, 0], [1, 1]), ([0, 1], [1])]
+)
+def test_map_pvalues_validates_members(conf_ix, conf_cnt):
+    """Configuration indices outside confs, or counts per member, raise."""
+    with pytest.raises(ValueError, match="conf_"):
+        nulls.map_pvalues([0.1, 0.2], [0, 1, 2], conf_ix, conf_cnt, CONFS[:2], 10, 1)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("n_scores", [1, 3])
+def test_map_pvalues_validates_score_count(backend, n_scores):
+    """One mAP score per group; the kernels would read past a shorter array."""
+    with pytest.raises(ValueError, match="groups"):
+        nulls.map_pvalues(
+            [0.1] * n_scores, [0, 1, 2], [0, 1], [1, 1], CONFS[:2], 10, 1, backend
+        )
+
+
+@pytest.mark.parametrize("seed", [-1, 2**64])
+def test_sampler_seed_out_of_range(seed):
+    """Seeds outside [0, 2**64) raise, whether or not the caller resolves them."""
+    with pytest.raises(ValueError, match="seed must be"):
+        nulls.ap_nulls(CONFS, 4, seed)
+    with pytest.raises(ValueError, match="seed must be"):
+        nulls.ap_pvalues([0.5], [0], CONFS, 4, seed)
+
+
+@pytest.mark.parametrize("null_size", [-1, -100, 2.5])
+def test_pvalues_reject_invalid_null_size(null_size):
+    """Negative or fractional null sizes raise instead of giving invalid p-values."""
+    with pytest.raises(ValueError, match="null_size"):
+        nulls.ap_pvalues([0.1], [0], CONFS[:1], null_size, seed=0)
+    with pytest.raises(ValueError, match="null_size"):
+        nulls.map_pvalues([0.1], [0, 1], [0], [1], CONFS[:1], null_size, seed=0)
+
+
+def test_pvalues_tiny_budget_streams_lazily():
+    """A budget of one sample per chunk streams without building chunk lists."""
+    scores, conf_ix = np.array([0.2, 0.5]), np.array([0, 1])
+    got = nulls.ap_pvalues(scores, conf_ix, CONFS[3:5], 300, seed=2, budget_bytes=8)
+    np.testing.assert_array_equal(
+        got, brute_ap_pvalues(scores, conf_ix, CONFS[3:5], 300, 2)
+    )
+
+
+def test_unseeded_pvalues_are_fresh():
+    """seed=None draws a fresh null per call."""
+    a = nulls.ap_nulls(CONFS, 50, common.resolve_seed(None))
+    b = nulls.ap_nulls(CONFS, 50, common.resolve_seed(None))
+    assert not np.array_equal(a, b)
+
+
+# Makes numba unimportable in a child interpreter, as if it were not installed.
+_WITHOUT_NUMBA = """
+import sys
+import importlib.util
+from importlib.abc import MetaPathFinder
+
+BLOCKED = ("numba", "llvmlite")
+
+
+class Block(MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in BLOCKED:
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+
+_find_spec = importlib.util.find_spec
+importlib.util.find_spec = lambda name, *args: (
+    None if name.split(".")[0] in BLOCKED else _find_spec(name, *args)
+)
+sys.meta_path.insert(0, Block())
+"""
+
+
+def run_python(code: str) -> str:
+    """Run ``code`` in a fresh interpreter and return its stdout."""
+    done = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+def test_default_path_runs_without_numba():
+    """Without numba, copairs imports, "auto" runs on NumPy and "numba" names the extra."""
+    out = run_python(
+        _WITHOUT_NUMBA
+        + """
+import numpy as np
+import pandas as pd
+import copairs, copairs.map, copairs.compute
+from copairs import nulls, compute
+from copairs.map import mean_average_precision
+
+assert "numba" not in sys.modules
+assert nulls.available_backends() == ["numpy"], nulls.available_backends()
+assert nulls.resolve_backend("auto") == "numpy"
+try:
+    nulls.ap_nulls([[2, 5]], 4, 0, backend="numba")
+except ImportError as exc:
+    assert "copairs[numba]" in str(exc), exc
+else:
+    raise AssertionError("backend='numba' ran without numba")
+p = compute.p_values(np.array([0.5, 1.0]), np.array([[2, 10], [1, 4]]), 100, 0,
+                     progress_bar=False)
+frame = pd.DataFrame({"g": ["a", "a"], "average_precision": [0.5, 0.6],
+                      "normalized_average_precision": 0.0, "n_pos_pairs": 1,
+                      "n_total_pairs": 10})
+m = mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False)
+assert "numba" not in sys.modules
+print(list(p), list(m["p_value"]))
+"""
+    )
+    assert out.strip()
+
+
+def test_import_does_not_load_numba():
+    """With numba installed, importing copairs and its null modules leaves it unloaded."""
+    pytest.importorskip("numba")
+    out = run_python(
+        "import sys\nimport copairs, copairs.map, copairs.compute, copairs.nulls\n"
+        "import copairs.map.multilabel, copairs.nulls.sampler, copairs.nulls.pvalues\n"
+        "print('numba' in sys.modules)"
+    )
+    assert out.strip() == "False"
