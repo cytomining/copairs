@@ -94,7 +94,7 @@ def ap_pvalues(
     work = (
         (b, start, size) for b in batches for start, size in chunks(null_size, chunk)
     )
-    n_work = len(batches) * -(-null_size // chunk)
+    n_work = len(batches) * len(range(0, null_size, chunk))
     if backend == "numba":
         count = _import_numba_backend().count_ge
     else:
@@ -169,7 +169,7 @@ def map_pvalues(
         kernel = _group_ge_host
     counts = np.zeros(len(thr), dtype=np.int64)
     chunk = chunk_size(null_size, len(confs), budget_bytes)
-    n_work = -(-null_size // chunk)
+    n_work = len(range(0, null_size, chunk))
     for start, size in progress(
         chunks(null_size, chunk), n_work, progress_bar, "mAP null"
     ):
