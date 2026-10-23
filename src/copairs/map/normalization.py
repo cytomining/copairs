@@ -1,8 +1,10 @@
 """Functions for normalizing Average Precision scores."""
 
-from typing import Tuple, Union
+from typing import Tuple, Union, Literal
 
 import numpy as np
+
+from copairs import compute
 
 
 def harmonic_number(n: int) -> float:
@@ -72,6 +74,7 @@ def normalize_ap(
     M: Union[int, np.ndarray],
     N: Union[int, np.ndarray],
     eps: float = 1e-10,
+    backend: Literal["numpy", "numba"] = "numpy",
 ) -> Union[float, np.ndarray]:
     """Normalize Average Precision scores to be scale-independent.
 
@@ -88,6 +91,11 @@ def normalize_ap(
         Number of negative items for each AP score.
     eps : float
         Small epsilon to avoid division by zero when μ₀ ≈ 1.
+    backend : {"numpy", "numba"}
+        ``"numpy"`` (default) evaluates :func:`expected_ap` for each score.
+        ``"numba"`` (install ``copairs[numba]``) evaluates each distinct
+        ``(M, N)`` once, with harmonic numbers from one table; results are
+        equal bit for bit.
 
     Returns
     -------
@@ -100,6 +108,10 @@ def normalize_ap(
     - Normalized AP = 1 when performance is perfect
     - Negative values indicate worse-than-random performance
     """
+    compute._check_backend(backend)
+    if backend == "numba":
+        fastap = compute._import_numba_backend()
+
     # Handle scalar or array inputs
     is_scalar = np.isscalar(ap)
 
@@ -119,11 +131,17 @@ def normalize_ap(
         )
 
     # Compute expected AP for each configuration
-    mu0 = np.zeros_like(ap, dtype=float)
-    for i in range(len(ap)):
-        M_i = M[i] if len(M) > 1 else M[0]
-        N_i = N[i] if len(N) > 1 else N[0]
-        mu0[i] = expected_ap(int(M_i), int(N_i))
+    if backend == "numba":
+        M = M if len(M) > 1 else np.repeat(M[:1], len(ap))
+        N = N if len(N) > 1 else np.repeat(N[:1], len(ap))
+        # One configuration per row of ap, as the loop below fills mu0
+        mu0 = fastap.expected_ap_array(M, N).reshape((-1,) + (1,) * (ap.ndim - 1))
+    else:
+        mu0 = np.zeros_like(ap, dtype=float)
+        for i in range(len(ap)):
+            M_i = M[i] if len(M) > 1 else M[0]
+            N_i = N[i] if len(N) > 1 else N[0]
+            mu0[i] = expected_ap(int(M_i), int(N_i))
 
     # Normalize: (AP - μ₀) / (1 - μ₀)
     # Use eps to avoid division by zero when μ₀ ≈ 1

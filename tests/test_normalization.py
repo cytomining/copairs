@@ -145,3 +145,49 @@ def test_normalization_interpretability():
 
     assert normalized[0] < 0, "AP=0 should give negative normalized score"
     assert normalized[-1] > 0.99, "AP=1 should give normalized score near 1"
+
+
+def test_expected_ap_array_bitwise():
+    """The vectorized expected AP equals the scalar formula bit for bit."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    from copairs import fastap
+
+    rng = np.random.default_rng(3)
+    M = rng.integers(0, 40, size=2000)
+    N = rng.integers(0, 2000, size=2000)
+    M[:4], N[:4] = [1, 0, 1, 5], [0, 1, 4, 0]
+    keep = M + N >= 1
+    M, N = M[keep], N[keep]
+    scalar = np.array([expected_ap(int(m), int(n)) for m, n in zip(M, N)])
+    np.testing.assert_array_equal(
+        fastap.expected_ap_array(M, N).view(np.uint64), scalar.view(np.uint64)
+    )
+    with pytest.raises(ValueError):
+        fastap.expected_ap_array(np.array([-1]), np.array([3]))
+
+
+@pytest.mark.parametrize(
+    "ap,M,N",
+    [
+        (0.5, 3, 10),
+        (np.linspace(0, 1, 7), np.arange(1, 8), np.arange(7) * 5),
+        (np.linspace(0, 1, 7), 4, 9),
+        (np.linspace(0, 1, 6).reshape(3, 2), np.array([1, 2, 3]), 8),
+        (np.zeros(0), np.zeros(0, dtype=int), np.zeros(0, dtype=int)),
+    ],
+)
+def test_normalize_ap_numba_backend_bitwise(ap, M, N):
+    """normalize_ap gives the same bits with either backend."""
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    expected = normalize_ap(ap, M, N, backend="numpy")
+    got = normalize_ap(ap, M, N, backend="numba")
+    assert type(got) is type(expected)
+    np.testing.assert_array_equal(
+        np.asarray(got).view(np.uint64), np.asarray(expected).view(np.uint64)
+    )
+
+
+def test_normalize_ap_rejects_unknown_backend():
+    """A misspelled backend raises instead of silently using NumPy."""
+    with pytest.raises(ValueError, match="'numpy' or 'numba'"):
+        normalize_ap(0.5, 3, 10, backend="numbaa")
