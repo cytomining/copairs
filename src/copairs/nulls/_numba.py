@@ -14,42 +14,40 @@ the calling thread without the GIL, so threads can run groups at once.
 """
 
 import threading
+from pathlib import Path
 
 import numba
 import numpy as np
 
-from copairs.nulls import joint, common, philox, sampler, permutation
+from copairs.nulls import joint, permutation
 from copairs._numba_cache import cached_njit
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
 
-# The kernels of each null compile functions of these files; Numba's cache
-# would only see this one (see copairs._numba_cache).
-_AP_SOURCES = (__file__, philox.__file__, sampler.__file__)
-_JOINT_SOURCES = (__file__, philox.__file__, common.__file__, joint.__file__)
-_PERMUTATION_SOURCES = (
-    __file__, philox.__file__, common.__file__, permutation.__file__,
-)  # fmt: skip
+# The kernels compile functions of copairs.nulls' files, which Numba's cache
+# would not check (see copairs._numba_cache): an edit to any of them
+# recompiles every kernel.
+_SOURCES = tuple(sorted(str(path) for path in Path(__file__).parent.glob("*.py")))
 
 _philox_nb = numba.njit(inline="always")(philox4x32)
 _uniform_nb = numba.njit(inline="always")(uniform53)
-_gap_loop_nb = cached_njit(_AP_SOURCES)(gap_loop)
-_ap_sample_nb = cached_njit(_AP_SOURCES)(
+_gap_loop_nb = cached_njit(_SOURCES)(gap_loop)
+_ap_sample_nb = cached_njit(_SOURCES)(
     _make_ap_sample(
         _philox_nb,
         _uniform_nb,
         _gap_loop_nb,
-        cached_njit(_AP_SOURCES)(_make_gap_guided(_gap_loop_nb, numba.njit)),
+        cached_njit(_SOURCES)(_make_gap_guided(_gap_loop_nb, numba.njit)),
     )
 )
 _joint_sample_nb, _, _ = joint._make_sampler(
-    _philox_nb, _uniform_nb, cached_njit(_JOINT_SOURCES)
+    _philox_nb, _uniform_nb, cached_njit(_SOURCES)
 )
 _draw_nb, _group_map_nb = permutation._make_kernels(
-    _philox_nb, _uniform_nb, cached_njit(_PERMUTATION_SOURCES)
+    _philox_nb, _uniform_nb, cached_njit(_SOURCES)
 )
 _draw_pool_nb, _label_group_map_nb = permutation._make_label_kernels(
-    _philox_nb, _uniform_nb, cached_njit(_PERMUTATION_SOURCES)
+    _philox_nb, _uniform_nb, cached_njit(_SOURCES)
 )
 # Samples or draws per parallel task; each task allocates its scratch once.
 _JOINT_TASK = 256
@@ -80,7 +78,7 @@ def ap_nulls(num_pos, total, k0, k1, start, out):
     _launch(_ap_nulls, num_pos, total, k0, k1, start, out)
 
 
-@cached_njit(_AP_SOURCES, parallel=True)
+@cached_njit(_SOURCES, parallel=True)
 def _ap_nulls(num_pos, total, k0, k1, start, out):
     n_conf, size = out.shape
     for flat in numba.prange(n_conf * size):
@@ -158,7 +156,7 @@ def _split_segments(rows, ptr, max_scores):
     return piece_rows, np.append(starts, ptr[-1])
 
 
-@cached_njit(_AP_SOURCES, parallel=True)
+@cached_njit(_SOURCES, parallel=True)
 def _count_ge_kernel(null, rows, thr, ptr, counts, max_blocks):
     """Count segment ``s``'s scores ``thr[ptr[s]:ptr[s + 1]]`` on ``null[rows[s]]``."""
     n_seg = len(rows)
@@ -192,7 +190,7 @@ def group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
     _launch(_group_ge, null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
 
 
-@cached_njit(_AP_SOURCES, parallel=True)
+@cached_njit(_SOURCES, parallel=True)
 def _group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
     n_groups = len(ptr) - 1
     size = null.shape[1]
@@ -228,7 +226,7 @@ def joint_nulls(
     )  # fmt: skip
 
 
-@cached_njit(_JOINT_SOURCES, parallel=True)
+@cached_njit(_SOURCES, parallel=True)
 def _joint_nulls(
     mem_ptr, num_pos, num_neg, edge_ptr, inc_ptr, inc_edge, k0, k1, sigs, start, out,
     max_edge, max_pos,
@@ -247,7 +245,7 @@ def _joint_nulls(
             )  # fmt: skip
 
 
-@cached_njit(_PERMUTATION_SOURCES, nogil=True)
+@cached_njit(_SOURCES, nogil=True)
 def _permutation_maps(
     n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, slot_block, adjm, deg, kmu,
     krr, gptr, grow, smr_ptr, smr, srr_ptr, srr, rmu, rcm, rrr, ranked, start, out,
@@ -272,7 +270,7 @@ def _permutation_maps(
         )  # fmt: skip
 
 
-@cached_njit(_PERMUTATION_SOURCES, parallel=True, nogil=True)
+@cached_njit(_SOURCES, parallel=True, nogil=True)
 def _permutation_maps_parallel(
     n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, slot_block, adjm, deg, kmu,
     krr, gptr, grow, smr_ptr, smr, srr_ptr, srr, rmu, rcm, rrr, ranked, start, out,
@@ -289,15 +287,31 @@ def _permutation_maps_parallel(
         )  # fmt: skip
 
 
+@cached_njit(_SOURCES, nogil=True)
+def _permutation_identity(
+    pm, n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr, srr_ptr, srr,
+    rmu, rcm, rrr, ranked,
+):  # fmt: skip
+    """Return the mAP of a group whose slot ``s`` holds member ``pm[s]``.
+
+    A kernel, not a call of ``_group_map_nb`` from Python: Numba never loads
+    the factory-made function from its cache when Python calls it.
+    """
+    members = np.empty(n, dtype=np.int64)
+    refs = np.empty(n, dtype=np.int64)
+    ent = np.empty(n, dtype=np.uint64)
+    rank = np.empty(n, dtype=np.int32)
+    term = np.empty(n, dtype=np.float64)
+    return _group_map_nb(
+        pm, n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr, srr_ptr,
+        srr, rmu, rcm, rrr, ranked, members, refs, ent, rank, term,
+    )  # fmt: skip
+
+
 def permutation_identity(layout):
     """Return the mAP of ``layout``'s group under its observed labels, as a float."""
-    n = layout.n
-    scratch = (
-        np.empty(n, np.int64), np.empty(n, np.int64), np.empty(n, np.uint64),
-        np.empty(n, np.int32), np.empty(n, np.float64),
-    )  # fmt: skip
-    identity = np.arange(n, dtype=np.int64)
-    return float(_group_map_nb(identity, *layout.map_args(), *scratch))
+    identity = np.arange(layout.n, dtype=np.int64)
+    return float(_permutation_identity(identity, *layout.map_args()))
 
 
 def permutation_maps(layout, start, size, k0, k1, parallel=True):
@@ -317,7 +331,7 @@ def permutation_maps(layout, start, size, k0, k1, parallel=True):
     return out
 
 
-@cached_njit(_PERMUTATION_SOURCES, nogil=True)
+@cached_njit(_SOURCES, nogil=True)
 def _label_maps(
     n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, n, adjm, deg, keys,
     rank_table, ranked, nptr, nrow, nbits, loc, lone, gptr, grow, start, out,
@@ -341,7 +355,7 @@ def _label_maps(
         )  # fmt: skip
 
 
-@cached_njit(_PERMUTATION_SOURCES, parallel=True, nogil=True)
+@cached_njit(_SOURCES, parallel=True, nogil=True)
 def _label_maps_parallel(
     n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, n, adjm, deg, keys,
     rank_table, ranked, nptr, nrow, nbits, loc, lone, gptr, grow, start, out,
@@ -358,15 +372,29 @@ def _label_maps_parallel(
         )  # fmt: skip
 
 
+@cached_njit(_SOURCES, nogil=True)
+def _label_identity(
+    pm, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits, loc, lone, gptr,
+    grow,
+):  # fmt: skip
+    """Return the mAP of a multilabel group whose slot ``s`` holds pool code ``pm[s]``.
+
+    As :func:`_permutation_identity`.
+    """
+    ent = np.empty(n, dtype=np.uint64)
+    rank = np.empty(n, dtype=np.int32)
+    inb = np.empty(n, dtype=np.bool_)
+    term = np.empty(n, dtype=np.float64)
+    return _label_group_map_nb(
+        pm, n, adjm, deg, keys, rank_table, ranked, nptr, nrow, nbits, loc, lone,
+        gptr, grow, ent, rank, inb, term,
+    )  # fmt: skip
+
+
 def label_identity(layout):
     """Return the mAP of ``layout``'s multilabel group under its observed labels."""
-    n = layout.n
-    scratch = (
-        np.empty(n, np.uint64), np.empty(n, np.int32), np.empty(n, np.bool_),
-        np.empty(n, np.float64),
-    )  # fmt: skip
     identity = np.asarray(layout.identity, dtype=np.int64)
-    return float(_label_group_map_nb(identity, *layout.map_args(), *scratch))
+    return float(_label_identity(identity, *layout.map_args()))
 
 
 def label_maps(layout, start, size, k0, k1, parallel=True):

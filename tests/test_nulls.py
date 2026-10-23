@@ -555,10 +555,20 @@ sys.meta_path.insert(0, Block())
 """
 
 
-def run_python(code: str) -> str:
-    """Run ``code`` in a fresh interpreter and return its stdout."""
+def run_python(
+    code: str, *argv: str, cwd: Path | None = None, env: dict[str, str] | None = None
+) -> str:
+    """Run ``code`` in a fresh interpreter and return its stdout.
+
+    ``argv`` are its arguments, ``cwd`` and ``env`` as in :func:`subprocess.run`.
+    """
     done = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+        [sys.executable, "-c", code, *argv],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
     assert done.returncode == 0, done.stderr
     return done.stdout
@@ -765,16 +775,9 @@ def test_numba_cache_follows_edits_to_compiled_files(tmp_path, name, old, new):
     env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "numba_cache")}
 
     def run():
-        done = subprocess.run(
-            [sys.executable, "-c", _CACHE_PROBE, str(tmp_path)],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=600,
+        return json.loads(
+            run_python(_CACHE_PROBE, str(tmp_path), cwd=tmp_path, env=env)
         )
-        assert done.returncode == 0, done.stderr
-        return json.loads(done.stdout)
 
     before = run()
     assert run()["hits"] == 1
