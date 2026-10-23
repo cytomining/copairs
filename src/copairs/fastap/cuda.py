@@ -117,10 +117,10 @@ extern "C" __global__ void ap_from_hist(const long long* ptr, const unsigned lon
     }
 }
 """
-_SOURCE = _cuda.PRELUDE + _PAIR_KERNELS
 
 
 def _kernel(name: str):
+    """Kernel ``name`` of the module's one source (:data:`_SOURCE`)."""
     return _cuda.kernel(_SOURCE, name)
 
 
@@ -369,7 +369,8 @@ extern "C" __global__ void draw_ap(const float* sims, int k, int m, long long n_
     }
 }
 """
-_DRAW_SOURCE = _cuda.PRELUDE + _DRAW_KERNEL
+# All the module's kernels, compiled as one module per device.
+_SOURCE = _cuda.PRELUDE + _PAIR_KERNELS + _DRAW_KERNEL
 
 
 def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.ndarray:
@@ -389,7 +390,7 @@ def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.nd
     rows_of = cp.asarray(x) if resident else x
     budget_bytes -= x.nbytes if resident else 0
     out = np.empty((n_draws, k), dtype=np.float64)
-    kernel = _cuda.kernel(_DRAW_SOURCE, "draw_ap")
+    kernel = _kernel("draw_ap")
     threads = 128 if k + m >= 128 else 32
     step = draws._chunk(n_draws, k, m, x.shape[1], budget_bytes)
     for start in range(0, n_draws, step):
