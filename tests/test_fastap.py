@@ -613,6 +613,17 @@ def test_draw_average_precisions_shared_memory_limit(extra):
 
 
 @needs_cupy
+def test_cuda_ap_from_pairs_checks_device_sims(monkeypatch):
+    """CuPy similarities, like NumPy ones, must be one per pair."""
+    cp, _ = fake_gpu(monkeypatch)
+    cuda = backend_module("cuda")
+    pos, neg = np.array([[0, 1]]), np.array([[0, 2], [1, 2]])
+    for sims in ([0.5], np.array([0.5]), cp.asarray(np.array([0.5]))):
+        with pytest.raises(ValueError, match="one similarity per pair"):
+            cuda.ap_from_pairs(pos, neg, [0.9], sims)
+
+
+@needs_cupy
 def test_cuda_pairs_cast_to_uint32_on_the_host(monkeypatch):
     """Pairs reach the GPU as uint32, 8 bytes per pair, whatever their host dtype."""
     cp, launches = fake_gpu(monkeypatch)

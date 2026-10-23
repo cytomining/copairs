@@ -78,9 +78,9 @@ def index_pairs(pairs, n: int | None = None) -> np.ndarray:
     return pairs if pairs.dtype == np.uint32 else pairs.astype(np.int64, copy=False)
 
 
-def pair_sims(sims, pairs: np.ndarray) -> np.ndarray:
-    """``sims`` as an array, one per pair; ValueError otherwise."""
-    sims = np.asarray(sims)
+def pair_sims(sims, pairs: np.ndarray, xp=np) -> np.ndarray:
+    """``sims`` as an ``xp`` array, one per pair; ValueError otherwise."""
+    sims = xp.asarray(sims)
     if sims.shape != (len(pairs),):
         raise ValueError(
             f"need one similarity per pair: {len(pairs)} pairs, sims of shape "

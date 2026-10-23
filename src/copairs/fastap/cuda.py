@@ -214,14 +214,7 @@ def _pair_sims(sims, pairs, given):
         if sims.source is not given and not np.array_equal(sims.pairs, pairs):
             raise ValueError("these similarities were computed for other pairs")
         return sims
-    if not _cuda.is_device_array(sims):
-        return ranking.pair_sims(sims, pairs)
-    if sims.shape != (len(pairs),):
-        raise ValueError(
-            f"need one similarity per pair: {len(pairs)} pairs, sims of shape "
-            f"{sims.shape}"
-        )
-    return sims
+    return ranking.pair_sims(sims, pairs, cp if _cuda.is_device_array(sims) else np)
 
 
 def _chunk_sims(sims, start: int, device_pairs):
