@@ -94,35 +94,42 @@ def test_missing_numba_extra_has_actionable_error(call):
     assert result.returncode == 0, result.stderr
 
 
-def test_numba_transitive_missing_module_is_not_masked():
-    """A broken Numba installation keeps its original missing-module error."""
+@pytest.mark.parametrize(
+    "error",
+    [
+        "ModuleNotFoundError(\"No module named 'llvmlite'\", name='llvmlite')",
+        "ImportError('incompatible numba build')",
+    ],
+    ids=["transitive_missing_module", "incompatible_build"],
+)
+def test_numba_import_failure_is_not_masked(error):
+    """A broken or incompatible Numba installation keeps its original error."""
     result = _run_isolated(
-        BLOCK_NUMBA.format(
-            error="ModuleNotFoundError(\"No module named 'llvmlite'\", name='llvmlite')"
-        )
-        + "from copairs.map import average_precision\n"
+        BLOCK_NUMBA.format(error=error) + "from copairs.map import average_precision\n"
         "try:\n"
         "    average_precision(None, None, [], [], [], [], backend='numba')\n"
-        "except ModuleNotFoundError as exc:\n"
-        "    assert exc.name == 'llvmlite'\n"
-        "    assert 'copairs[numba]' not in str(exc)\n"
+        "except ImportError as exc:\n"
+        f"    expected = {error}\n"
+        "    assert type(exc) is type(expected), exc\n"
+        "    assert (str(exc), exc.name) == (str(expected), expected.name), exc\n"
         "else:\n"
-        "    raise AssertionError('transitive import failure was masked')\n"
+        "    raise AssertionError('the import failure was masked')\n"
     )
     assert result.returncode == 0, result.stderr
 
 
-def test_incompatible_numba_import_error_is_not_masked():
-    """An incompatible Numba installation keeps its original ImportError."""
+def test_fastap_does_not_import_nulls():
+    """The AP kernels stand alone: copairs.nulls and copairs.map stay unloaded.
+
+    copairs.map loads statsmodels.
+    """
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
     result = _run_isolated(
-        BLOCK_NUMBA.format(error="ImportError('incompatible numba build')")
-        + "from copairs.map import average_precision\n"
-        "try:\n"
-        "    average_precision(None, None, [], [], [], [], backend='numba')\n"
-        "except ImportError as exc:\n"
-        "    assert str(exc) == 'incompatible numba build'\n"
-        "else:\n"
-        "    raise AssertionError('incompatible import failure was masked')\n"
+        "import sys\n"
+        "import copairs.fastap\n"
+        "for name in ('copairs.nulls', 'copairs.map', 'statsmodels'):\n"
+        "    assert not any(m == name or m.startswith(name + '.')\n"
+        "                   for m in sys.modules), name\n"
     )
     assert result.returncode == 0, result.stderr
 

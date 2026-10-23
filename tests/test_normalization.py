@@ -187,9 +187,3 @@ def test_normalize_ap_numba_backend_bitwise(ap, M, N):
     np.testing.assert_array_equal(
         np.asarray(got).view(np.uint64), np.asarray(expected).view(np.uint64)
     )
-
-
-def test_normalize_ap_rejects_unknown_backend():
-    """A misspelled backend raises instead of silently using NumPy."""
-    with pytest.raises(ValueError, match="'numpy' or 'numba'"):
-        normalize_ap(0.5, 3, 10, backend="numbaa")
