@@ -173,13 +173,16 @@ def test_average_precision_numba_similarity():
 
 
 def reference_draw_ap(query, reference):
-    """AP of each query by fully sorting its rank list (ties: queries first)."""
+    """AP of each query by fully sorting its rank list.
+
+    Ranked by copairs' float32 key ``1 - similarity``; ties put queries first.
+    """
     k = len(query)
     feats = np.concatenate([query, reference]).astype(np.float64)
     feats = (feats / np.linalg.norm(feats, axis=1, keepdims=True)).astype(np.float32)
-    sims = feats[:k] @ feats.T
-    sims[np.arange(k), np.arange(k)] = -np.inf
-    order = np.argsort(-sims, axis=1, kind="stable")[:, :-1]
+    keys = np.float32(1) - feats[:k] @ feats.T
+    keys[np.arange(k), np.arange(k)] = np.inf
+    order = np.argsort(keys, axis=1, kind="stable")[:, :-1]
     rel_k = np.nonzero(order < k)[1].reshape(k, k - 1)
     return (np.arange(1, k, dtype=np.float64) / (rel_k + 1)).mean(axis=1)
 
@@ -201,6 +204,40 @@ def test_draw_average_precisions(k, m, ties):
         feats, queries, refs, budget_bytes=4 * (k + m) * 100 * 7
     )
     np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-15)
+
+
+def exact_draws(case, rng):
+    """Features whose unit rows and cosines are exact in float32 and float64."""
+    if case == "collision":
+        # Query 0's negative 2 has cosine 2**-30, its positive 1 has 0: the
+        # same float32 key 1 - cosine, so the positive ranks first.
+        feats = np.eye(4, dtype=np.float32)
+        feats[2, 0] = 2.0**-30  # norm 1 in float64
+        return feats, [np.arange(4)], 2
+    # Four entries of +-1 per row: cosines are multiples of 1/4 and tie often.
+    feats = np.zeros((60, 16), dtype=np.float32)
+    for row in feats:
+        row[rng.choice(16, 4, replace=False)] = rng.choice([-1, 1], 4)
+    return feats, [rng.choice(60, 36, replace=False) for _ in range(5)], 6
+
+
+@pytest.mark.parametrize("case", ["collision", "ties"])
+def test_draw_average_precisions_match_average_precision(case):
+    """Draw APs equal average_precision(backend="numba") on the same rank lists."""
+    feats, draws, k = exact_draws(case, np.random.default_rng(8))
+    got = fastap.draw_average_precisions(
+        feats, [r[:k] for r in draws], [r[k:] for r in draws]
+    )
+    for draw, ap in zip(draws, got):
+        # Queries share one label; each reference has its own, so it has no
+        # positives and is ranked by the queries as a negative only.
+        meta = pd.DataFrame({"g": ["q"] * k + [f"r{i}" for i in draw[k:]]})
+        result = average_precision(
+            meta, feats[draw], ["g"], [], [], ["g"], progress_bar=False, backend="numba"
+        )
+        np.testing.assert_array_equal(ap, result["average_precision"].to_numpy()[:k])
+    if case == "collision":
+        np.testing.assert_array_equal(got, [[1.0, 1.0]])
 
 
 def test_draw_average_precisions_validation():

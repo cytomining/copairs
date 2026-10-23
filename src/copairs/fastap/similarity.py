@@ -27,23 +27,32 @@ _ROW_BLOCK = 8192
 PAIR_CHUNK = 1 << 24
 
 
-def _unit_rows(feats: np.ndarray, center: bool) -> np.ndarray:
+def _unit_rows(
+    feats: np.ndarray, center: bool, dtype=None, strict: bool = False
+) -> np.ndarray:
     """Rows scaled to unit norm (after centering for correlation).
 
     Computed in float64 one block of rows at a time, so the temporaries stay
-    small, and stored as float32 unless ``feats`` is float64.
+    small, and stored as ``dtype``: by default float32 unless ``feats`` is
+    float64. With ``strict``, non-finite and zero norms raise ValueError
+    instead of giving NaN rows.
     """
-    out = np.empty(
-        feats.shape, dtype=np.float64 if feats.dtype == np.float64 else np.float32
-    )
+    if dtype is None:
+        dtype = np.float64 if feats.dtype == np.float64 else np.float32
+    out = np.empty(feats.shape, dtype=dtype)
     with np.errstate(divide="ignore", invalid="ignore"):
         for start in range(0, len(feats), _ROW_BLOCK):
             x = np.asarray(feats[start : start + _ROW_BLOCK], dtype=np.float64)
             if center:
                 x = x - x.mean(axis=1, keepdims=True)
-            out[start : start + _ROW_BLOCK] = x / np.linalg.norm(
-                x, axis=1, keepdims=True
-            )
+            norms = np.linalg.norm(x, axis=1, keepdims=True)
+            if strict and not np.isfinite(norms).all():
+                raise ValueError("non-finite features; clean them first")
+            if strict and (norms == 0).any():
+                raise ValueError(
+                    "zero-norm feature vector; cosine similarity is undefined"
+                )
+            out[start : start + _ROW_BLOCK] = x / norms
     return out
 
 
