@@ -11,6 +11,12 @@ METHODS = ("fast", "legacy")
 BACKENDS = ("auto", "numba", "numpy")
 
 
+def _check_backend(backend: str) -> None:
+    """Raise ValueError unless ``backend`` names a known backend."""
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+
+
 def check_method(method: str, backend: str = "auto") -> None:
     """Raise ValueError unless ``method`` and ``backend`` name known choices.
 
@@ -19,8 +25,7 @@ def check_method(method: str, backend: str = "auto") -> None:
     """
     if method not in METHODS:
         raise ValueError(f"unknown method {method!r}; expected one of {METHODS}")
-    if backend not in BACKENDS:
-        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+    _check_backend(backend)
 
 
 def available_backends() -> list[str]:
@@ -37,8 +42,7 @@ def resolve_backend(backend: str) -> str:
     otherwise. That choice cannot change results: both backends return
     bitwise-identical null samples and counts (tested).
     """
-    if backend not in BACKENDS:
-        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+    _check_backend(backend)
     if backend == "auto":
         return available_backends()[0]
     if backend == "numba":
