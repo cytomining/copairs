@@ -26,6 +26,43 @@ To also install dependencies for running examples, run:
 pip install copairs[demo]
 ```
 
+#### Null distributions and the optional Numba backend
+
+The AP and mAP p-value functions (`compute.p_values`,
+`map.average_precision.p_values`, `mean_average_precision`,
+`mean_average_precision_hierarchical` and `get_map_pvalue`) take
+`method="fast"` (default) or `"legacy"`, and a `backend`:
+
+- `"fast"` samples each AP null exactly (Philox counter-based RNG, Vitter's
+  Algorithm A) in O(1) memory per sample, instead of permuting a
+  `null_size x total` matrix, and streams p-values in bounded memory without a
+  disk cache. Sample `j` of a `(num_pos, total)` null depends only on
+  `(seed, num_pos, total, j)`, with `seed` in `[0, 2**64)`.
+- `"legacy"` is copairs 0.5.5's null, seeded per configuration and cached
+  under `cache_dir` (default `~/.copairs`).
+- The fast method's null samples come from a different random stream, so
+  p-values agree with `"legacy"` within Monte Carlo error. Its mAP p-values
+  count null values `>=` the observed mAP, as in the paper; legacy counts `>`,
+  which gives too small p-values when the mAP equals an atom of the null
+  (e.g. perfect retrieval).
+
+`backend="numpy"` needs nothing extra. `backend="numba"` compiles the same
+code with [Numba](https://numba.pydata.org), an optional dependency:
+```bash
+pip install copairs[numba]
+```
+The two backends return bitwise-identical nulls and p-values, so
+`backend="auto"` (default) uses Numba whenever it is installed.
+
+Numba starts one thread per host CPU. In a container or job with a CPU quota,
+set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs. If
+Numba uses its GNU OpenMP threading layer (the default when it cannot load
+TBB), a process forked after copairs ran a Numba kernel stops when it runs one
+itself ("Terminating: fork() called from a process already using GNU
+OpenMP"). Use the `spawn` or `forkserver` start method, set
+`NUMBA_THREADING_LAYER=workqueue` before the first copairs call, or pass
+`backend="numpy"` in the children.
+
 ### Testing
 
 To run tests, run:
