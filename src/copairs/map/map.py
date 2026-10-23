@@ -39,6 +39,7 @@ def get_map_pvalue(
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
     pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
 
@@ -120,6 +121,21 @@ def get_map_pvalue(
         concatenated from several AP calls) need ``pairs=`` or another null.
         The joint null takes its positive pairs from ``pairs`` too, or from
         the attached pairs (see ``pos_pairs``), except `LabelPairs`.
+    stop_after : int, optional
+        Permutation null only: stop a group's draws at its ``stop_after``-th
+        draw whose mAP reaches the group's, and report ``stop_after / draws``
+        (Besag and Clifford's sequential p-value, valid like the fixed-size
+        one). Groups with large p-values then need few draws, while groups
+        that never reach ``stop_after`` hits run all ``null_size`` draws and
+        keep the usual p-value, so small p-values keep their resolution.
+        Draw ``j`` is the same either way: a stopped run is a prefix of the
+        full one. Near a decision threshold, though, a stopped p-value has
+        about ``1 / sqrt(stop_after)`` relative Monte Carlo error whatever
+        ``null_size`` is, so borderline calls change with the seed (on the
+        paper's cellhealth data, ``stop_after=10`` flipped 8 of ~210 calls
+        between seeds where full runs flipped none, at 3-6x the speed). Use
+        it to screen, or with a larger value for final calls. Default: run
+        all draws.
 
     Returns
     -------
@@ -135,6 +151,9 @@ def get_map_pvalue(
     null = check_null(null)
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
+    if null != "permutation" and stop_after is not None:
+        raise ValueError("stop_after is used by the permutation null only")
+    stop_after = permutation.check_stop_after(stop_after)
     if null != "copied" and pos_pairs is None and pairs is None:
         pairs = attached_pairs(ap_scores)
     if null == "joint" and isinstance(pairs, LabelPairs):
@@ -218,6 +237,7 @@ def get_map_pvalue(
             observed=scores,
             progress_bar=progress_bar,
             max_workers=max_workers,
+            stop_after=stop_after,
         )
         return map_scores
 
@@ -237,6 +257,7 @@ def get_map_pvalue(
             progress_bar=progress_bar,
             max_workers=max_workers,
             pos_diffby=pairs.pos_diffby,
+            stop_after=stop_after,
         )
         return map_scores
 
@@ -330,6 +351,7 @@ def mean_average_precision(
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
     pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
 
@@ -369,6 +391,9 @@ def mean_average_precision(
     pairs : RankPairs, optional
         Pairs of the AP scores, needed by ``null="permutation"`` and attached
         to AP frames; see `get_map_pvalue`.
+    stop_after : int, optional
+        Stop each group's permutation draws at its ``stop_after``-th draw
+        reaching its mAP; see `get_map_pvalue`.
 
     Returns
     -------
@@ -398,6 +423,7 @@ def mean_average_precision(
         pos_pairs=pos_pairs,
         null=null,
         pairs=pairs,
+        stop_after=stop_after,
     )
 
     # Step 2: Apply multiple testing correction
@@ -423,6 +449,7 @@ def mean_average_precision_hierarchical(
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
     pairs: RankPairs | None = None,
+    stop_after: int | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
 
@@ -475,6 +502,9 @@ def mean_average_precision_hierarchical(
     pairs : RankPairs, optional
         Pairs of the AP scores, needed by ``null="permutation"`` and attached
         to AP frames; see `get_map_pvalue`.
+    stop_after : int, optional
+        Stop each group's permutation draws at its ``stop_after``-th draw
+        reaching its mAP; see `get_map_pvalue`.
 
     Returns
     -------
@@ -508,6 +538,7 @@ def mean_average_precision_hierarchical(
         pos_pairs=pos_pairs,
         null=null,
         pairs=pairs,
+        stop_after=stop_after,
     )
 
     # Step 2: Apply hierarchical multiple testing correction

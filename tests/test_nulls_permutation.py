@@ -76,9 +76,10 @@ def draws_of(meta, feats, spec, null_size, seed=0):
     """Observed mAP and the null's draws for group "q"."""
     observed, layout, pairs = group_of_q(meta, feats, spec)
     out = np.empty(null_size)
-    count, identity, _ = permutation.permutation_null(
+    count, identity, _, draws = permutation.permutation_null(
         *layout, pairs.similarity, null_size, seed, out=out
     )
+    assert draws == null_size
     return observed, identity, count, out
 
 
@@ -167,9 +168,10 @@ def test_hits_match_scalar_draws():
     feats = np.random.default_rng(21).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
     observed, group, pairs = group_of_q(meta, feats, spec)
-    count, identity, pool = permutation.permutation_null(
+    count, identity, pool, draws = permutation.permutation_null(
         *group, pairs.similarity, 700, 5
     )
+    assert draws == 700
     members, edges, _, block_of = group
     layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
     _, maps = scalar_draws(layout, 0, 700, *permutation.group_key(5, members))
@@ -211,7 +213,8 @@ def test_matches_relabelled_average_precision(plates, reps, ctrls, spec):
     assert count == (draws >= identity - 1e-10).sum()
 
 
-def test_calibrated_on_exchangeable_profiles():
+@pytest.mark.parametrize("stop_after", [None, 10])
+def test_calibrated_on_exchangeable_profiles(stop_after):
     """Groups of profiles drawn like their controls get uniform p-values."""
     rng = np.random.default_rng(5)
     n_groups, reps, ctrls = 300, 3, 20
@@ -228,8 +231,9 @@ def test_calibrated_on_exchangeable_profiles():
     )
     ap = ap[meta["g"] != "ctrl"]
     res = mean_average_precision(
-        ap, ["g"], 999, 0.05, 0, progress_bar=False, null="permutation", pairs=pairs
-    )
+        ap, ["g"], 999, 0.05, 0, progress_bar=False, null="permutation",
+        pairs=pairs, stop_after=stop_after,
+    )  # fmt: skip
     p = res["p_value"].to_numpy()
     assert stats.binom(n_groups, 0.05).ppf(0.0005) <= (p <= 0.05).sum()
     assert (p <= 0.05).sum() <= stats.binom(n_groups, 0.05).ppf(0.9995)
@@ -652,9 +656,10 @@ def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0):
     """Observed mAP of ``label`` and the null's draws for it."""
     observed, layout, pool, _ = label_group(meta, feats, label, spec)
     out = np.empty(null_size)
-    count, identity = permutation.label_permutation_null(
+    count, identity, draws = permutation.label_permutation_null(
         *layout, pool, null_size, seed, out=out
     )
+    assert draws == null_size
     return observed, identity, count, out
 
 
@@ -909,3 +914,108 @@ def label_pool_args(meta, feats):
         pairs,
     )  # fmt: skip
     return comp_profiles, nbr_ptr, nbr, pairs.similarity
+
+
+def sequential_expected(draws, identity, null_size, stop_after):
+    """Besag-Clifford p-value from the full, ordered sequence of draws."""
+    hits = np.flatnonzero(draws >= tie_thresholds(identity))
+    if len(hits) >= stop_after:
+        return stop_after / (hits[stop_after - 1] + 1)
+    return (len(hits) + 1) / (null_size + 1)
+
+
+@pytest.mark.parametrize("stop_after", [1, 10, 400, 10**6])
+def test_stop_after_follows_the_draw_sequence(stop_after, monkeypatch):
+    """Stopped runs give stop_after / (draw of that hit), from the same draws.
+
+    The draws run are a prefix of the full run's, whatever the rounds; a
+    run that never reaches stop_after hits keeps the fixed-size p-value.
+    """
+    null_size = 5000
+    meta = layout_meta(2, 2, 6)
+    feats = np.random.default_rng(13).standard_normal((len(meta), 5))
+    spec = dict(SPEC, neg_sameby=["plate"])
+    _, identity, _, full = draws_of(meta, feats, spec, null_size)
+    _, layout, pairs = group_of_q(meta, feats, spec)
+    out = np.full(null_size, np.nan)
+    count, _, _, draws = permutation.permutation_null(
+        *layout, pairs.similarity, null_size, 0, out=out, stop_after=stop_after
+    )
+    got = permutation.sequential_pvalue(count, draws, null_size, stop_after)
+    assert got == sequential_expected(full, identity, null_size, stop_after)
+    np.testing.assert_array_equal(out[:draws], full[:draws])
+    if stop_after == 400:  # stops past the first round
+        assert permutation._FIRST_ROUND < draws < null_size
+    if stop_after == 10**6:
+        assert draws == null_size
+    ap = average_precision(meta, feats, progress_bar=False, **spec)
+    ap = ap.query("n_pos_pairs > 0 and g == 'q'")
+    res = mean_average_precision(
+        ap, ["g"], null_size, 0.05, 0, progress_bar=False, stop_after=stop_after
+    )
+    assert res["p_value"].iloc[0] == got
+    monkeypatch.setattr(permutation, "_FIRST_ROUND", 7)
+    monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 77)
+    rounds = mean_average_precision(
+        ap, ["g"], null_size, 0.05, 0, progress_bar=False, stop_after=stop_after
+    )
+    assert rounds["p_value"].iloc[0] == got
+
+
+@pytest.mark.parametrize("hits_at", [[], [0], [255], [255, 767], [0, 255, 256, 1999]])
+def test_count_hits_at_round_edges(hits_at):
+    """Runs stop at the stop_after-th hit of the sequence, wherever rounds end.
+
+    With the default chunk, rounds end after draws 255, 767, 1791 and 1999.
+    """
+    null_size = 2000
+    seq = np.zeros(null_size)
+    seq[hits_at] = 1.0
+    hits = np.flatnonzero(seq)
+    for chunk in (77, 256, 2**16):
+        assert permutation._count_hits(
+            lambda start, size: seq[start : start + size], null_size, 0.5, chunk
+        ) == (len(hits), null_size)
+        for stop_after in (1, 2, 3, 4, 5):
+            got = permutation._count_hits(
+                lambda start, size: seq[start : start + size], null_size, 0.5,
+                chunk, stop_after,
+            )  # fmt: skip
+            if len(hits) >= stop_after:
+                assert got == (stop_after, hits[stop_after - 1] + 1)
+            else:
+                assert got == (len(hits), null_size)
+
+
+def test_stop_after_on_multilabel_groups():
+    """Multilabel groups stop the same way."""
+    meta = label_meta()
+    feats = np.random.default_rng(14).standard_normal((len(meta), 5))
+    ap = multilabel_ap(meta, feats)
+    res = mean_average_precision(
+        ap, ["target"], 3000, 0.05, 0, progress_bar=False, stop_after=10
+    ).set_index("target")
+    for label in ("A", "B"):
+        _, identity, count, full = label_draws(meta, feats, label, 3000)
+        assert count >= 10  # the run stopped
+        expected = sequential_expected(full, identity, 3000, 10)
+        assert res.loc[label, "p_value"] == expected
+
+
+def test_stop_after_arguments():
+    """stop_after is a positive integer, for the permutation null only."""
+    meta = layout_meta(1, 3, 6)
+    feats = np.random.default_rng(15).standard_normal((len(meta), 5))
+    ap = average_precision(meta, feats, progress_bar=False, **SPEC)
+    args = (["g"], 100, 0.05, 0)
+    for null in ("joint", "copied"):
+        with pytest.raises(ValueError, match="permutation null only"):
+            mean_average_precision(
+                ap, *args, progress_bar=False, null=null, stop_after=10
+            )
+    for bad in (0, -1, 2.5):
+        with pytest.raises(ValueError, match="positive integer"):
+            mean_average_precision(ap, *args, progress_bar=False, stop_after=bad)
+    default = mean_average_precision(ap, *args, progress_bar=False)
+    explicit = mean_average_precision(ap, *args, progress_bar=False, stop_after=None)
+    assert default["p_value"].tolist() == explicit["p_value"].tolist()

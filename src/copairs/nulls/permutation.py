@@ -21,6 +21,10 @@ recomputes the group's mAP from integer rank codes, with IEEE divisions and
 additions in a fixed order. :func:`_draws_np` and :func:`_group_maps_np`
 perform the same operations vectorized over draws and give identical mAPs.
 
+With ``stop_after``, a group's draws stop at its ``stop_after``-th draw that
+reaches its mAP (:func:`sequential_pvalue`); draw ``j`` stays the same, so
+a stopped run is a prefix of the full one.
+
 A multilabel group (:func:`label_permutation_pvalues`) holds one label of a
 multilabel column, and its pools are whole components of the graph of
 negative pairs, members included: a draw moves the label to as many of each
@@ -79,6 +83,9 @@ RANK_POOL = 2**12
 # Elements of the per-slot arrays of one vectorized chunk of draws.
 _CHUNK_ELEMENTS = 2**22
 _FULL_TABLE = 2**20  # largest (code, code) table a layout gathers from
+# A run that may stop early (``stop_after``) starts with this many draws and
+# doubles them each round, up to the layout's chunk.
+_FIRST_ROUND = 256
 
 # Rank code of a NaN key: after every number.
 _NAN = np.uint32(0xFFFFFFFF)
@@ -926,15 +933,17 @@ def group_key(seed: int, members, label=None) -> tuple[np.uint64, np.uint64]:
 
 def permutation_null(
     members, edges, blocks, block_of, similarity, null_size, seed, pool=None,
-    out=None,
+    out=None, stop_after=None,
 ):  # fmt: skip
-    """Run ``null_size`` label permutations of one group.
+    """Run up to ``null_size`` label permutations of one group.
 
-    Returns ``(count, identity, pool)``: the draws whose mAP ties or exceeds
-    the observed labels' (``identity``, within
-    :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP,
-    and the reference pool, reusable by groups ranking the same references.
-    ``out`` receives the draws' mAPs if given.
+    Returns ``(count, identity, pool, draws)``: the draws whose mAP ties or
+    exceeds the observed labels' (``identity``, within
+    :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP, the
+    reference pool, reusable by groups ranking the same references, and the
+    draws run, fewer than ``null_size`` when ``stop_after`` hits came first
+    (:func:`sequential_pvalue`). ``out`` receives the mAPs of the draws run
+    (whole rounds, see :func:`_count_hits`) if given.
     """
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
@@ -942,14 +951,69 @@ def permutation_null(
     k0, k1 = group_key(seed, members)
     identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
     thr = float(tie_thresholds(identity))
+
+    def maps_of(start, size):
+        return _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
+
+    count, draws = _count_hits(
+        maps_of, int(null_size), thr, layout.chunk(), stop_after, out
+    )
+    return count, identity, pool, draws
+
+
+def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
+    """Count a group's draws whose mAP reaches ``thr``, stopping at ``stop_after``.
+
+    ``maps_of(start, size)`` returns the mAPs of draws ``start, ...,
+    start + size - 1``. Without ``stop_after`` all ``null_size`` draws run in
+    chunks of ``chunk``; with it, rounds start at :data:`_FIRST_ROUND` draws
+    and double up to ``chunk``, and the run stops at its ``stop_after``-th
+    hit. Returns ``(count, draws)``: the hits and the draws they came from,
+    which is the draw of the ``stop_after``-th hit when the run stops early.
+    Draw ``j`` does not depend on the rounds, so neither does the result.
+    ``out`` receives the mAPs of the rounds run.
+    """
     count = 0
-    chunk = layout.chunk()
-    for start, size in chunks(int(null_size), chunk):
-        maps = _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
+    start = 0
+    size = chunk if stop_after is None else min(_FIRST_ROUND, chunk)
+    while start < null_size:
+        size = min(size, null_size - start)
+        maps = maps_of(start, size)
         if out is not None:
             out[start : start + size] = maps
-        count += int((maps >= thr).sum())
-    return count, identity, pool
+        hits = maps >= thr
+        if stop_after is not None:
+            seen = np.cumsum(hits)
+            if count + seen[-1] >= stop_after:
+                at = int(np.searchsorted(seen, stop_after - count))
+                return stop_after, start + at + 1
+            size = min(2 * size, chunk)
+        count += int(hits.sum())
+        start += len(hits)
+    return count, null_size
+
+
+def sequential_pvalue(count, draws, null_size, stop_after=None) -> float:
+    """P-value of a run of :func:`permutation_null` or :func:`label_permutation_null`.
+
+    ``(count + 1) / (null_size + 1)`` after all draws, and ``count / draws``
+    when the run stopped at its ``stop_after``-th hit (Besag and Clifford,
+    1991, Biometrika 78:301). Both are valid p-values; stopping spends few
+    draws on groups with large p-values and none of the resolution of small
+    ones, which run all draws.
+    """
+    if stop_after is not None and count >= stop_after:
+        return count / draws
+    return (count + 1) / (null_size + 1)
+
+
+def check_stop_after(stop_after):
+    """Return ``stop_after`` as an int, or None; raise unless a positive integer."""
+    if stop_after is None:
+        return None
+    if int(stop_after) != stop_after or stop_after < 1:
+        raise ValueError(f"stop_after must be a positive integer, got {stop_after}")
+    return int(stop_after)
 
 
 def _pool_bytes(blocks):
@@ -1039,7 +1103,7 @@ def _check_identity(g, identity, observed):
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
     null_size, seed, observed=None, progress_bar=False, max_workers=None,
-    pos_diffby=None,
+    pos_diffby=None, stop_after=None,
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
 
@@ -1077,6 +1141,10 @@ def permutation_pvalues(
         ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
         columns, indexed like the pairs; layouts whose draws could break
         that rule raise (:func:`check_pos_diffby`). Not checked when omitted.
+    stop_after : int, optional
+        Stop a group's draws at its ``stop_after``-th draw that reaches its
+        mAP, with ``p = stop_after / draws`` (:func:`sequential_pvalue`).
+        Default: run all draws.
 
     Returns
     -------
@@ -1085,6 +1153,7 @@ def permutation_pvalues(
     """
     null_size = check_null_size(null_size)
     seed = resolve_seed(seed)
+    stop_after = check_stop_after(stop_after)
     profile = np.asarray(profile, dtype=np.int64)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
@@ -1096,13 +1165,13 @@ def permutation_pvalues(
     def pvalue(g):
         try:
             pool = pools.acquire(g)
-            count, identity, _ = permutation_null(
-                *layouts[g], similarity, null_size, seed, pool
+            count, identity, _, draws = permutation_null(
+                *layouts[g], similarity, null_size, seed, pool, stop_after=stop_after
             )
         finally:
             pools.release(g)
         _check_identity(g, identity, observed)
-        return (count + 1) / (null_size + 1)
+        return sequential_pvalue(count, draws, null_size, stop_after)
 
     pvals = np.empty(len(groups), dtype=np.float64)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -1558,29 +1627,31 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
 
 
 def label_permutation_null(
-    members, edges, lone, comps, block_of, key, pool, null_size, seed, out=None
-):
-    """Run ``null_size`` moves of one multilabel group's label on its pool.
+    members, edges, lone, comps, block_of, key, pool, null_size, seed, out=None,
+    stop_after=None,
+):  # fmt: skip
+    """Run up to ``null_size`` moves of one multilabel group's label on its pool.
 
     ``pool`` is the ``_LabelPool`` of its ``comps``. Returns ``(count,
-    identity)`` as :func:`permutation_null`.
+    identity, draws)`` as :func:`permutation_null`.
     """
     layout = _LabelLayout(members, edges, lone, block_of, pool)
     k0, k1 = group_key(seed, members, key)
     identity = float(_label_maps_np(layout, layout.member_code[None])[0])
     thr = float(tie_thresholds(identity))
-    count = 0
-    for start, size in chunks(int(null_size), layout.chunk()):
-        maps = _label_maps_np(layout, _draws_pool_np(layout, start, size, k0, k1))
-        if out is not None:
-            out[start : start + size] = maps
-        count += int((maps >= thr).sum())
-    return count, identity
+
+    def maps_of(start, size):
+        return _label_maps_np(layout, _draws_pool_np(layout, start, size, k0, k1))
+
+    count, draws = _count_hits(
+        maps_of, int(null_size), thr, layout.chunk(), stop_after, out
+    )
+    return count, identity, draws
 
 
 def label_permutation_pvalues(
     groups, rows, labels, num_pos, num_total, pairs, null_size, seed,
-    observed=None, progress_bar=False, max_workers=None,
+    observed=None, progress_bar=False, max_workers=None, stop_after=None,
 ):  # fmt: skip
     """P-value of each multilabel group's mAP against moves of its label.
 
@@ -1600,7 +1671,7 @@ def label_permutation_pvalues(
         The AP table's index (rows of ``pairs.profile``).
     labels : np.ndarray
         The AP rows' labels (``pairs.label_col``).
-    num_pos, num_total, null_size, seed, observed, progress_bar, max_workers
+    num_pos, num_total, null_size, seed, observed, progress_bar, max_workers, stop_after
         As in :func:`permutation_pvalues`; pools are components' profiles.
     pairs : copairs.map.LabelPairs
         The pairs the APs were computed from. Layouts whose draws could
@@ -1613,6 +1684,7 @@ def label_permutation_pvalues(
     """
     null_size = check_null_size(null_size)
     seed = resolve_seed(seed)
+    stop_after = check_stop_after(stop_after)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
@@ -1642,11 +1714,13 @@ def label_permutation_pvalues(
     def pvalue(g):
         try:
             pool = pools.acquire(g)
-            count, identity = label_permutation_null(*layouts[g], pool, null_size, seed)
+            count, identity, draws = label_permutation_null(
+                *layouts[g], pool, null_size, seed, stop_after=stop_after
+            )
         finally:
             pools.release(g)
         _check_identity(g, identity, observed)
-        return (count + 1) / (null_size + 1)
+        return sequential_pvalue(count, draws, null_size, stop_after)
 
     pvals = np.empty(len(groups), dtype=np.float64)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
