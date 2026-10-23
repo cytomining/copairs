@@ -996,6 +996,9 @@ def test_labels_with_one_holder_set_draw_independently():
     assert not np.array_equal(a, b)
     members = [2, 0, 1]
     assert permutation.group_key(5, members) == stream_key(5, (0, 1, 2))
+    # The label key keeps #150's text, "(seed, members)/label".
+    assert permutation._label_key(3, [12, 4, 7], 2) == (3205283342, 3195927061)
+    assert permutation._label_key(3, [12, 4, 7], 2) == stream_key(3, (4, 7, 12), "/2")
     assert permutation._label_key(5, members, 0) != permutation._label_key(
         5, members, 1
     )

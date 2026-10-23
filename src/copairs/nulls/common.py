@@ -46,13 +46,14 @@ def resolve_seed(seed: int | None) -> int:
     return int(seed)
 
 
-def stream_key(seed: int, obj) -> tuple[np.uint64, np.uint64]:
+def stream_key(seed: int, obj, suffix: str = "") -> tuple[np.uint64, np.uint64]:
     """Philox key ``(k0, k1)`` of ``obj``'s draws: a pure function of ``(seed, obj)``.
 
-    The key is the 64-bit blake2b digest of ``repr((seed, obj))``, so ``obj``
-    must have a deterministic ``repr`` (tuples of ints).
+    The key is the 64-bit blake2b digest of ``repr((seed, obj)) + suffix``,
+    so ``obj`` must have a deterministic ``repr`` (tuples of ints).
     """
-    digest = hashlib.blake2b(repr((int(seed), obj)).encode(), digest_size=8)
+    text = repr((int(seed), obj)) + suffix
+    digest = hashlib.blake2b(text.encode(), digest_size=8)
     word = int.from_bytes(digest.digest(), "little")
     return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
 

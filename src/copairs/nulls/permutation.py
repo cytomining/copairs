@@ -34,7 +34,6 @@ vectorized twins.
 """
 
 import os
-import hashlib
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
@@ -967,11 +966,7 @@ def _label_key(seed: int, members, label) -> tuple[np.uint64, np.uint64]:
     ``label``, the index of the group's label, gives groups of the same
     profiles but different labels independent draws.
     """
-    members = tuple(sorted(int(m) for m in members))
-    text = f"{(int(seed), members)!r}/{int(label)}"
-    digest = hashlib.blake2b(text.encode(), digest_size=8)
-    word = int.from_bytes(digest.digest(), "little")
-    return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
+    return stream_key(seed, tuple(sorted(int(m) for m in members)), f"/{int(label)}")
 
 
 class _Run:
