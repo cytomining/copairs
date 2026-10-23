@@ -77,3 +77,21 @@ def create_dframe(n_options, n_rows):
     dframe = pd.DataFrame((product(colc, colp, colw)), columns=list("cpw"))
     dframe = dframe.sample(n_rows, random_state=SEED).reset_index(drop=True)
     return dframe
+
+
+def ap_frame(rows):
+    """Build an ``ap_scores`` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
+    frame = pd.DataFrame(
+        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
+    )
+    frame["normalized_average_precision"] = 0.0
+    return frame
+
+
+def query_meta(others: int = 0) -> pd.DataFrame:
+    """Four replicates of group "query" among 30 one-profile controls.
+
+    ``others`` profiles of group "other" follow the controls.
+    """
+    groups = ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * others
+    return pd.DataFrame({"g": groups})

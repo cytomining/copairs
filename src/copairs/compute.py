@@ -33,9 +33,11 @@ def parallel_map(
     """
     # Total number of items to process
     num_items = len(items)
+    if num_items == 0:
+        return
 
     # Determine the number of threads to use, limited by CPU count
-    pool_size = min(num_items, os.cpu_count())
+    pool_size = min(num_items, os.cpu_count() or 1)
 
     # Calculate chunk size for dividing work among threads
     chunksize = num_items // pool_size
@@ -312,6 +314,16 @@ def get_similarity_fn(
     >>> distance_fn = get_distance_fn("cosine")
     >>> similarity_scores = distance_fn(x_sample, y_sample)
     """
+    # Wrap the distance function for efficient batch processing
+    return batch_processing(pairwise_similarity_fn(distance), progress_bar=progress_bar)
+
+
+def pairwise_similarity_fn(distance: Union[str, Callable]) -> Callable:
+    """Return the ``(x_sample, y_sample) -> similarities`` function of ``distance``.
+
+    The unbatched function :func:`get_similarity_fn` wraps; ``distance`` is
+    as there.
+    """
     # Dictionary of supported similarity functions
     similarity_functions = {
         "abs_cosine": pairwise_abs_cosine,
@@ -340,9 +352,7 @@ def get_similarity_fn(
     else:
         # Raise an error if neither a string nor a callable is provided
         raise ValueError("Distance must be either a string or a callable object.")
-
-    # Wrap the distance function for efficient batch processing
-    return batch_processing(similarity_fn, progress_bar=progress_bar)
+    return similarity_fn
 
 
 def random_binary_matrix(n, m, k, rng):
@@ -493,7 +503,8 @@ def null_dist_cached(
 ) -> np.ndarray:
     """Generate or retrieve a cached null distribution for a given configuration.
 
-    Each (num_pos, total) pair is cached as an individual .npy file. Reads
+    Each (num_pos, total, seed) triple is cached as an individual .npy file,
+    so a cached null is exactly the one ``random_ap`` would generate. Reads
     are lock-free (just np.load), and writes use atomic rename to prevent
     corruption from concurrent workers.
 
@@ -518,12 +529,17 @@ def null_dist_cached(
     if seed is None:
         return random_ap(null_size, num_pos, total, seed)
 
-    path = cache_dir / f"n{total}_k{num_pos}.npy"
+    path = cache_dir / f"n{total}_k{num_pos}_s{seed}.npy"
     null_dist = _cache_read(path)
     if null_dist is None:
         null_dist = random_ap(null_size, num_pos, total, seed)
         _cache_write(path, null_dist)
     return null_dist
+
+
+def _conf_seed(seed: int, num_pos: int, total: int) -> int:
+    """Return the seed of one configuration's null, a function of its values only."""
+    return int(np.random.SeedSequence([seed, num_pos, total]).generate_state(1)[0])
 
 
 def get_null_dists(
@@ -543,7 +559,9 @@ def get_null_dists(
     null_size : int
         Number of samples to generate in the null distribution.
     seed : int
-        Random seed for reproducibility.
+        Random seed for reproducibility. Each configuration's null is seeded by
+        ``(seed, num_pos, total)``, so it does not depend on the other
+        configurations. With ``None``, nulls are fresh draws and are not cached.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
 
@@ -555,22 +573,18 @@ def get_null_dists(
     """
     cache_dir = Path.home() / ".copairs" if cache_dir is None else Path(cache_dir)
     cache_dir = cache_dir / f"seed{seed}" / f"ns{null_size}"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    if seed is not None:
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
     num_confs = len(confs)
-    rng = np.random.default_rng(seed)
-    seeds = rng.integers(8096, size=num_confs)
-
     null_dists = np.empty([len(confs), null_size], dtype=np.float32)
 
     def par_func(i):
         num_pos, total = confs[i]
-        path = cache_dir / f"n{total}_k{num_pos}.npy"
-        null_dist = _cache_read(path)
-        if null_dist is None:
-            null_dist = random_ap(null_size, num_pos, total, seeds[i])
-            _cache_write(path, null_dist)
-        null_dists[i] = null_dist
+        conf_seed = None if seed is None else _conf_seed(seed, num_pos, total)
+        null_dists[i] = null_dist_cached(
+            num_pos, total, conf_seed, null_size, cache_dir
+        )
 
     parallel_map(par_func, np.arange(num_confs), progress_bar)
 
