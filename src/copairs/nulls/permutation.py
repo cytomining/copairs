@@ -734,12 +734,14 @@ def _positives(layout, s, t, pm):
 
 
 def _mean_precision(before):
-    """Each row's AP, its ``d``-th positive ranked after ``before[:, d]`` negatives."""
+    """Each row's AP, its ``d``-th positive ranked after ``before[:, d]`` negatives.
+
+    The precisions add left to right (a cumulative sum, not a pairwise
+    one), as the scalar ``group_map`` adds them.
+    """
     deg = before.shape[1]
-    acc = np.zeros(len(before))
-    for d in range(deg):
-        acc += (d + 1) / (d + 1 + before[:, d])
-    return acc / deg
+    rank = np.arange(1, deg + 1)
+    return np.cumsum(rank / (rank + before), axis=1)[:, -1] / deg
 
 
 def _mix(x):
