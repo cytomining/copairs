@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 
 from copairs import nulls, compute
-from copairs.nulls.common import check_null_size
 from copairs.nulls.backend import check_method
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
@@ -132,11 +131,8 @@ def _copied_pvalues(
     :func:`nulls.map_pvalues` and counts ties; ``"legacy"`` averages the nulls
     of :func:`compute.get_null_dists` and counts null mAPs ``>`` the score.
     """
-    if not groups:
-        check_null_size(null_size)
-        nulls.resolve_backend(backend)
-        return np.zeros(0, dtype=np.float64)
-    members = np.concatenate(groups).astype(np.int64)
+    members = np.concatenate(groups) if groups else np.zeros(0)
+    members = members.astype(np.int64)
     rows = np.unique(members)
     null_confs = ap_scores.loc[rows, ["n_pos_pairs", "n_total_pairs"]].values
     null_confs, conf_ix = np.unique(null_confs, axis=0, return_inverse=True)

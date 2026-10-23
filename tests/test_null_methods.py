@@ -299,11 +299,9 @@ def test_configurations_without_positives(tmp_path):
     np.testing.assert_array_equal(only_controls, [1.0, 1.0])
 
 
-@pytest.mark.parametrize("method", ["fast", "legacy"])
-@pytest.mark.parametrize("hierarchical", [False, True])
-def test_map_empty_input(method, hierarchical, tmp_path):
-    """No valid AP scores give an empty result with the usual columns."""
-    empty = pd.DataFrame(
+def empty_ap_frame():
+    """AP scores of no profiles, with the usual columns."""
+    return pd.DataFrame(
         {
             "g": pd.Series([], dtype=str),
             "h": pd.Series([], dtype=str),
@@ -313,6 +311,13 @@ def test_map_empty_input(method, hierarchical, tmp_path):
             "n_total_pairs": pd.Series([], dtype=int),
         }
     )
+
+
+@pytest.mark.parametrize("method", ["fast", "legacy"])
+@pytest.mark.parametrize("hierarchical", [False, True])
+def test_map_empty_input(method, hierarchical, tmp_path):
+    """No valid AP scores give an empty result with the usual columns."""
+    empty = empty_ap_frame()
     kwargs = dict(progress_bar=False, method=method, cache_dir=tmp_path)
     if hierarchical:
         result = mean_average_precision_hierarchical(
@@ -333,6 +338,19 @@ def test_p_values_empty(method):
     assert len(pvals) == 0
     nulls_ = compute.get_null_dists(np.empty((0, 2), dtype=int), 100, 0, method=method)
     assert nulls_.shape == (0, 100)
+
+
+@pytest.mark.parametrize(
+    "bad,match", [(dict(seed=-1), "seed must be"), (dict(null_size=-1), "null_size")]
+)
+def test_empty_input_still_validates(bad, match):
+    """The fast method checks the seed and null size of inputs with nothing to rank."""
+    kwargs = dict(null_size=100, seed=0, progress_bar=False) | bad
+    for confs in (np.empty((0, 2), dtype=int), np.array([[0, 10]])):
+        with pytest.raises(ValueError, match=match):
+            compute.p_values(np.zeros(len(confs)), confs, **kwargs)
+    with pytest.raises(ValueError, match=match):
+        mean_average_precision(empty_ap_frame(), ["g"], threshold=0.05, **kwargs)
 
 
 def test_unknown_method():
@@ -370,6 +388,10 @@ def test_numba_backend_without_numba_names_the_extra():
     with pytest.raises(ImportError, match=r"copairs\[numba\]"):
         compute.p_values(np.array([0.5]), [[2, 10]], 10, 0, backend="numba")
     with pytest.raises(ImportError, match=r"copairs\[numba\]"):
+        compute.p_values(np.array([]), np.empty((0, 2)), 10, 0, backend="numba")
+    with pytest.raises(ImportError, match=r"copairs\[numba\]"):
         mean_average_precision(
             perfect_retrieval_scores(), ["g"], 10, 0.05, 0, backend="numba"
         )
+    with pytest.raises(ImportError, match=r"copairs\[numba\]"):
+        mean_average_precision(empty_ap_frame(), ["g"], 10, 0.05, 0, backend="numba")

@@ -635,10 +635,6 @@ def _fast_p_values(ap_scores, confs, rev_ix, null_size, seed, backend, progress_
     ranked = ~_without_positives(confs)
     pvals = np.ones(len(rev_ix), dtype=np.float32)
     rows = ranked[rev_ix]
-    if not rows.any():
-        check_null_size(null_size)
-        nulls.resolve_backend(backend)
-        return pvals
     index = np.cumsum(ranked) - 1  # configuration -> row of confs[ranked]
     pvals[rows] = nulls.ap_pvalues(
         np.asarray(ap_scores)[rows],
