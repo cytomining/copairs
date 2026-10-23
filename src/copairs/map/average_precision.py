@@ -236,7 +236,10 @@ def average_precision(
         needs. They are attached to the returned frame either way, in
         ``frame.attrs["copairs_pairs"]``, and follow it through filtering
         and copies (not saving, pickling or concatenating with other AP
-        calls' frames). They keep ``feats`` and every positive and negative
+        calls' frames). The permutation null accepts filtering out whole
+        groups, not some of a group's members: their APs were computed with
+        the dropped members as positives. They keep ``feats`` and every
+        positive and negative
         pair (8 bytes per pair) alive with the frame, whichever null is used;
         drop them with ``frame.attrs.pop("copairs_pairs")``.
 

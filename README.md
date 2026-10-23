@@ -70,9 +70,13 @@ perfect retrieval) counts the atom.
 
   The pairs (`ap.attrs["copairs_pairs"]`) follow the frame through filtering
   and copies, but not through saving, pickling or concatenating frames of
-  different AP calls; such frames raise under this null. Recompute them,
-  pass `pairs=` (`average_precision(..., return_pairs=True)` also returns
-  them), or choose another null. The attached pairs keep the features and
+  different AP calls; such frames raise under this null. Filter out whole
+  groups (or controls) only: the members' APs were computed with all of
+  their group's members as positives, so dropping some members raises
+  under this null; recompute the APs on the kept profiles or use `"joint"`
+  or `"copied"`. For frames without pairs, recompute the APs, pass
+  `pairs=` (`average_precision(..., return_pairs=True)` also returns them),
+  or choose another null. The attached pairs keep the features and
   every positive and negative pair alive with the frame (8 bytes per pair,
   e.g. 800 MB for 10^8 negative pairs), whichever null is used;
   `ap.attrs.pop("copairs_pairs")` drops them. Frames from

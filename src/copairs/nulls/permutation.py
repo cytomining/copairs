@@ -651,6 +651,20 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     member = profile[rows]
     count, h1, h2, inside = _scan_negatives(neg_pairs, group_of, len(groups), n_prof)
     check_pair_counts(count, member, num_neg[rows], "negative")
+    # Positives to profiles in no group: members dropped from the AP scores.
+    ga, gb = group_of[pos_pairs[:, 0]], group_of[pos_pairs[:, 1]]
+    orphaned = np.unique(np.concatenate([ga[gb < 0], gb[ga < 0]]))
+    orphaned = orphaned[orphaned >= 0]
+    if len(orphaned):
+        raise ValueError(
+            f"{len(orphaned)} group(s) have positives among profiles the AP "
+            "scores no longer have (e.g. some of a group's members were "
+            "dropped after average_precision). Their members' APs were "
+            "computed with them as positives, so relabelling the kept members "
+            "does not test those APs. Drop whole groups only, recompute "
+            "average_precision on the kept profiles, or pass null='joint' or "
+            "null='copied'"
+        )
     bad = leaves | inside
     if bad.any():
         raise ValueError(

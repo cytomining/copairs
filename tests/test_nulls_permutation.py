@@ -313,6 +313,23 @@ def test_rejects_unsupported_layouts():
         )
 
 
+def test_dropped_members_say_why_and_what_to_do():
+    """Dropping some of a group's members raises, naming the cause and the remedies."""
+    meta = layout_meta(1, 3, 5)
+    feats = np.random.default_rng(2).standard_normal((len(meta), 4))
+    ap = average_precision(meta, feats, progress_bar=False, **SPEC)
+    args = (["g"], 100, 0.05, 0)
+    with pytest.raises(
+        ValueError,
+        match=r"1 group\(s\) .* profiles the AP scores no longer have.*"
+        r"computed with them as positives.*recompute average_precision.*"
+        r"null='joint' or null='copied'",
+    ):
+        mean_average_precision(ap.drop(index=[0]), *args, progress_bar=False)
+    kept = ap[ap["g"] == "q"]  # whole groups (and controls) may be dropped
+    assert len(mean_average_precision(kept, *args, progress_bar=False))
+
+
 def test_group_without_references():
     """Members with positives but no negatives have one relabelling: p = 1."""
     meta = pd.DataFrame(
