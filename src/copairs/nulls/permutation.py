@@ -34,6 +34,7 @@ vectorized twins.
 """
 
 import os
+from typing import NamedTuple
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
@@ -1687,11 +1688,8 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
 
     Returns
     -------
-    layouts : list of tuple
-        One ``(members, edges, lone, comps, block_of, key)`` per group: its
-        profiles, its positive and lone pairs between local member indices,
-        the components of the negative graph holding its members, each
-        member's component (index into ``comps``) and its label's index.
+    layouts : list of _LabelGroup
+        Each group's layout.
     comp_profiles : dict
         The sorted profiles of every component, by component.
     neighbours : tuple of np.ndarray
@@ -1734,8 +1732,8 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     }
     labels = np.asarray(pairs.keys).tolist()
     n_keys = len(labels)
-    pos_order, pos_ptr = _segments(pos_key, n_keys)
-    lone_order, lone_ptr = _segments(lone_key, n_keys)
+    pos_segments = _segments(pos_key, n_keys)
+    lone_segments = _segments(lone_key, n_keys)
     local = np.full(n_prof, -1, dtype=np.int64)
     layouts = []
     for ix in groups:
@@ -1753,30 +1751,10 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
         if len(np.unique(members)) != n:
             raise ValueError(f"group {label!r}: its rows must be distinct profiles")
         local[members] = np.arange(n)
-        layout = [members]
-        for found, order_, ptr in (
-            (pos, pos_order, pos_ptr),
-            (lone, lone_order, lone_ptr),
-        ):
-            seg = found[order_[ptr[key] : ptr[key + 1]]]
-            ends_ = local[seg]
-            if (ends_ < 0).any():
-                local[members] = -1
-                missing = np.unique(seg[ends_ < 0])
-                raise ValueError(
-                    f"group {label!r}: {len(missing)} profile(s) holding its "
-                    f"label (e.g. profile {missing[0]}) have no row for it in the "
-                    "group: some of the label's AP rows were dropped after "
-                    "multilabel.average_precision or grouped apart, or those "
-                    "profiles have no positive pairs for it. The permutation "
-                    "null moves the label among all profiles of its components, "
-                    "so it needs every profile holding it in the group. Group "
-                    "by the label alone and keep all of a label's rows, or pass "
-                    "null='joint' or null='copied'"
-                )
-            layout.append(ends_)
-        degree = np.bincount(layout[1].ravel(), minlength=n)
+        edges = _local_pairs(pos, pos_segments, key, local, label)
+        lone_edges = _local_pairs(lone, lone_segments, key, local, label)
         local[members] = -1
+        degree = np.bincount(edges.ravel(), minlength=n)
         n_neg = nbr_ptr[members + 1] - nbr_ptr[members]
         check_pair_counts(degree, members, num_pos[ix], "positive", label)
         check_pair_counts(n_neg, members, num_neg[ix], "negative", label)
@@ -1794,9 +1772,49 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
                 f"profile of its components, up to {MAX_POOL}: {fix}pass "
                 "null='joint' or null='copied'"
             )
-        layout += [tuple(int(c) for c in comps), block_of.ravel().astype(np.int64), key]
-        layouts.append(tuple(layout))
+        layouts.append(
+            _LabelGroup(
+                members, edges, lone_edges, tuple(int(c) for c in comps),
+                block_of.ravel().astype(np.int64), key,
+            )
+        )  # fmt: skip
     return layouts, comp_profiles, (nbr_ptr, nbr)
+
+
+class _LabelGroup(NamedTuple):
+    """One multilabel group's layout (:func:`_label_layouts`)."""
+
+    members: np.ndarray  # its profiles
+    edges: np.ndarray  # its positive pairs, between local member indices
+    lone: np.ndarray  # its lone pairs, between local member indices
+    comps: tuple  # the negative graph's components holding its members
+    block_of: np.ndarray  # each member's component (index into comps)
+    key: int  # its label's index into the pairs' keys
+
+
+def _local_pairs(found, segments, key, local, label):
+    """Label ``key``'s pairs of ``found`` between local member indices (``local``).
+
+    ``segments`` (:func:`_segments`) slices ``found`` by label; a pair to a
+    profile outside the group (``local`` -1) raises.
+    """
+    order, ptr = segments
+    pairs = found[order[ptr[key] : ptr[key + 1]]]
+    ends = local[pairs]
+    if (ends < 0).any():
+        missing = np.unique(pairs[ends < 0])
+        raise ValueError(
+            f"group {label!r}: {len(missing)} profile(s) holding its "
+            f"label (e.g. profile {missing[0]}) have no row for it in the "
+            "group: some of the label's AP rows were dropped after "
+            "multilabel.average_precision or grouped apart, or those "
+            "profiles have no positive pairs for it. The permutation "
+            "null moves the label among all profiles of its components, "
+            "so it needs every profile holding it in the group. Group "
+            "by the label alone and keep all of a label's rows, or pass "
+            "null='joint' or null='copied'"
+        )
+    return ends
 
 
 def _label_run(members, edges, lone, comps, block_of, key, pool, seed, draws=0):
@@ -1859,12 +1877,12 @@ def label_permutation_pvalues(
     degree = np.diff(nbr_ptr)
 
     def pool_bytes(g):
-        parts = [comp_profiles[c] for c in layouts[g][3]]
+        parts = [comp_profiles[c] for c in layouts[g].comps]
         p = sum(len(part) for part in parts)
         return _label_pool_bytes(p, int(sum(degree[part].sum() for part in parts)))
 
     def build(g, table):
-        comps = layouts[g][3]
+        comps = layouts[g].comps
         return _LabelPool(comps, comp_profiles, nbr_ptr, nbr, pairs.similarity, table)
 
     def start(g, pool):
@@ -1872,7 +1890,7 @@ def label_permutation_pvalues(
         _check_identity(g, run.identity, observed)
         return run
 
-    keys = [lay[3] for lay in layouts]
+    keys = [lay.comps for lay in layouts]
     refs = {
         comps: np.concatenate([comp_profiles[c] for c in comps]) for comps in set(keys)
     }
