@@ -98,17 +98,29 @@ def permutation_similarity(feats):
     return lambda pairs: cosine(feats, np.asarray(pairs), 20000)
 
 
-def scalar_draws(layout, start, size, k0, k1):
-    """Return draws ``start, ...`` from the scalar functions, one at a time."""
+def scalar_draws(
+    layout,
+    start,
+    size,
+    k0,
+    k1,
+    draw=permutation._draw,
+    group_map=permutation._group_map,
+):
+    """Return draws ``start, ...`` from the scalar functions, one at a time.
+
+    ``draw`` and ``group_map`` default to the Python ones; Numba's compiled
+    ones run the same way.
+    """
     n = layout.n
     pm = np.empty(n, dtype=np.int64)
     chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
     scratch = map_scratch(n)
     pms, maps = [], []
     for j in range(start, start + size):
-        permutation._draw(j, *layout.draw_args(), k0, k1, pm, chosen)
+        draw(j, *layout.draw_args(), k0, k1, pm, chosen)
         pms.append(pm.copy())
-        maps.append(permutation._group_map(pm, *layout.map_args(), *scratch))
+        maps.append(group_map(pm, *layout.map_args(), *scratch))
     return np.array(pms), np.array(maps)
 
 
@@ -182,12 +194,11 @@ def test_numba_matches_numpy_draws(
     k0, k1 = permutation.group_key(3, members)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
     pm = permutation._draws_np(layout, start, 300, k0, k1)
-    got = np.empty(layout.n, dtype=np.int64)
-    chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
-    for r in range(len(pm)):
-        _numba._draw_nb(start + r, *layout.draw_args(), k0, k1, got, chosen)
-        np.testing.assert_array_equal(got, pm[r])
     expected = permutation._group_maps_np(np_tables, pm)
+    kernels = (_numba._draw_nb, _numba._group_map_nb)
+    got_pm, got_maps = scalar_draws(layout, start, 300, k0, k1, *kernels)
+    np.testing.assert_array_equal(got_pm, pm)
+    np.testing.assert_array_equal(got_maps, expected)
     for parallel in (True, False):  # on Numba's threads or the caller's
         maps = _numba.permutation_maps(layout, start, 300, k0, k1, parallel)
         np.testing.assert_array_equal(maps, expected)

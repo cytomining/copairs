@@ -129,24 +129,6 @@ def test_numba_matches_numpy_draws():
     )
 
 
-def test_numba_pvalues_match_numpy():
-    """Joint p-values are identical on both backends, ties included."""
-    pytest.importorskip("numba")
-    sigs = random_signatures(np.random.default_rng(8), 12)
-    null = joint.joint_nulls(joint.joint_plan(sigs, 4), 500, backend="numpy")
-    rng = np.random.default_rng(1)
-    sig_ix = np.repeat(np.arange(len(sigs)), 4)
-    scores = null[sig_ix, rng.integers(0, 500, len(sig_ix))]  # null atoms
-    scores[1::2] = rng.random(len(sig_ix) // 2)  # anywhere in [0, 1)
-    got = {
-        b: joint.joint_pvalues(scores, sig_ix, sigs, 500, 4, backend=b)
-        for b in ("numpy", "numba")
-    }
-    np.testing.assert_array_equal(got["numba"], got["numpy"])
-    hits = (null[sig_ix] >= common.tie_thresholds(scores)[:, None]).sum(axis=1)
-    np.testing.assert_array_equal(got["numpy"], (hits + 1) / 501)
-
-
 @pytest.mark.parametrize("batch_bytes", [8 * 200 * 2, 8 * 200 * 5, 2**26])
 def test_numba_samples_batches_of_signatures(batch_bytes, monkeypatch):
     """Numba samples a chunk of a batch of used signatures per launch.
@@ -219,15 +201,20 @@ def test_chunks_bound_the_per_sample_arrays(monkeypatch):
     assert max(sizes) <= 2**9 and 0 < p.min() and p.max() <= 1
 
 
-def test_pvalue_hits_match_scalar_draws(monkeypatch):
-    """Joint p-values count exactly the scalar samples at or above each score."""
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_pvalue_hits_match_scalar_draws(backend, monkeypatch):
+    """Joint p-values count exactly the scalar samples at or above each score.
+
+    Half the scores are atoms of the null, which count as ties.
+    """
     monkeypatch.setattr(joint, "_CHUNK", 64)  # several chunks per signature
     sigs = [joint.canonical_signature(*sig) for sig in SIGNATURES[:4]]
-    scores = np.array([0.1, 0.07, 0.3, 0.5, 0.02, 0.2])
-    sig_ix = np.array([0, 0, 1, 2, 3, 1])
-    p = joint.joint_pvalues(scores, sig_ix, sigs, 400, seed=11)
+    sig_ix = np.array([0, 0, 1, 2, 3, 1, 0, 1, 2, 3, 3, 2])
     null = scalar_nulls(joint.joint_plan(sigs, 11), 400, 0)
-    hits = (null[sig_ix] >= (scores - 1e-10)[:, None]).sum(axis=1)
+    scores = np.array([0.1, 0.07, 0.3, 0.5, 0.02, 0.2] + [0.0] * 6)
+    scores[6:] = null[sig_ix[6:], [3, 50, 101, 222, 307, 399]]  # null atoms
+    p = joint.joint_pvalues(scores, sig_ix, sigs, 400, seed=11, backend=backend)
+    hits = (null[sig_ix] >= common.tie_thresholds(scores)[:, None]).sum(axis=1)
     np.testing.assert_array_equal(p, (hits + 1) / 401)
 
 

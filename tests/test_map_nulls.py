@@ -205,9 +205,12 @@ def plate_aps(groups=12, reps=3, ctrls=15, plates=3, seed=0):
     return ap[~ap["ctrl"]]
 
 
-@pytest.mark.parametrize("null", NULLS)
+@pytest.mark.parametrize("null", ["permutation", "joint"])
 def test_backends_give_identical_pvalues(null):
-    """Each null's mAP p-values are bitwise identical on NumPy and Numba."""
+    """The mAP nulls' p-values are bitwise identical on NumPy and Numba.
+
+    The copied null's: test_null_methods.test_backends_identical_through_public_api.
+    """
     pytest.importorskip("numba")
     ap = plate_aps()
     kwargs = dict(null_size=3000, threshold=0.05, seed=7, progress_bar=False)
@@ -235,9 +238,7 @@ def test_auto_backend_runs_numba_kernels(monkeypatch):
     ap = plate_aps(groups=4)
     kwargs = dict(null_size=500, threshold=0.05, seed=0, progress_bar=False)
     for null in ("joint", "permutation"):
-        auto = mean_average_precision(ap, ["g"], null=null, **kwargs)
-        numpy = mean_average_precision(ap, ["g"], null=null, backend="numpy", **kwargs)
-        pd.testing.assert_frame_equal(auto, numpy)
+        mean_average_precision(ap, ["g"], null=null, **kwargs)
     assert set(calls) == {"joint_nulls", "permutation_maps"}
     calls.clear()
     mean_average_precision(ap, ["g"], null="permutation", backend="numpy", **kwargs)
