@@ -98,15 +98,13 @@ def average_precision(
     --------
     copairs.map.average_precision : Average precision without multilabel support.
     """
-    compute._check_backend(backend)
-    if backend == "numba":
-        fastap = compute._import_numba_backend()
+    fastap = compute._backend_module(backend)
 
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
     distance_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
-    if backend == "numba":
+    if fastap is not None:
         distance_fn = fastap.similarity_fn(feats, distance, distance_fn)
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
@@ -145,7 +143,7 @@ def average_precision(
     logger.info("Computing negative similarities...")
     neg_sims = distance_fn(feats, neg_pairs, batch_size)
 
-    if backend == "numba":
+    if fastap is not None:
         logger.info("Computing AP per label...")
         label, ix, ap, num_pos, total = fastap.multilabel.multilabel_ap(
             pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, len(meta)

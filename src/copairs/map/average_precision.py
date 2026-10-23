@@ -184,9 +184,7 @@ def average_precision(
         * Negative pairs are defined by `neg_diffby` (profiles differ in these metadata values)
           and optionally constrained by `neg_sameby` (profiles share these metadata values if specified).
     """
-    compute._check_backend(backend)
-    if backend == "numba":
-        fastap = compute._import_numba_backend()
+    fastap = compute._backend_module(backend)
 
     # Combine all metadata columns needed for pair definitions
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
@@ -197,7 +195,7 @@ def average_precision(
 
     # Get the distance function for similarity calculations (e.g., cosine)
     similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
-    if backend == "numba":
+    if fastap is not None:
         similarity_fn = fastap.similarity_fn(feats, distance, similarity_fn)
 
     # Reset metadata index for consistent indexing
@@ -225,7 +223,7 @@ def average_precision(
     logger.info("Computing negative similarities...")
     neg_sims = similarity_fn(feats, neg_pairs, batch_size)
 
-    if backend == "numba":
+    if fastap is not None:
         # Count each positive's preceding negatives instead of sorting
         logger.info("Computing average precision...")
         paired_ix, ap_scores, null_confs = fastap.ap_from_pairs(

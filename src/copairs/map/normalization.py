@@ -108,9 +108,7 @@ def normalize_ap(
     - Normalized AP = 1 when performance is perfect
     - Negative values indicate worse-than-random performance
     """
-    compute._check_backend(backend)
-    if backend == "numba":
-        fastap = compute._import_numba_backend()
+    fastap = compute._backend_module(backend)
 
     # Handle scalar or array inputs
     is_scalar = np.isscalar(ap)
@@ -131,7 +129,7 @@ def normalize_ap(
         )
 
     # Compute expected AP for each configuration
-    if backend == "numba":
+    if fastap is not None:
         M = M if len(M) > 1 else np.repeat(M[:1], len(ap))
         N = N if len(N) > 1 else np.repeat(N[:1], len(ap))
         # One configuration per row of ap, as the loop below fills mu0

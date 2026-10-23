@@ -590,10 +590,14 @@ def find_pairs_multilabel(
         f"Missing {multilabel_col} in sameby and diffby"
     )
 
-    if backend not in ("numpy", "numba"):
-        raise ValueError("backend must be either 'numpy' or 'numba'.")
-    if backend == "numba":
-        fast = _find_pairs_multilabel_numba(dframe, sameby, diffby, multilabel_col)
+    # Imported here: copairs.compute loads SciPy, which `import copairs` skips.
+    from copairs.compute import _backend_module
+
+    fastap = _backend_module(backend)
+    if fastap is not None:
+        fast = _find_pairs_multilabel_numba(
+            fastap, dframe, sameby, diffby, multilabel_col
+        )
         if fast is not None:
             return fast
 
@@ -666,7 +670,7 @@ def find_pairs_multilabel(
             result = np.array(
                 [index_d[k] for k in ("index", "index_1")], dtype=np.uint32
             ).T
-            if backend == "numba":  # sorted, like the inverted-index matcher
+            if fastap is not None:  # sorted, like the inverted-index matcher
                 result = _sorted_unique_pairs(result)
 
     return result
@@ -688,12 +692,9 @@ def _as_label_lists(labels: pd.Series) -> pd.Series:
     )
 
 
-def _find_pairs_multilabel_numba(dframe, sameby, diffby, multilabel_col):
+def _find_pairs_multilabel_numba(fastap, dframe, sameby, diffby, multilabel_col):
     """Inverted-index :func:`find_pairs_multilabel`, or None when unsupported."""
-    # Imported here: the optional extra, and fastap.multilabel imports find_pairs.
-    from copairs.compute import _import_numba_backend
-
-    fast = _import_numba_backend().multilabel
+    fast = fastap.multilabel
     if not isinstance(dframe, pd.DataFrame):
         return None
     dframe = dframe.assign(**{multilabel_col: _as_label_lists(dframe[multilabel_col])})

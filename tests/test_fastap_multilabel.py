@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
-from copairs import compute, matching
+from copairs import fastap, compute, matching
 from copairs.map import multilabel
 
 N_LABELS = 12
@@ -60,7 +60,7 @@ def test_shared_label_pairs_match_sql(sameby, diffby):
     """Pairs sharing a label, and per-label counts, equal the SQL result."""
     dframe = label_frame()
     args = (dframe, sameby, diffby, "labels")
-    assert matching._find_pairs_multilabel_numba(*args) is not None
+    assert matching._find_pairs_multilabel_numba(fastap, *args) is not None
     pairs, keys, counts = index_pairs(*args)
     sql_pairs_, sql_keys, sql_counts = sql_pairs(*args)
     np.testing.assert_array_equal(keys, sql_keys)
@@ -82,7 +82,7 @@ def test_disjoint_label_pairs_match_sql(sameby, diffby):
     """Pairs sharing no label equal the SQL result, sorted and unique."""
     dframe = label_frame(1)
     args = (dframe, sameby, diffby, "labels")
-    assert matching._find_pairs_multilabel_numba(*args) is not None
+    assert matching._find_pairs_multilabel_numba(fastap, *args) is not None
     pairs = index_pairs(*args)
     assert as_set(pairs) == as_set(sql_pairs(*args))
     keys = pairs[:, 0].astype(np.int64) * len(dframe) + pairs[:, 1]
@@ -117,11 +117,11 @@ def test_array_label_cells_with_other_columns():
     dframe = label_frame(3)
     arrays = dframe.assign(labels=dframe["labels"].map(np.array))
     args = (["labels"], ["plate"], "labels")
-    got = matching._find_pairs_multilabel_numba(arrays, *args)
+    got = matching._find_pairs_multilabel_numba(fastap, arrays, *args)
     for g, e in zip(got, index_pairs(dframe, *args)):
         np.testing.assert_array_equal(g, e)
     args = (["plate"], ["labels"], "labels")
-    got = matching._find_pairs_multilabel_numba(arrays, *args)
+    got = matching._find_pairs_multilabel_numba(fastap, arrays, *args)
     np.testing.assert_array_equal(got, index_pairs(dframe, *args))
 
 
@@ -147,7 +147,8 @@ def test_unsupported_labels_fall_back(labels, index):
     """Inputs the inverted index cannot represent exactly use the SQL path."""
     dframe = pd.DataFrame({"labels": labels}, index=index)
     assert (
-        matching._find_pairs_multilabel_numba(dframe, ["labels"], [], "labels") is None
+        matching._find_pairs_multilabel_numba(fastap, dframe, ["labels"], [], "labels")
+        is None
     )
 
 
@@ -212,7 +213,8 @@ def test_multilabel_ap_with_sql_fallback(distance):
     dframe, feats = consistency_input(5)
     dframe.loc[0, "labels"] = dframe.loc[0, "labels"] * 2  # a label twice in a row
     assert (
-        matching._find_pairs_multilabel_numba(dframe, [], ["labels"], "labels") is None
+        matching._find_pairs_multilabel_numba(fastap, dframe, [], ["labels"], "labels")
+        is None
     )
     pairs = index_pairs(dframe, ["plate"], ["labels"], "labels")
     keys = pairs[:, 0].astype(np.int64) * len(dframe) + pairs[:, 1]
