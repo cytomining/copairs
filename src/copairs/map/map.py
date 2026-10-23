@@ -58,7 +58,9 @@ def get_map_pvalue(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+        Threads that compute the copied null's p-values or run the
+        permutation null's groups. Default defined by
+        `concurrent.futures.ThreadPoolExecutor`.
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
@@ -183,6 +185,7 @@ def get_map_pvalue(
             seed,
             observed=scores,
             progress_bar=progress_bar,
+            max_workers=max_workers,
         )
         return map_scores
 
@@ -288,7 +291,9 @@ def mean_average_precision(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+        Threads that compute the copied null's p-values or run the
+        permutation null's groups. Default defined by
+        `concurrent.futures.ThreadPoolExecutor`.
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
@@ -392,7 +397,9 @@ def mean_average_precision_hierarchical(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+        Threads that compute the copied null's p-values or run the
+        permutation null's groups. Default defined by
+        `concurrent.futures.ThreadPoolExecutor`.
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional

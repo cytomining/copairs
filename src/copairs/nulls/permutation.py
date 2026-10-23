@@ -22,6 +22,10 @@ additions in a fixed order. :func:`_draws_np` and :func:`_group_maps_np`
 perform the same operations vectorized over draws and give identical mAPs.
 """
 
+import threading
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
 from copairs.nulls.common import (
@@ -726,9 +730,44 @@ def permutation_null(
     return count, identity, pool
 
 
+class _SharedPools:
+    """The pools of a set of groups, each built once and freed after its last group.
+
+    Groups ranking the same references share one read-only pool, so threads
+    can run them concurrently.
+    """
+
+    def __init__(self, layouts, similarity):
+        self.similarity = similarity
+        self.key = [tuple(b.tobytes() for b in layout[2]) for layout in layouts]
+        self.left = Counter(self.key)
+        self.pools = {}
+        self.building = {}
+        self.lock = threading.Lock()
+
+    def acquire(self, g, blocks):
+        """Return group ``g``'s pool (its ``blocks``' references), building it once."""
+        key = self.key[g]
+        with self.lock:
+            building = self.building.setdefault(key, threading.Lock())
+        with building:
+            if key not in self.pools:
+                self.pools[key] = _Pool(blocks, self.similarity)
+            return self.pools[key]
+
+    def release(self, g):
+        """Free group ``g``'s pool if no other group needs it."""
+        key = self.key[g]
+        with self.lock:
+            self.left[key] -= 1
+            if not self.left[key]:
+                self.pools.pop(key, None)
+                self.building.pop(key, None)
+
+
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
-    null_size, seed, observed=None, progress_bar=False,
+    null_size, seed, observed=None, progress_bar=False, max_workers=None,
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
 
@@ -756,6 +795,10 @@ def permutation_pvalues(
         do not match the table.
     progress_bar : bool
         Whether to show a progress bar over groups.
+    max_workers : int, optional
+        Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s).
+        Each group's p-value depends only on its own draws, so results do not
+        depend on it.
 
     Returns
     -------
@@ -769,22 +812,35 @@ def permutation_pvalues(
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
     layouts = group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs)
-    # Visit groups pool by pool, so each pool's reference keys are built once.
-    order = sorted(
-        range(len(groups)),
-        key=lambda g: tuple((len(b), *b[:2]) for b in layouts[g][2]),
-    )
-    pvals = np.empty(len(groups), dtype=np.float64)
-    pool = None
-    for g in progress(order, len(order), progress_bar, "permutation null"):
-        count, identity, pool = permutation_null(
-            *layouts[g], similarity, null_size, seed, pool
-        )
+    pools = _SharedPools(layouts, similarity)
+
+    def pvalue(g):
+        try:
+            pool = pools.acquire(g, layouts[g][2])
+            count, identity, _ = permutation_null(
+                *layouts[g], similarity, null_size, seed, pool
+            )
+        finally:
+            pools.release(g)
         if observed is not None and abs(identity - observed[g]) > 1e-6:
             raise ValueError(
                 f"group {g}: mAP {identity} from the pairs differs from "
                 f"{observed[g]} in the AP table; the pairs or similarity do not "
                 "match the AP scores (keep the AP frame's index: no reset_index)"
             )
-        pvals[g] = (count + 1) / (null_size + 1)
+        return (count + 1) / (null_size + 1)
+
+    # Visit groups pool by pool, so few pools are alive at a time.
+    order = sorted(range(len(groups)), key=lambda g: pools.key[g])
+    pvals = np.empty(len(groups), dtype=np.float64)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        try:
+            done = progress(
+                ex.map(pvalue, order), len(order), progress_bar, "permutation null"
+            )
+            for g, p in zip(order, done):
+                pvals[g] = p
+        except BaseException:
+            ex.shutdown(wait=False, cancel_futures=True)
+            raise
     return pvals

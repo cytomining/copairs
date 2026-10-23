@@ -347,3 +347,52 @@ def test_rank_table_matches_binary_search(monkeypatch):
     searched = draws_of(meta, feats, spec, 5000)
     assert ranked[1:3] == searched[1:3]
     np.testing.assert_array_equal(ranked[3], searched[3])
+
+
+def test_pvalues_do_not_depend_on_workers(monkeypatch):
+    """Groups sharing pools give the same p-values on 1 or 4 threads, or alone."""
+    rows = []
+    for p in range(3):
+        rows += [(f"c{p}_{i}", p) for i in range(6)]
+    for g in range(6):  # group g on plates g % 3 and (g + 1) % 3: 3 pools of 2 groups
+        rows += [(f"q{g}", g % 3), (f"q{g}", (g + 1) % 3)]
+    meta = pd.DataFrame(rows, columns=["g", "plate"])
+    meta["ref"] = np.where(meta["g"].str.startswith("c"), meta.index, -1)
+    feats = np.random.default_rng(6).standard_normal((len(meta), 5))
+    spec = dict(
+        pos_sameby=["g", "ref"], pos_diffby=[], neg_sameby=["plate"],
+        neg_diffby=["g", "ref"],
+    )  # fmt: skip
+    ap = average_precision(meta, feats, progress_bar=False, **spec)
+    ap = ap[ap["ref"] < 0]
+    args = (["g"], 300, 0.05, 0)
+    built, workers = [], []
+
+    class CountedPool(permutation._Pool):
+        def __init__(self, blocks, similarity):
+            built.append(len(blocks))
+            super().__init__(blocks, similarity)
+
+    class RecordedExecutor(permutation.ThreadPoolExecutor):
+        def __init__(self, max_workers):
+            workers.append(max_workers)
+            super().__init__(max_workers)
+
+    monkeypatch.setattr(permutation, "_Pool", CountedPool)
+    monkeypatch.setattr(permutation, "ThreadPoolExecutor", RecordedExecutor)
+    p = [
+        mean_average_precision(ap, *args, progress_bar=False, max_workers=w)[
+            "p_value"
+        ].tolist()
+        for w in (1, 4)
+    ]
+    assert built == [2] * 6  # each run builds each of the 3 pools once
+    assert workers == [1, 4]
+    alone = [
+        mean_average_precision(ap[ap["g"] == g], *args, progress_bar=False)[
+            "p_value"
+        ].item()
+        for g in sorted(ap["g"].unique())
+    ]
+    assert p[0] == p[1] == alone
+    assert len(set(alone)) > 1
