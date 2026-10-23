@@ -161,6 +161,21 @@ def test_fastap_does_not_import_nulls():
     assert result.returncode == 0, result.stderr
 
 
+def test_numba_nulls_do_not_import_fastap():
+    """The Numba nulls share only the binary search with the AP kernels.
+
+    It lives outside copairs.fastap, so the nulls do not load the AP kernels.
+    """
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    result = run_isolated(
+        "import sys\n"
+        "import copairs.nulls._numba\n"
+        "assert not any(m == 'copairs.fastap' or m.startswith('copairs.fastap.')\n"
+        "               for m in sys.modules)\n"
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("backend", ["auto", "gpu", "Numba", "CUDA", None])
 def test_unknown_backend_raises(backend):
     """Unknown backends raise before any work.

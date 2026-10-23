@@ -208,9 +208,9 @@ def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col, found):
     return _key_pairs(mono[~_in_sorted(mono, shared)])
 
 
-# _rows_ap compiles functions of ranking.py, which Numba's cache would not see
-# (see copairs._numba_cache).
-@cached_njit((__file__, ranking.__file__), parallel=True)
+# _rows_ap compiles ranking's device functions, which Numba's cache would not
+# see (see copairs._numba_cache).
+@cached_njit((__file__, *ranking.KERNEL_SOURCES), parallel=True)
 def _rows_ap(pos_ptr, pos_vals, row_profile, neg_ptr, neg_vals, max_pos, n_tasks):
     """AP of rows with sorted positive keys and their profile's negatives.
 

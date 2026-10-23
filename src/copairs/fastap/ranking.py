@@ -13,6 +13,14 @@ import operator
 import numba
 import numpy as np
 
+from copairs import _search
+from copairs._search import upper_bound
+from copairs._numba_cache import cached_njit
+
+# Files a kernel compiles when it calls this module's device functions, for
+# copairs._numba_cache.cached_njit: Numba's cache sees only the kernel's file.
+KERNEL_SOURCES = (__file__, _search.__file__)
+
 
 def sortable_keys(keys: np.ndarray, xp=np) -> np.ndarray:
     """uint64 that orders like float32 ``keys`` in NumPy (NaN last).
@@ -37,20 +45,6 @@ def rank_keys(sims, xp=np) -> np.ndarray:
 def _rank_key(sim):
     """:func:`rank_keys` of one similarity."""
     return np.float32(1) - np.float32(sim)
-
-
-@numba.njit(inline="always")
-def upper_bound(vals, lo, hi, key):
-    """First index in sorted ``vals[lo:hi]`` after ``key`` (NumPy order, NaN last)."""
-    key_nan = np.isnan(key)
-    while lo < hi:
-        mid = (lo + hi) >> 1
-        v = vals[mid]
-        if key_nan or (not np.isnan(v) and v <= key):
-            lo = mid + 1
-        else:
-            hi = mid
-    return lo
 
 
 def index_pairs(pairs, n: int | None = None) -> np.ndarray:
@@ -134,7 +128,7 @@ def ap_from_counts(hist, base, num_pos):
     return acc / num_pos
 
 
-@numba.njit(parallel=True, cache=True)
+@cached_njit(KERNEL_SOURCES, parallel=True)
 def _negative_hist(neg_pairs, neg_sims, ptr, vals, hist, n_neg):
     """Per-profile histograms of negatives over the gaps between positive keys.
 

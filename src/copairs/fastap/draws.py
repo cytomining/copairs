@@ -38,9 +38,9 @@ def unit_rows(feats, normalized: bool = False) -> np.ndarray:
     return x
 
 
-# _row_ap compiles functions of ranking.py, which Numba's cache would not see
-# (see copairs._numba_cache).
-@cached_njit((__file__, ranking.__file__), parallel=True)
+# _row_ap compiles ranking's device functions, which Numba's cache would not
+# see (see copairs._numba_cache).
+@cached_njit((__file__, *ranking.KERNEL_SOURCES), parallel=True)
 def _row_ap(sims, k, out, n_tasks):
     """AP of each ``(draw, query)`` row of ``sims`` with shape ``(n_rows, k + m)``.
 

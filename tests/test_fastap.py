@@ -708,7 +708,9 @@ refs = np.array([rng.choice(40, 6, replace=False) for _ in range(20)])
 pos = np.array([[0, 1], [1, 2], [2, 3], [0, 3]])
 neg = np.array([[0, 4], [1, 5], [2, 6], [3, 7], [0, 5]])
 pos_sims, neg_sims = rng.random(4), rng.random(5)
+pairs_ap = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)[1]
 out = {
+    "pairs": np.nan_to_num(pairs_ap, nan=-1).tolist(),
     "draws": fastap.draw_average_precisions(feats, queries, refs).tolist(),
     "multilabel": multilabel.multilabel_ap(pos, pos_sims, [2, 2], neg, neg_sims, 8)[
         2
@@ -758,3 +760,40 @@ def test_numba_cache_follows_edits_to_compiled_files(tmp_path):
     after = run()
     for key in ("draws", "multilabel"):
         np.testing.assert_array_equal(after[key], 0.5 * np.array(before[key]))
+
+
+def test_numba_cache_follows_edits_to_upper_bound(tmp_path):
+    """Cached AP kernels follow edits to the binary search they compile.
+
+    ``upper_bound`` lives outside ranking.py, shared with the Numba nulls.
+    After an edit to it, the next process must give the APs of a process with
+    an empty cache, for every kernel that compiles it.
+    """
+    package = Path(copairs.__file__).parent
+    defined_in = Path(fastap.ranking.upper_bound.py_func.__code__.co_filename)
+    shutil.copytree(
+        package, tmp_path / "copairs", ignore=shutil.ignore_patterns("__pycache__")
+    )
+
+    def run(cache):
+        done = subprocess.run(
+            [sys.executable, "-c", _CACHE_PROBE, str(tmp_path)],
+            cwd=tmp_path,
+            env={**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / cache)},
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    before = run("cache")
+    assert run("cache")["hits"] == [1, 1]
+    source = tmp_path / "copairs" / defined_in.relative_to(package)
+    text = source.read_text()
+    assert text.count("v <= key)") == 1
+    # Keys lie in [0, 2]: every positive now ranks ahead of every negative.
+    source.write_text(text.replace("v <= key)", "v <= key + 2.0)"))
+    after, fresh = run("cache"), run("empty_cache")
+    for key in ("pairs", "draws", "multilabel"):
+        assert after[key] == fresh[key] != before[key], key

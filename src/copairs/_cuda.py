@@ -25,7 +25,7 @@ _PROBE = 'extern "C" __global__ void probe(int* x) { if (x) *x = 1; }'
 # Device functions shared by copairs' kernel sources, which start with it.
 PRELUDE = r"""
 // First index in sorted vals[lo:hi] after key (NumPy order, NaN last); mirrors
-// copairs.fastap.ranking.upper_bound.
+// copairs._search.upper_bound.
 template <typename T, typename I>
 __device__ __forceinline__ I upper_bound(const T* vals, I lo, I hi, T key) {
     bool key_nan = isnan(key);

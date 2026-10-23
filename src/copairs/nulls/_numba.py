@@ -3,25 +3,25 @@
 Imported only through :func:`copairs.nulls.backend._import_numba_backend`. The
 sampler compiles the scalar reference functions of
 :mod:`copairs.nulls.sampler` unchanged, so its samples are bitwise identical to
-the NumPy backend's. The counts' binary search is the AP kernels'
-:func:`copairs.fastap.ranking.upper_bound` (nulls may import fastap, not the
-reverse).
+the NumPy backend's. The counts' binary search,
+:func:`copairs._search.upper_bound`, is the AP kernels' one; it lives outside
+:mod:`copairs.fastap`, so the nulls do not import the AP kernels.
 """
 
 import numba
 import numpy as np
 
+from copairs import _search
 from copairs.nulls import philox, sampler
-from copairs.fastap import ranking
+from copairs._search import upper_bound
 from copairs._numba_cache import cached_njit
 from copairs.nulls.common import split_segments, segment_batches
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
-from copairs.fastap.ranking import upper_bound
 
-# The kernels compile functions of these files (the counts' upper_bound is in
-# ranking.py); Numba's cache would only see this one (see copairs._numba_cache).
-_SOURCES = (__file__, philox.__file__, sampler.__file__, ranking.__file__)
+# The kernels compile functions of these files; Numba's cache would only see
+# this one (see copairs._numba_cache).
+_SOURCES = (__file__, philox.__file__, sampler.__file__, _search.__file__)
 
 _gap_loop_nb = cached_njit(_SOURCES)(gap_loop)
 _ap_sample_nb = cached_njit(_SOURCES)(
