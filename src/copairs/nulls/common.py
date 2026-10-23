@@ -6,6 +6,8 @@ computations, so a null rank list identical to the observed one is counted as
 a tie, as in the ``>=`` definition of a permutation p-value.
 """
 
+import hashlib
+
 import numpy as np
 
 # Far above float64 summation-order differences of an AP (~k * 2**-52). Distinct
@@ -42,6 +44,17 @@ def resolve_seed(seed: int | None) -> int:
     if seed is None:
         return int(np.random.SeedSequence().entropy % 2**64)
     return int(seed)
+
+
+def stream_key(seed: int, obj) -> tuple[np.uint64, np.uint64]:
+    """Philox key ``(k0, k1)`` of ``obj``'s draws: a pure function of ``(seed, obj)``.
+
+    The key is the 64-bit blake2b digest of ``repr((seed, obj))``, so ``obj``
+    must have a deterministic ``repr`` (tuples of ints).
+    """
+    digest = hashlib.blake2b(repr((int(seed), obj)).encode(), digest_size=8)
+    word = int.from_bytes(digest.digest(), "little")
+    return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
 
 
 def check_null_size(null_size: int) -> int:

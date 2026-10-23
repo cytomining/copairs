@@ -25,13 +25,13 @@ both give identical samples, as would the scalar functions compiled.
 """
 
 import math
-import hashlib
 
 import numpy as np
 
 from copairs.nulls.common import (
     chunks,
     progress,
+    stream_key,
     group_edges,
     resolve_seed,
     tie_thresholds,
@@ -438,9 +438,7 @@ def signature_keys(seed: int, signatures) -> tuple[np.ndarray, np.ndarray]:
     k0 = np.empty(len(signatures), dtype=np.uint64)
     k1 = np.empty(len(signatures), dtype=np.uint64)
     for s, sig in enumerate(signatures):
-        digest = hashlib.blake2b(repr((int(seed), sig)).encode(), digest_size=8)
-        word = int.from_bytes(digest.digest(), "little")
-        k0[s], k1[s] = word & 0xFFFFFFFF, word >> 32
+        k0[s], k1[s] = stream_key(seed, sig)
     return k0, k1
 
 

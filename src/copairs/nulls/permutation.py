@@ -22,13 +22,12 @@ additions in a fixed order. :func:`_draws_np` and :func:`_group_maps_np`
 perform the same operations vectorized over draws and give identical mAPs.
 """
 
-import hashlib
-
 import numpy as np
 
 from copairs.nulls.common import (
     chunks,
     progress,
+    stream_key,
     group_edges,
     resolve_seed,
     tie_thresholds,
@@ -677,11 +676,7 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
 
 def group_key(seed: int, members) -> tuple[np.uint64, np.uint64]:
     """Philox key of a group's draws: a pure function of ``(seed, members)``."""
-    rep = repr((int(seed), tuple(sorted(int(m) for m in members))))
-    word = int.from_bytes(
-        hashlib.blake2b(rep.encode(), digest_size=8).digest(), "little"
-    )
-    return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
+    return stream_key(seed, tuple(sorted(int(m) for m in members)))
 
 
 def permutation_null(

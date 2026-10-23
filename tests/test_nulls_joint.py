@@ -7,7 +7,7 @@ import pytest
 from scipy import stats
 
 from copairs import compute
-from copairs.nulls import joint
+from copairs.nulls import joint, common, permutation
 
 COMPLETE4 = [(i, j) for i in range(4) for j in range(i + 1, 4)]
 SIGNATURES = [
@@ -219,3 +219,13 @@ def test_plan_validates():
         joint.joint_plan([(((1, 3), (1, 3), (1, 3)), ((0, 1), (0, 2), (1, 2)))], 0)
     with pytest.raises(ValueError, match="sig_ix must index"):
         joint.joint_pvalues(np.array([0.5]), [1], [((((1, 3),), ()))], 10, 0)
+
+
+def test_stream_keys_are_pinned():
+    """Both nulls key their streams with common.stream_key; its derivation is fixed."""
+    sig = joint.canonical_signature([(1, 5), (2, 9)], [(0, 1)])
+    k0, k1 = joint.signature_keys(7, [sig])
+    assert (int(k0[0]), int(k1[0])) == common.stream_key(7, sig)
+    assert common.stream_key(7, sig) == (1817989492, 2765743222)
+    assert permutation.group_key(3, [12, 4, 7]) == common.stream_key(3, (4, 7, 12))
+    assert common.stream_key(3, (4, 7, 12)) == (1999174365, 1542470604)
