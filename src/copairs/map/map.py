@@ -85,36 +85,6 @@ def get_map_pvalue(
     # Filter out invalid or incomplete AP scores
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
     ap_scores = ap_scores.reset_index(drop=True).copy()
-    if method == "fast":
-        return _fast_map_pvalue(
-            ap_scores, sameby, null_size, seed, backend, progress_bar
-        )
-
-    logger.info("Computing null_dist...")
-    # Extract configurations for null distribution generation
-    null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
-    null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
-
-    # Generate null distributions for each unique configuration
-    null_dists = compute.get_null_dists(
-        null_confs,
-        null_size,
-        seed=seed,
-        cache_dir=cache_dir,
-        progress_bar=progress_bar,
-        method="legacy",
-    )
-    ap_scores["null_ix"] = rev_ix
-
-    # Function to calculate the p-value for a mAP score based on the null distribution
-    def get_p_value(params):
-        map_score, indices = params
-        null_dist = null_dists[rev_ix[indices]].mean(axis=0)
-        num = (null_dist > map_score).sum()
-        p_value = (num + 1) / (null_size + 1)  # Add 1 for stability
-        return p_value
-
-    logger.info("Computing p-values...")
 
     # Group by the specified metadata column(s) and calculate mean AP
     map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
@@ -128,23 +98,97 @@ def get_map_pvalue(
         "indices",
         "mean_normalized_average_precision",
     ]
+    map_scores["p_value"] = _copied_pvalues(
+        map_scores["mean_average_precision"].to_numpy(),
+        map_scores["indices"].tolist(),
+        ap_scores,
+        null_size=null_size,
+        seed=seed,
+        cache_dir=cache_dir,
+        progress_bar=progress_bar,
+        max_workers=max_workers,
+        method=method,
+        backend=backend,
+    )
+    return map_scores
 
-    # Compute p-values for each group using the null distributions
-    params = map_scores[["mean_average_precision", "indices"]]
 
+def _copied_pvalues(
+    scores,
+    groups,
+    ap_scores,
+    null_size,
+    seed,
+    cache_dir,
+    progress_bar,
+    max_workers,
+    method="fast",
+    backend="auto",
+):
+    """P-values against the mean of the members' AP nulls, as in copairs <= 0.5.5.
+
+    ``groups`` lists each group's rows of ``ap_scores``; members with equal pair
+    counts share null samples. ``method="fast"`` streams the exact nulls of
+    :func:`nulls.map_pvalues` and counts ties; ``"legacy"`` averages the nulls
+    of :func:`compute.get_null_dists` and counts null mAPs ``>`` the score.
+    """
+    if not groups:
+        check_null_size(null_size)
+        nulls.resolve_backend(backend)
+        return np.zeros(0, dtype=np.float64)
+    members = np.concatenate(groups).astype(np.int64)
+    rows = np.unique(members)
+    null_confs = ap_scores.loc[rows, ["n_pos_pairs", "n_total_pairs"]].values
+    null_confs, conf_ix = np.unique(null_confs, axis=0, return_inverse=True)
+    rev_ix = np.full(len(ap_scores), -1, dtype=np.int64)
+    rev_ix[rows] = conf_ix.ravel()
+
+    if method == "fast":
+        logger.info("Computing p-values...")
+        gid = np.repeat(np.arange(len(groups)), [len(ix) for ix in groups])
+        keys, conf_cnt = np.unique(
+            gid * len(null_confs) + rev_ix[members], return_counts=True
+        )
+        ptr = np.searchsorted(keys // len(null_confs), np.arange(len(groups) + 1))
+        return nulls.map_pvalues(
+            scores,
+            ptr,
+            keys % len(null_confs),
+            conf_cnt,
+            null_confs,
+            null_size,
+            seed,
+            backend=backend,
+            progress_bar=progress_bar,
+        )
+
+    logger.info("Computing null_dist...")
+    null_dists = compute.get_null_dists(
+        null_confs,
+        null_size,
+        seed=seed,
+        cache_dir=cache_dir,
+        progress_bar=progress_bar,
+        method="legacy",
+    )
+
+    def get_p_value(k):
+        null_dist = null_dists[rev_ix[groups[k]]].mean(axis=0)
+        # A Python float, as copairs 0.5.5 compared: float32 nulls stay float32.
+        num = (null_dist > float(scores[k])).sum()
+        return (num + 1) / (null_size + 1)  # Add 1 for stability
+
+    logger.info("Computing p-values...")
+    return _thread_map(get_p_value, range(len(groups)), progress_bar, max_workers)
+
+
+def _thread_map(fn, items, progress_bar, max_workers):
+    """``[fn(item) for item in items]`` on a thread pool."""
     if progress_bar:
         from tqdm.contrib.concurrent import thread_map
 
-        p_values = thread_map(
-            get_p_value, params.values, leave=False, max_workers=max_workers
-        )
-    else:
-        p_values = silent_thread_map(
-            get_p_value, params.values, max_workers=max_workers
-        )
-    map_scores["p_value"] = p_values
-
-    return map_scores
+        return thread_map(fn, items, leave=False, max_workers=max_workers)
+    return silent_thread_map(fn, items, max_workers=max_workers)
 
 
 def mean_average_precision(
@@ -355,61 +399,3 @@ def silent_thread_map(fn, *iterables, **kwargs):
     chunksize = kwargs.pop("chunksize", 1)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))
-
-
-def _fast_map_pvalue(ap_scores, sameby, null_size, seed, backend, progress_bar):
-    """:func:`get_map_pvalue` with ``method="fast"``, on the filtered AP scores."""
-    null_confs = ap_scores[["n_pos_pairs", "n_total_pairs"]].values
-    null_confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
-    map_scores = ap_scores.groupby(sameby, observed=True, as_index=False).agg(
-        {
-            "average_precision": ["mean", lambda x: list(x.index)],
-            "normalized_average_precision": "mean",
-        }
-    )
-    map_scores.columns = sameby + [
-        "mean_average_precision",
-        "indices",
-        "mean_normalized_average_precision",
-    ]
-    logger.info("Computing p-values...")
-    map_scores["p_value"] = _copied_pvalues(
-        map_scores["mean_average_precision"].to_numpy(),
-        map_scores["indices"].tolist(),
-        rev_ix.ravel(),
-        null_confs,
-        null_size,
-        seed,
-        backend,
-        progress_bar,
-    )
-    return map_scores
-
-
-def _copied_pvalues(
-    scores, groups, rev_ix, null_confs, null_size, seed, backend, progress_bar
-):
-    """P-values against the mean of the members' AP nulls (:func:`nulls.map_pvalues`).
-
-    ``groups`` lists each group's rows; members sharing a configuration share
-    null samples, as in copairs <= 0.5.5.
-    """
-    if not groups:
-        check_null_size(null_size)
-        nulls.resolve_backend(backend)
-        return np.zeros(0, dtype=np.float64)
-    gid = np.repeat(np.arange(len(groups)), [len(ix) for ix in groups])
-    rows = np.concatenate(groups).astype(np.int64)
-    keys, conf_cnt = np.unique(gid * len(null_confs) + rev_ix[rows], return_counts=True)
-    ptr = np.searchsorted(keys // len(null_confs), np.arange(len(groups) + 1))
-    return nulls.map_pvalues(
-        scores,
-        ptr,
-        keys % len(null_confs),
-        conf_cnt,
-        null_confs,
-        null_size,
-        seed,
-        backend=backend,
-        progress_bar=progress_bar,
-    )
