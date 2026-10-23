@@ -3,6 +3,7 @@
 import sys
 import itertools
 import subprocess
+import tracemalloc
 import importlib.util
 
 import numpy as np
@@ -456,6 +457,30 @@ def test_pvalues_tiny_budget_streams_lazily():
     np.testing.assert_array_equal(
         got, brute_ap_pvalues(scores, conf_ix, CONFS[3:5], 300, 2)
     )
+
+
+@pytest.mark.parametrize("which", ["ap", "map"])
+def test_numpy_pvalues_memory_within_budget(which):
+    """Peak memory of the NumPy p-values stays within 2.5x budget_bytes.
+
+    The chunk of null samples, the sampler's temporaries and the counts' each
+    fit the budget, and a chunk is freed before the next is sampled. Sampling a
+    whole chunk at once peaked at 31x (AP) and 9.7x (mAP).
+    """
+    budget = 2**18
+    confs = np.array([[5, 505], [3, 50003], [1, 10**6], [8, 20000]])
+    ix = np.arange(len(confs))
+    kwargs = dict(null_size=budget // 2, seed=0, backend="numpy", budget_bytes=budget)
+    tracemalloc.start()
+    try:
+        if which == "ap":
+            nulls.ap_pvalues(np.full(len(confs), 0.5), ix, confs, **kwargs)
+        else:
+            nulls.map_pvalues([0.5], [0, len(confs)], ix, [1] * 4, confs, **kwargs)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak <= 2.5 * budget, peak / budget
 
 
 def test_unseeded_pvalues_are_fresh():

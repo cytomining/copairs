@@ -42,6 +42,12 @@ _FACTOR_LIMIT = 1.0 - 2.0**-10
 # ratio. Its own k bound keeps the log1p sum error bound above.
 NUMPY_GUIDED_RATIO = 2
 _GUIDED_MAX_K = 1448
+# Default bound on the NumPy backend's temporaries, in bytes.
+DEFAULT_BUDGET = 2**30
+# Upper bound on the NumPy backend's temporaries per sample, in bytes: its
+# tracemalloc peak is at most 236 bytes per sample (gap bisection; 140 for one
+# positive, 195 for the plain gap loop), output included.
+_NUMPY_SAMPLE_BYTES = 256
 
 
 def gap_loop(remaining, k, u):
@@ -339,8 +345,12 @@ def ap_nulls(
     return _ap_nulls(plan, null_size, start, backend, dtype)
 
 
-def _ap_nulls(plan, null_size, start, backend, dtype):
-    """:func:`ap_nulls` from a :func:`null_plan` and a resolved backend."""
+def _ap_nulls(plan, null_size, start, backend, dtype, budget_bytes=DEFAULT_BUDGET):
+    """:func:`ap_nulls` from a :func:`null_plan` and a resolved backend.
+
+    The NumPy backend samples in blocks whose temporaries stay within
+    ``budget_bytes``; the output is allocated on top of that.
+    """
     dtype = np.dtype(dtype)
     if dtype not in (np.float32, np.float64):
         raise ValueError(f"dtype must be float32 or float64, got {dtype}")
@@ -348,9 +358,12 @@ def _ap_nulls(plan, null_size, start, backend, dtype):
     out = np.empty((len(num_pos), null_size), dtype=dtype)
     if backend == "numba":
         _import_numba_backend().ap_nulls(num_pos, total, k0, k1, start, out)
-    else:
-        for c in range(len(num_pos)):
-            out[c] = _ap_null_numpy(
-                int(num_pos[c]), int(total[c]), start, null_size, k0[c], k1[c]
+        return out
+    block = max(1, budget_bytes // _NUMPY_SAMPLE_BYTES)
+    for c in range(len(num_pos)):
+        for s in range(0, null_size, block):
+            n = min(block, null_size - s)
+            out[c, s : s + n] = _ap_null_numpy(
+                int(num_pos[c]), int(total[c]), start + s, n, k0[c], k1[c]
             )
     return out

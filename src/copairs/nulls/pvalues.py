@@ -1,12 +1,15 @@
 """Permutation p-values against the fast AP null, streamed in sample chunks.
 
-Nulls are regenerated chunk by chunk instead of being stored, so memory is
-bounded by ``budget_bytes`` whatever ``null_size`` and the number of
-configurations. Null samples are kept in float64, the precision copairs
-computes observed APs in, and a null value counts against an observed score
-when ``null >= score - tol`` (see :func:`tie_thresholds`). The tolerance
-absorbs rounding between the two computations, so a null rank list identical
-to the observed one is counted as a tie, as in the paper's ``>=`` definition.
+Nulls are regenerated chunk by chunk instead of being stored. The chunk of
+null samples, the NumPy sampler's temporaries and those of the counts each
+stay within ``budget_bytes``, and a chunk is freed before the next is sampled,
+so peak memory stays within 2.5x ``budget_bytes`` (tested) whatever
+``null_size`` and the number of configurations. Null samples are kept in
+float64, the precision copairs computes observed APs in, and a null value
+counts against an observed score when ``null >= score - tol`` (see
+:func:`tie_thresholds`). The tolerance absorbs rounding between the two
+computations, so a null rank list identical to the observed one is counted as
+a tie, as in the paper's ``>=`` definition.
 """
 
 import numpy as np
@@ -20,9 +23,7 @@ from copairs.nulls.common import (
     check_null_size,
 )
 from copairs.nulls.backend import resolve_backend, _import_numba_backend
-from copairs.nulls.sampler import _ap_nulls, null_plan
-
-DEFAULT_BUDGET = 2**30
+from copairs.nulls.sampler import DEFAULT_BUDGET, _ap_nulls, null_plan
 
 
 def _count_ge_host(null, thr, ptr, counts):
@@ -75,7 +76,8 @@ def ap_pvalues(
     null_size, seed, backend
         See :func:`copairs.nulls.sampler.ap_nulls`.
     budget_bytes : int
-        Upper bound on the null samples held in memory at once.
+        Upper bound on the null samples held in memory at once, and on the
+        NumPy sampler's temporaries.
     progress_bar : bool
         Show a progress bar over chunks.
     """
@@ -103,8 +105,9 @@ def ap_pvalues(
     for b, start, size in progress(work, n_work, progress_bar, "AP null"):
         sl = slice(b, min(b + batch, len(confs)))
         part = tuple(a[sl] for a in plan)
-        null = _ap_nulls(part, size, start, backend, np.float64)
+        null = _ap_nulls(part, size, start, backend, np.float64, budget_bytes)
         count(null, thr, ptr[sl.start : sl.stop + 1], counts)
+        del null  # free this chunk before sampling the next
     pvals = np.empty(len(thr), dtype=np.float64)
     pvals[order] = (counts + 1) / (null_size + 1)
     return pvals
@@ -173,6 +176,7 @@ def map_pvalues(
     for start, size in progress(
         chunks(null_size, chunk), n_work, progress_bar, "mAP null"
     ):
-        null = _ap_nulls(plan, size, start, backend, np.float64)
+        null = _ap_nulls(plan, size, start, backend, np.float64, budget_bytes)
         kernel(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
+        del null  # free this chunk before sampling the next
     return (counts + 1) / (null_size + 1)
