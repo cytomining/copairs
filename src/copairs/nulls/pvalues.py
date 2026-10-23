@@ -89,7 +89,7 @@ def ap_pvalues(
     ptr = np.searchsorted(conf_ix[order], np.arange(len(confs) + 1))
     # Process configurations in batches whose chunk of samples fits the budget.
     chunk = chunk_size(null_size, 1, budget_bytes)
-    batch = max(1, budget_bytes // (8 * chunk))
+    batch = chunk_size(len(confs), chunk, budget_bytes)
     batches = range(0, len(confs), batch)
     work = (
         (b, start, size) for b in batches for start, size in chunks(null_size, chunk)
