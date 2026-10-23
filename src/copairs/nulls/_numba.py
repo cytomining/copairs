@@ -11,23 +11,29 @@ reverse).
 import numba
 import numpy as np
 
+from copairs.nulls import philox, sampler
+from copairs._numba_cache import cached_njit
 from copairs.nulls.common import split_segments, segment_batches
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
 from copairs.fastap.ranking import upper_bound
 
-_gap_loop_nb = numba.njit(cache=True)(gap_loop)
-_ap_sample_nb = numba.njit(cache=True)(
+# The kernels compile functions of these files; Numba's cache would only see
+# this one (see copairs._numba_cache).
+_SOURCES = (__file__, philox.__file__, sampler.__file__)
+
+_gap_loop_nb = cached_njit(_SOURCES)(gap_loop)
+_ap_sample_nb = cached_njit(_SOURCES)(
     _make_ap_sample(
         numba.njit(inline="always")(philox4x32),
         numba.njit(inline="always")(uniform53),
         _gap_loop_nb,
-        numba.njit(cache=True)(_make_gap_guided(_gap_loop_nb, numba.njit)),
+        cached_njit(_SOURCES)(_make_gap_guided(_gap_loop_nb, numba.njit)),
     )
 )
 
 
-@numba.njit(parallel=True, cache=True)
+@cached_njit(_SOURCES, parallel=True)
 def ap_nulls(num_pos, total, k0, k1, start, out):
     """Fill ``out[c, t]`` with sample ``start + t`` of configuration ``c``."""
     n_conf, size = out.shape
@@ -65,7 +71,7 @@ def count_ge(null, thr, ptr, counts):
         )
 
 
-@numba.njit(parallel=True, cache=True)
+@cached_njit(_SOURCES, parallel=True)
 def _count_ge_kernel(null, rows, thr, ptr, counts, max_blocks):
     """Count segment ``s``'s scores ``thr[ptr[s]:ptr[s + 1]]`` on ``null[rows[s]]``."""
     n_seg = len(rows)
@@ -94,7 +100,7 @@ def _count_ge_kernel(null, rows, thr, ptr, counts, max_blocks):
             counts[lo + q] += run
 
 
-@numba.njit(parallel=True, cache=True)
+@cached_njit(_SOURCES, parallel=True)
 def group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
     """:func:`copairs.nulls.pvalues._group_ge_host` in parallel over sample blocks."""
     n_groups = len(ptr) - 1
