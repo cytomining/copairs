@@ -74,12 +74,8 @@ _FULL_TABLE = 2**20  # largest (code, code) table a layout gathers from
 _NAN = np.uint32(0xFFFFFFFF)
 
 
-def _make_kernels(philox, uniform, jit=lambda f: f):
-    """Build the scalar draw and mAP functions around ``philox`` and ``uniform``.
-
-    ``jit`` compiles each part (e.g. ``numba.njit``) or leaves it Python.
-    Returns ``(draw, group_map)``.
-    """
+def _make_count_less(jit=lambda f: f):
+    """Build ``count_less``, a binary search; ``jit`` as in :func:`_make_kernels`."""
 
     @jit
     def count_less(row, lo, hi, key):
@@ -92,7 +88,60 @@ def _make_kernels(philox, uniform, jit=lambda f: f):
                 hi = mid
         return lo
 
+    return count_less
+
+
+def _make_ordered_subset(philox, uniform, jit=lambda f: f):
+    """Build ``ordered_subset``, which draws one block's profiles from a draw's stream.
+
+    ``jit`` as in :func:`_make_kernels`.
+    """
+    uniform_pair = make_uniform_pair(philox, uniform, jit)
+
+    @jit
+    def next_uniform(c0, c1, blk, spare, k0, k1):
+        """Next uniform of draw ``(c0, c1)``'s stream: ``(u, blk, spare)``."""
+        if spare >= 0.0:
+            return spare, blk, -1.0
+        u, spare = uniform_pair(c0, c1, blk, 0, k0, k1)
+        return u, blk + 1, spare
+
+    @jit
+    def ordered_subset(k, p, c0, c1, blk, spare, k0, k1, chosen):
+        """Fill ``chosen[:k]`` with a uniform ``k``-subset of ``range(p)`` in random order.
+
+        Takes the next uniforms of draw ``(c0, c1)``'s stream, which is at
+        Philox block ``blk`` with ``spare`` left over (-1 if none), and
+        returns the stream's new ``(blk, spare)``.
+        """
+        cnt = 0
+        for t in range(p - k, p):  # Floyd's algorithm: a uniform k-subset
+            u, blk, spare = next_uniform(c0, c1, blk, spare, k0, k1)
+            r = min(int(u * (t + 1)), t)
+            for z in range(cnt):
+                if chosen[z] == r:
+                    r = t
+                    break
+            chosen[cnt] = r
+            cnt += 1
+        for z in range(k - 1, 0, -1):  # Fisher-Yates: a uniform order
+            u, blk, spare = next_uniform(c0, c1, blk, spare, k0, k1)
+            r = min(int(u * (z + 1)), z)
+            chosen[z], chosen[r] = chosen[r], chosen[z]
+        return blk, spare
+
+    return ordered_subset
+
+
+def _make_kernels(philox, uniform, jit=lambda f: f):
+    """Build the scalar draw and mAP functions around ``philox`` and ``uniform``.
+
+    ``jit`` compiles each part (e.g. ``numba.njit``) or leaves it Python.
+    Returns ``(draw, group_map)``.
+    """
+    count_less = _make_count_less(jit)
     sort_entries = make_head_sort(_INSERTION, jit)
+    ordered_subset = _make_ordered_subset(philox, uniform, jit)
 
     @jit
     def group_map(
@@ -184,16 +233,6 @@ def _make_kernels(philox, uniform, jit=lambda f: f):
             total += acc / deg[s]
         return total / n
 
-    uniform_pair = make_uniform_pair(philox, uniform, jit)
-
-    @jit
-    def next_uniform(c0, c1, blk, spare, k0, k1):
-        """Next uniform of draw ``(c0, c1)``'s stream: ``(u, blk, spare)``."""
-        if spare >= 0.0:
-            return spare, blk, -1.0
-        u, spare = uniform_pair(c0, c1, blk, 0, k0, k1)
-        return u, blk + 1, spare
-
     @jit
     def draw(j, n, n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, pm, chosen):
         """Fill ``pm`` with draw ``j``.
@@ -209,20 +248,7 @@ def _make_kernels(philox, uniform, jit=lambda f: f):
         for b in range(n_block):
             k = bm_ptr[b + 1] - bm_ptr[b]
             p = k + cr_hi[b] - cr_lo[b]
-            cnt = 0
-            for t in range(p - k, p):  # Floyd's algorithm: a uniform k-subset
-                u, blk, spare = next_uniform(c0, c1, blk, spare, k0, k1)
-                r = min(int(u * (t + 1)), t)
-                for z in range(cnt):
-                    if chosen[z] == r:
-                        r = t
-                        break
-                chosen[cnt] = r
-                cnt += 1
-            for z in range(k - 1, 0, -1):  # Fisher-Yates: a uniform order
-                u, blk, spare = next_uniform(c0, c1, blk, spare, k0, k1)
-                r = min(int(u * (z + 1)), z)
-                chosen[z], chosen[r] = chosen[r], chosen[z]
+            blk, spare = ordered_subset(k, p, c0, c1, blk, spare, k0, k1, chosen)
             for z in range(k):
                 e = chosen[z]
                 if e < k:
@@ -523,6 +549,29 @@ def _uniforms_np(c0, c1, count, k0, k1):
     return out
 
 
+def _ordered_subsets_np(u, i, k, p):
+    """``ordered_subset`` of each row of uniforms ``u``, read from column ``i``.
+
+    Returns ``(chosen, i)``: each row's ``k`` choices from ``range(p)`` and
+    the column after the last uniform read.
+    """
+    rows = np.arange(len(u))
+    chosen = np.empty((len(u), k), dtype=np.int64)
+    for cnt, t in enumerate(range(p - k, p)):  # Floyd's algorithm
+        r = np.minimum((u[:, i] * (t + 1)).astype(np.int64), t)
+        i += 1
+        if cnt:
+            r = np.where((chosen[:, :cnt] == r[:, None]).any(axis=1), t, r)
+        chosen[:, cnt] = r
+    for z in range(k - 1, 0, -1):  # Fisher-Yates
+        r = np.minimum((u[:, i] * (z + 1)).astype(np.int64), z)
+        i += 1
+        old = chosen[:, z].copy()
+        chosen[:, z] = chosen[rows, r]
+        chosen[rows, r] = old
+    return chosen, i
+
+
 def _draws_np(layout, start, size, k0, k1):
     """``pm`` of draws ``start, ..., start + size - 1``, one row each, as ``draw``."""
     n, bm_ptr, bm_slot = layout.n, layout.bm_ptr, layout.bm_slot
@@ -531,23 +580,9 @@ def _draws_np(layout, start, size, k0, k1):
     ks = np.diff(bm_ptr)
     u = _uniforms_np(j & M32, j >> S32, int((2 * ks - 1).sum()), k0, k1)
     pm = np.empty((size, n), dtype=np.int64)
-    rows = np.arange(size)
     i = 0
     for b, k in enumerate(ks):
-        p = k + cr_hi[b] - cr_lo[b]
-        chosen = np.empty((size, k), dtype=np.int64)
-        for cnt, t in enumerate(range(p - k, p)):  # Floyd's algorithm
-            r = np.minimum((u[:, i] * (t + 1)).astype(np.int64), t)
-            i += 1
-            if cnt:
-                r = np.where((chosen[:, :cnt] == r[:, None]).any(axis=1), t, r)
-            chosen[:, cnt] = r
-        for z in range(k - 1, 0, -1):  # Fisher-Yates
-            r = np.minimum((u[:, i] * (z + 1)).astype(np.int64), z)
-            i += 1
-            old = chosen[:, z].copy()
-            chosen[:, z] = chosen[rows, r]
-            chosen[rows, r] = old
+        chosen, i = _ordered_subsets_np(u, i, k, k + cr_hi[b] - cr_lo[b])
         slots = bm_slot[bm_ptr[b] : bm_ptr[b + 1]]
         pm[:, slots] = np.where(
             chosen < k, slots[np.minimum(chosen, k - 1)], n + cr_lo[b] + chosen - k
