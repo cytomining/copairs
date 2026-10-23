@@ -183,11 +183,17 @@ def _gap_loop_numpy(remaining, k, u):
     quot = top / remaining
     gap = np.zeros(len(u), dtype=np.int64)
     run = np.flatnonzero(quot > u)
+    # Every sample still running has the same gap, so carry only theirs.
+    top, quot, rem, u = top[run], quot[run], remaining[run], u[run]
+    g = 0
     while run.size:
-        gap[run] += 1
-        top[run] -= 1
-        quot[run] = quot[run] * (top[run] / (remaining[run] - gap[run]))
-        run = run[quot[run] > u[run]]
+        g += 1
+        top -= 1
+        quot = quot * (top / (rem - g))
+        more = quot > u
+        if not more.all():
+            gap[run[~more]] = g
+            run, top, quot, rem, u = (a[more] for a in (run, top, quot, rem, u))
     return gap
 
 
@@ -230,17 +236,24 @@ def _gap_bisect_numpy(remaining, k, u):
     smallest gap where it is ``<= u`` is unique, and each probe decides it
     exactly (see :func:`_make_gap_guided`).
     """
-    lo = np.full(len(u), -1, dtype=np.int64)  # the product is > u at lo
-    hi = remaining - k  # and <= u at hi
-    log_u = np.log(u)
-    run = np.flatnonzero(hi - lo > 1)
-    while run.size:
-        mid = (lo[run] + hi[run]) // 2
-        stop = _stops_numpy(remaining[run], k, mid, u[run], log_u[run])
-        hi[run[stop]] = mid[stop]
-        lo[run[~stop]] = mid[~stop]
-        run = run[hi[run] - lo[run] > 1]
-    return hi
+    gap = remaining - k  # the product is <= u at hi
+    lo = np.full(len(u), -1, dtype=np.int64)  # and > u at lo
+    hi, log_u = gap.copy(), np.log(u)
+    run = np.arange(len(u))
+    # Bisect only the open intervals, carrying their arrays along.
+    while True:
+        open_ = hi - lo > 1
+        if not open_.all():
+            gap[run[~open_]] = hi[~open_]
+            run, lo, hi, remaining, u, log_u = (
+                a[open_] for a in (run, lo, hi, remaining, u, log_u)
+            )
+        if not run.size:
+            return gap
+        mid = (lo + hi) // 2
+        stop = _stops_numpy(remaining, k, mid, u, log_u)
+        hi = np.where(stop, mid, hi)
+        lo = np.where(stop, lo, mid)
 
 
 def _ap_null_numpy(num_pos, total, start, size, k0, k1):
