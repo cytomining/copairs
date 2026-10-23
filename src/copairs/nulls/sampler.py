@@ -47,8 +47,8 @@ _GUIDED_MAX_K = 1448
 # Default bound on the NumPy backend's temporaries, in bytes.
 DEFAULT_BUDGET = 2**30
 # Upper bound on the NumPy backend's temporaries per sample, in bytes: its
-# tracemalloc peak is at most 236 bytes per sample (gap bisection; 140 for one
-# positive, 195 for the plain gap loop), output included.
+# tracemalloc peak is at most 217 bytes per sample (gap bisection; 128 for one
+# positive, 178 for the plain gap loop), output included.
 _NUMPY_SAMPLE_BYTES = 256
 # Smallest block of samples worth a NumPy worker thread of its own: with 4096,
 # 4 configurations x 1e4 samples took 0.34 s on 16 threads, with 16384 0.29 s.
