@@ -354,24 +354,42 @@ __device__ __forceinline__ bool key_le(float v, float key) {
 extern "C" __global__ void draw_ap(const float* sims, int k, int m, long long n_rows,
                                    double* ap) {
     extern __shared__ float smem[];
-    float* pos = smem;                                   // k - 1 keys, ascending
+    float* pos = smem;                                   // k - 1 keys, sorted ascending
     unsigned int* hist = (unsigned int*)(smem + k);      // k bins
+    int n = k - 1, size = 1;
+    while (size < n) size <<= 1;
     for (long long row = blockIdx.x; row < n_rows; row += gridDim.x) {
         const float* s = sims + row * (long long)(k + m);
         int q = (int)(row % k);
-        for (int j = threadIdx.x; j < k; j += blockDim.x) hist[j] = 0u;
         for (int j = threadIdx.x; j < k; j += blockDim.x) {
-            if (j == q) continue;
-            float v = 1.0f - s[j];
-            int r = 0;  // rank of key v among the positives', ties by column
-            for (int i = 0; i < k; ++i) {
-                if (i == q || i == j) continue;
-                float w = 1.0f - s[i];
-                r += key_lt(w, v) || (!key_lt(v, w) && i < j);
-            }
-            pos[r] = v;
+            hist[j] = 0u;
+            if (j != q) pos[j - (j > q)] = 1.0f - s[j];
         }
         __syncthreads();
+        // Bitonic sort of the size-padded keys whose compare-exchanges all put the
+        // larger key at the higher slot: slots from n on act as keys above every
+        // other (NaN included), so exchanges that reach them are skipped. Tied keys
+        // compare alike everywhere below, so their order does not matter.
+        for (int width = 2; width <= size; width <<= 1) {
+            for (int stride = width >> 1; stride > 0; stride >>= 1) {
+                for (int t = threadIdx.x; t < size >> 1; t += blockDim.x) {
+                    int a, b;
+                    if (stride == width >> 1) {  // compare mirrored slots of a block
+                        a = (t / stride) * width + t % stride;
+                        b = (t / stride) * width + width - 1 - t % stride;
+                    } else {
+                        a = (t / stride) * 2 * stride + t % stride;
+                        b = a + stride;
+                    }
+                    if (b < n && key_lt(pos[b], pos[a])) {
+                        float v = pos[a];
+                        pos[a] = pos[b];
+                        pos[b] = v;
+                    }
+                }
+                __syncthreads();
+            }
+        }
         for (int e = threadIdx.x; e < m; e += blockDim.x) {
             float key = 1.0f - s[k + e];
             int lo = 0, hi = k - 1;  // positives ranked ahead of this negative
