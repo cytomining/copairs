@@ -620,12 +620,13 @@ def _fast_null_dists(confs, null_size, seed, backend) -> np.ndarray:
     """:func:`get_null_dists` with ``method="fast"``."""
     confs = np.asarray(confs).reshape(-1, 2)
     null_size = check_null_size(null_size)
-    out = np.full((len(confs), null_size), np.nan, dtype=np.float32)
+    seed = resolve_seed(seed)
     ranked = ~_without_positives(confs)
+    if ranked.all():
+        return nulls.ap_nulls(confs, null_size, seed, backend=backend)
+    out = np.full((len(confs), null_size), np.nan, dtype=np.float32)
     if ranked.any():
-        out[ranked] = nulls.ap_nulls(
-            confs[ranked], null_size, resolve_seed(seed), backend=backend
-        )
+        out[ranked] = nulls.ap_nulls(confs[ranked], null_size, seed, backend=backend)
     return out
 
 
