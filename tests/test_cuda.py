@@ -284,7 +284,7 @@ class _HostCuda:
         return self.ap_nulls(plan, start, size, dtype)
 
     class ScoreCounter:
-        def __init__(self, thr):
+        def __init__(self, thr, budget_bytes):
             self.thr = thr
             self._counts = np.zeros(len(thr), dtype=np.int64)
 
@@ -457,9 +457,57 @@ def test_cuda_samples_and_pvalues_bitwise_numpy():
     assert a.tobytes() == b.tobytes()
 
 
-@needs_gpu
-def test_cuda_counts_match_host():
-    """The GPU counters equal the NumPy counts, NaN samples and ties included."""
+def _numpy_exceed_hist(null, size, n_seg, rows, ptr, thr, hist):
+    """Run the exceed_hist kernel in NumPy on the fake GPU's arrays."""
+    null = null.reshape(-1, int(size))
+    for s in range(int(n_seg)):
+        lo, hi = ptr[s], ptr[s + 1]
+        if hi > lo:
+            q = np.searchsorted(thr[lo:hi], null[rows[s]], side="right")
+            np.add.at(hist, ptr[s] + s + q, 1)
+
+
+def _numpy_suffix_add(ptr, n_seg, hist, counts):
+    """Run the suffix_add kernel in NumPy on the fake GPU's arrays."""
+    for s in range(int(n_seg)):
+        lo, hi = ptr[s], ptr[s + 1]
+        bins = hist[lo + s : hi + s + 1].astype(np.int64)
+        counts[lo:hi] += np.cumsum(bins[::-1])[::-1][1:]
+
+
+def _numpy_group_ge(null, size, n_groups, ptr, conf_ix, conf_cnt, n_group, thr, out):
+    """Run the group_ge kernel in NumPy on the fake GPU's arrays."""
+    counts = np.zeros(int(n_groups), dtype=np.int64)
+    null = null.reshape(-1, int(size))
+    pvalues._group_ge_host(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
+    out += counts.astype(np.uint64)
+
+
+def _count_kernels():
+    return {
+        "exceed_hist": _numpy_exceed_hist,
+        "suffix_add": _numpy_suffix_add,
+        "group_ge": _numpy_group_ge,
+    }
+
+
+@pytest.fixture(params=["fake", pytest.param("gpu", marks=needs_gpu)])
+def device(request, monkeypatch):
+    """Use the GPU (None), or a fake one that runs the kernels in NumPy (needs CuPy)."""
+    if request.param == "gpu":
+        return None
+    pytest.importorskip("cupy")
+    kernels = {**_count_kernels(), "ap_nulls_f64": _numpy_ap_nulls}
+    return fake_gpu(monkeypatch, kernels)
+
+
+@pytest.mark.parametrize("budget", [56, 300, 2**30])
+def test_cuda_counts_match_host(device, budget):
+    """The GPU counters equal the NumPy counts, NaN samples and ties included.
+
+    A small budget splits the scores into batches, and one configuration's
+    scores into pieces, without changing the counts.
+    """
     from copairs.nulls import cuda
 
     rng = np.random.default_rng(3)
@@ -473,7 +521,7 @@ def test_cuda_counts_match_host():
         thr[ptr[c] : ptr[c + 1]].sort()
     expected = np.zeros(len(thr), dtype=np.int64)
     pvalues._count_ge_host(null, thr, ptr, expected)
-    counter = cuda.ScoreCounter(thr)
+    counter = cuda.ScoreCounter(thr, budget)
     counter(cuda.cp.asarray(null), ptr)
     np.testing.assert_array_equal(counter.counts(), expected)
 
@@ -489,6 +537,31 @@ def test_cuda_counts_match_host():
     group = cuda.GroupCounter(gptr, conf_ix, conf_cnt, n_group, gthr)
     group(cuda.cp.asarray(null))
     np.testing.assert_array_equal(group.counts(), expected)
+
+
+@pytest.mark.parametrize("budget", [56, 300])
+def test_cuda_pvalues_count_within_budget(device, budget):
+    """AP p-values on the GPU hold at most budget_bytes of count temporaries.
+
+    Thresholds, counts and histogram bins go to the GPU batch by batch
+    instead of all at once; the p-values stay NumPy's.
+    """
+    rng = np.random.default_rng(4)
+    confs = np.array([[2, 10], [3, 40], [5, 60]])
+    conf_ix = rng.integers(len(confs), size=400)
+    scores = rng.random(400)
+    args = (scores, conf_ix, confs, 50, 9)
+    expected = nulls.ap_pvalues(*args, backend="numpy", budget_bytes=budget)
+    got = nulls.ap_pvalues(*args, backend="cuda", budget_bytes=budget)
+    np.testing.assert_array_equal(got, expected)
+    if device is None:
+        return
+    _, launches = device
+    counted = [a for name, a in launches if name in ("exceed_hist", "suffix_add")]
+    assert counted
+    for args in counted:  # the arrays a count kernel sees, but the null chunk
+        held = [a.nbytes for a in args if isinstance(a, np.ndarray) and a.ndim == 1]
+        assert sum(held) <= max(budget, 56), held
 
 
 @needs_gpu

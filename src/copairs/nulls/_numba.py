@@ -11,6 +11,7 @@ reverse).
 import numba
 import numpy as np
 
+from copairs.nulls.common import split_segments, segment_batches
 from copairs.nulls.philox import uniform53, philox4x32
 from copairs.nulls.sampler import gap_loop, _make_ap_sample, _make_gap_guided
 from copairs.fastap.ranking import upper_bound
@@ -54,40 +55,14 @@ def count_ge(null, thr, ptr, counts):
     max_bins = max(2, _HIST_BYTES // 8)
     batches = [(0, len(rows))]
     if ptr[-1] - ptr[0] + len(rows) > max_bins:
-        rows, ptr = _split_segments(rows, ptr, max_bins - 1)
-        batches = _batches(ptr, max_bins)
+        rows, ptr = split_segments(rows, ptr, max_bins - 1)
+        batches = segment_batches(ptr, max_bins)
     for first, end in batches:
         bins = int(ptr[end] - ptr[first]) + end - first
         max_blocks = min(4 * numba.get_num_threads(), max(1, _HIST_BYTES // (8 * bins)))
         _count_ge_kernel(
             null, rows[first:end], thr, ptr[first : end + 1], counts, max_blocks
         )
-
-
-def _batches(ptr, max_bins):
-    """Consecutive segments ``[first, end)`` with at most ``max_bins`` bins each.
-
-    A segment has a bin per score plus one; each must fit ``max_bins`` alone.
-    """
-    out, first = [], 0
-    for end in range(1, len(ptr)):
-        if ptr[end] - ptr[first] + end - first > max_bins:
-            out.append((first, end - 1))
-            first = end - 1
-    out.append((first, len(ptr) - 1))
-    return out
-
-
-def _split_segments(rows, ptr, max_scores):
-    """Split each segment ``ptr[s]:ptr[s + 1]`` into pieces of ``max_scores`` or fewer."""
-    lengths = np.diff(ptr)
-    pieces = np.maximum(1, -(-lengths // max_scores))
-    piece_rows = np.repeat(rows, pieces)
-    first = np.repeat(np.cumsum(pieces) - pieces, pieces)
-    starts = (
-        np.repeat(ptr[:-1], pieces) + (np.arange(len(piece_rows)) - first) * max_scores
-    )
-    return piece_rows, np.append(starts, ptr[-1])
 
 
 @numba.njit(parallel=True, cache=True)

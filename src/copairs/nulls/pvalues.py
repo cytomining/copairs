@@ -94,8 +94,10 @@ def ap_pvalues(
         See :func:`copairs.nulls.sampler.ap_nulls`. On the CUDA backend the
         samples are counted on the GPU too.
     budget_bytes : int
-        Upper bound on the null samples held in memory at once (in GPU memory
-        on the CUDA backend), and on the NumPy sampler's temporaries.
+        Upper bound on the null samples held in memory at once, and on the
+        temporaries of the NumPy sampler and of the counts. On the CUDA
+        backend both the samples and the counts' thresholds, counts and bins
+        stay within it in GPU memory.
     progress_bar : bool
         Show a progress bar over chunks.
     max_workers : int, optional
@@ -120,7 +122,7 @@ def ap_pvalues(
     )
     n_work = len(batches) * len(range(0, null_size, chunk))
     if backend == "cuda":
-        count = _import_cuda_backend().ScoreCounter(thr)
+        count = _import_cuda_backend().ScoreCounter(thr, budget_bytes)
     else:
         kernel = (
             _import_numba_backend().count_ge if backend == "numba" else _count_ge_host

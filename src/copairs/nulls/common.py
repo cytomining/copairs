@@ -61,6 +61,32 @@ def chunks(null_size: int, size: int):
     return ((s, min(size, null_size - s)) for s in range(0, null_size, size))
 
 
+def segment_batches(ptr, max_bins: int) -> list[tuple[int, int]]:
+    """Consecutive segments ``[first, end)`` with at most ``max_bins`` bins each.
+
+    A segment has a bin per score plus one; each must fit ``max_bins`` alone.
+    """
+    out, first = [], 0
+    for end in range(1, len(ptr)):
+        if ptr[end] - ptr[first] + end - first > max_bins:
+            out.append((first, end - 1))
+            first = end - 1
+    out.append((first, len(ptr) - 1))
+    return out
+
+
+def split_segments(rows, ptr, max_scores: int):
+    """Split each segment ``ptr[s]:ptr[s + 1]`` into pieces of ``max_scores`` or fewer."""
+    lengths = np.diff(ptr)
+    pieces = np.maximum(1, -(-lengths // max_scores))
+    piece_rows = np.repeat(rows, pieces)
+    first = np.repeat(np.cumsum(pieces) - pieces, pieces)
+    starts = (
+        np.repeat(ptr[:-1], pieces) + (np.arange(len(piece_rows)) - first) * max_scores
+    )
+    return piece_rows, np.append(starts, ptr[-1])
+
+
 def progress(items, total: int, enabled: bool, desc: str):
     """Wrap ``items`` in a progress bar when ``enabled`` and there are 2+ items."""
     if not enabled or total < 2:

@@ -32,6 +32,7 @@ import numpy as np
 
 from copairs import _cuda
 from copairs.nulls import sampler
+from copairs.nulls.common import split_segments, segment_batches
 
 cp = _cuda.cp
 host = _cuda.host
@@ -345,33 +346,33 @@ class GroupCounter:
 
 
 _COUNT_GE = r"""
-// Bin (ptr[c] - ptr[0] + c) + q counts the samples of configuration c with exactly q
-// thresholds of its segment <= the sample (thresholds sorted, NaN last).
-extern "C" __global__ void exceed_hist(const double* null, long long size, long long n_conf,
-                                       const long long* ptr, const double* thr,
-                                       unsigned long long* hist) {
+// Bin ptr[s] + s + q counts the samples of null row rows[s] with exactly q thresholds
+// of segment s <= the sample (thresholds sorted, NaN last; ptr[0] == 0).
+extern "C" __global__ void exceed_hist(const double* null, long long size, long long n_seg,
+                                       const long long* rows, const long long* ptr,
+                                       const double* thr, unsigned long long* hist) {
     for (long long flat = blockIdx.x * (long long)blockDim.x + threadIdx.x;
-         flat < n_conf * size; flat += (long long)gridDim.x * blockDim.x) {
-        long long c = flat / size;
-        long long lo = ptr[c], hi = ptr[c + 1];
+         flat < n_seg * size; flat += (long long)gridDim.x * blockDim.x) {
+        long long s = flat / size;
+        long long lo = ptr[s], hi = ptr[s + 1];
         if (hi == lo) continue;
-        double x = null[flat];
+        double x = null[rows[s] * size + (flat - s * size)];
         long long a = lo, b = hi;
         while (a < b) {
             long long mid = (a + b) >> 1;
             double v = thr[mid];
             if (isnan(x) || (!isnan(v) && v <= x)) a = mid + 1; else b = mid;
         }
-        atomicAdd(hist + (a - ptr[0] + c), 1ull);
+        atomicAdd(hist + (a + s), 1ull);
     }
 }
 
-// counts[p] += #{samples >= thr[p]}: the suffix sums of each configuration's bins.
-extern "C" __global__ void suffix_add(const long long* ptr, long long n_conf,
+// counts[p] += #{samples >= thr[p]}: the suffix sums of each segment's bins.
+extern "C" __global__ void suffix_add(const long long* ptr, long long n_seg,
                                       const unsigned long long* hist, long long* counts) {
-    for (long long c = blockIdx.x * (long long)blockDim.x + threadIdx.x; c < n_conf;
-         c += (long long)gridDim.x * blockDim.x) {
-        long long lo = ptr[c], hi = ptr[c + 1], off = lo - ptr[0] + c;
+    for (long long s = blockIdx.x * (long long)blockDim.x + threadIdx.x; s < n_seg;
+         s += (long long)gridDim.x * blockDim.x) {
+        long long lo = ptr[s], hi = ptr[s + 1], off = lo + s;
         unsigned long long run = 0;
         for (long long q = hi - lo - 1; q >= 0; --q) {
             run += hist[off + q + 1];
@@ -381,43 +382,67 @@ extern "C" __global__ void suffix_add(const long long* ptr, long long n_conf,
 }
 """
 
+# GPU bytes of count_ge per bin of a batch: the bin, and the threshold and count
+# of its score (a segment's extra bin pays for its row and offset), plus the
+# offsets' end.
+_BIN_BYTES = 24
+_BATCH_BYTES = 8
+
 
 class ScoreCounter:
     """Accumulate AP-null exceedance counts of sorted thresholds over chunks.
 
     The GPU counterpart of :func:`copairs.nulls.pvalues._count_ge_host`
-    applied chunk by chunk to the same counts.
+    applied chunk by chunk to the same counts. Thresholds and counts stay on
+    the host; see :func:`count_ge` for what the GPU holds.
     """
 
-    def __init__(self, thr):
-        self.thr = cp.asarray(thr, dtype=cp.float64)
-        self._counts = cp.zeros(len(self.thr), dtype=cp.int64)
+    def __init__(self, thr, budget_bytes: int):
+        self.thr = np.ascontiguousarray(thr, dtype=np.float64)
+        self._counts = np.zeros(len(self.thr), dtype=np.int64)
+        self.budget_bytes = budget_bytes
 
     def __call__(self, null, ptr):
         """Add the counts of one ``(n_conf, size)`` chunk, segments ``ptr`` (host)."""
-        count_ge(null, self.thr, ptr, self._counts)
+        count_ge(null, self.thr, ptr, self._counts, self.budget_bytes)
 
     def counts(self) -> np.ndarray:
         """Total exceedance count of each threshold."""
-        return self._counts.get()
+        return self._counts
 
 
-def count_ge(null, thr, ptr, counts):
+def count_ge(null, thr, ptr, counts, budget_bytes: int):
     """GPU counterpart of :func:`copairs.nulls.pvalues._count_ge_host`.
 
-    ``null`` is a ``(n_conf, size)`` chunk, ``thr`` the sorted float64
-    thresholds and ``counts`` their int64 counts, all CuPy arrays; ``ptr``
-    (host) gives each configuration's segment of ``thr``.
+    ``null`` is a ``(n_conf, size)`` chunk on the GPU; ``thr`` (the sorted
+    float64 thresholds), ``ptr`` (each configuration's segment of ``thr``) and
+    ``counts`` (their int64 counts) are on the host. The thresholds go to the
+    GPU in batches whose thresholds, counts and histogram bins take at most
+    ``budget_bytes``, a configuration's thresholds split where they alone
+    would exceed it, as in the Numba backend. Each piece counts its own
+    thresholds exactly, so the counts do not depend on the batches.
     """
     n_conf, size = null.shape
-    ptr = np.asarray(ptr, dtype=np.int64)
-    hist = cp.zeros(int(ptr[-1] - ptr[0]) + n_conf, dtype=cp.uint64)
-    ptr = cp.asarray(ptr)
     null = cp.ascontiguousarray(null, dtype=cp.float64)
-    args = (null, np.int64(size), np.int64(n_conf), ptr, thr, hist)
-    _cuda.kernel(_COUNT_GE, "exceed_hist")(
-        (_cuda.grid(null.size),), (_cuda.BLOCK,), args
+    max_bins = max(2, (budget_bytes - _BATCH_BYTES) // _BIN_BYTES)
+    rows, ptr = split_segments(
+        np.arange(n_conf, dtype=np.int64), np.asarray(ptr, dtype=np.int64), max_bins - 1
     )
-    _cuda.kernel(_COUNT_GE, "suffix_add")(
-        (_cuda.grid(n_conf),), (_cuda.BLOCK,), (ptr, np.int64(n_conf), hist, counts)
-    )
+    for first, end in segment_batches(ptr, max_bins):
+        lo, hi = int(ptr[first]), int(ptr[end])
+        if hi == lo:
+            continue
+        seg = cp.asarray(ptr[first : end + 1] - lo)
+        n_seg = np.int64(end - first)
+        hist = cp.zeros(hi - lo + int(n_seg), dtype=cp.uint64)
+        part = cp.zeros(hi - lo, dtype=cp.int64)
+        args = (null, np.int64(size), n_seg, cp.asarray(rows[first:end]), seg)
+        _cuda.kernel(_COUNT_GE, "exceed_hist")(
+            (_cuda.grid(int(n_seg) * size),),
+            (_cuda.BLOCK,),
+            (*args, cp.asarray(thr[lo:hi]), hist),
+        )
+        _cuda.kernel(_COUNT_GE, "suffix_add")(
+            (_cuda.grid(int(n_seg)),), (_cuda.BLOCK,), (seg, n_seg, hist, part)
+        )
+        counts[lo:hi] += host(part)
