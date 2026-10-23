@@ -72,8 +72,10 @@ perfect retrieval) counts the atom.
   and copies, but not through saving, pickling or concatenating frames of
   different AP calls; such frames raise under this null. Recompute them,
   pass `pairs=` (`average_precision(..., return_pairs=True)` also returns
-  them), or choose another null. They hold a reference to the features;
-  `ap.attrs.pop("copairs_pairs")` drops it. Frames from
+  them), or choose another null. The attached pairs keep the features and
+  every positive and negative pair alive with the frame (8 bytes per pair,
+  e.g. 800 MB for 10^8 negative pairs), whichever null is used;
+  `ap.attrs.pop("copairs_pairs")` drops them. Frames from
   `map.multilabel.average_precision` carry no pairs: use `"joint"` or
   `"copied"` for them.
 
