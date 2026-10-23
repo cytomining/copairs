@@ -959,6 +959,29 @@ def test_label_guards():
     )
 
 
+@pytest.mark.parametrize(
+    "spec, suggest_blocks", [(PLATE_SPEC, False), (ML_SPEC, True)],
+    ids=["plates", "one-component"],
+)  # fmt: skip
+def test_label_pool_limit_names_other_nulls(spec, suggest_blocks, monkeypatch):
+    """A label on more than MAX_POOL profiles raises, naming joint and copied.
+
+    Under neg_sameby=["plate"] each plate is a component and label A is on
+    both, so finer blocks cannot shrink its pool and the message does not
+    suggest them; on one component it does.
+    """
+    meta = plate_label_meta()
+    feats = np.random.default_rng(13).standard_normal((len(meta), 5))
+    ap = multilabel_ap(meta, feats, spec)
+    args = (["target"], 100, 0.05, 0)
+    monkeypatch.setattr(permutation, "MAX_POOL", 6)
+    match = "label 'A' .*: (split .* or )?pass null='joint' or null='copied'"
+    with pytest.raises(ValueError, match=match) as err:
+        mean_average_precision(ap, *args, progress_bar=False)
+    assert ("neg_sameby" in str(err.value)) == suggest_blocks
+    assert len(mean_average_precision(ap, *args, progress_bar=False, null="joint"))
+
+
 def test_labels_with_one_holder_set_draw_independently():
     """Two labels held by the same profiles get different draws (keys by label)."""
     meta = pd.DataFrame(

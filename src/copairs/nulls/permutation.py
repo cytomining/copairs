@@ -64,7 +64,8 @@ from copairs.nulls.philox import (
 
 # A slot sorts up to this many drawn profiles by insertion, more by quicksort.
 _INSERTION = 128
-# Reference profiles per group pool; a pool keeps its key matrix and each
+# Reference profiles per group pool (for a multilabel group, profiles of the
+# components holding its label); a pool keeps its key matrix and each
 # reference's sorted keys, about 2 * MAX_POOL**2 float32 (2 GiB).
 MAX_POOL = 2**14
 # Estimated bytes of the pools alive at once (:func:`_pool_bytes`): a group
@@ -1509,13 +1510,7 @@ class _LabelPool:
         self.comps = comps
         parts = [comp_profiles[c] for c in comps]
         self.profiles = np.concatenate(parts).astype(np.int64)
-        p = len(self.profiles)
-        if p > MAX_POOL:
-            raise ValueError(
-                f"a group pool has {p} profiles; the permutation null supports up "
-                f"to {MAX_POOL}. Split profiles into blocks (neg_sameby) or rank "
-                "fewer of them."
-            )
+        p = len(self.profiles)  # at most MAX_POOL (_label_layouts)
         size = np.cumsum([0] + [len(c) for c in parts])
         self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         self.code = np.full(len(nbr_ptr) - 1, -1, dtype=np.int64)
@@ -1790,6 +1785,19 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
         check_pair_counts(degree, members, num_pos[ix], "positive", label)
         check_pair_counts(n_neg, members, num_neg[ix], "negative", label)
         comps, block_of = np.unique(comp[members], return_inverse=True)
+        size = sum(len(comp_profiles[int(c)]) for c in comps)
+        if size > MAX_POOL:
+            # Finer blocks can split one component, but not shrink several.
+            fix = (
+                "" if len(comps) > 1 else "split profiles into blocks (neg_sameby) or "
+            )
+            raise ValueError(
+                f"label {label!r} is held on {len(comps)} component(s) of the "
+                f"negative pairs (e.g. plates), {size} profiles in all; the "
+                "permutation null of multilabel APs moves a label among every "
+                f"profile of its components, up to {MAX_POOL}: {fix}pass "
+                "null='joint' or null='copied'"
+            )
         layout += [tuple(int(c) for c in comps), block_of.ravel().astype(np.int64), key]
         layouts.append(tuple(layout))
     return layouts, comp_profiles, (nbr_ptr, nbr)

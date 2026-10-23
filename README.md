@@ -85,7 +85,10 @@ perfect retrieval) counts the atom.
   e.g. 800 MB for 10^8 negative pairs), whichever null is used;
   `ap.attrs.pop("copairs_pairs")` drops them. A multilabel group needs every
   AP row of its label, since any profile holding the label could hold it
-  under the null. The null recomputes similarities from the features,
+  under the null, and a label moves among every profile of the
+  negative-pair components holding it (e.g. its plates under `neg_sameby`),
+  at most 16,384 profiles: a label held on more raises, so use `"joint"`
+  or `"copied"` for it. The null recomputes similarities from the features,
   so distances that estimate their scale from each batch of pairs
   (`seuclidean`, `mahalanobis`) raise under it; use `"joint"` or `"copied"`.
   Relabelled profiles keep the group's positive pairs, so with `pos_diffby`
