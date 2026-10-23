@@ -118,12 +118,12 @@ def test_vectorized_matches_scalar_draws(
     feats = np.random.default_rng(plates + ctrls).standard_normal((len(meta), 6))
     if ties:  # rounding ties many similarities and zeroes some profiles (NaN)
         feats = np.round(feats)
-    observed, members, pairs = group_of_q(meta, feats, spec)
-    pool = permutation._Pool(members[2], pairs.similarity)
-    layout = permutation._Layout(*members, pairs.similarity, pool)
+    observed, (members, edges, blocks, block_of), pairs = group_of_q(meta, feats, spec)
+    pool = permutation._Pool(blocks, pairs.similarity)
+    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
     assert pool.ranked == (tables != "search")
     assert (layout.full_keys is not None) == (tables == "full")
-    k0, k1 = permutation.group_key(3, members[0])
+    k0, k1 = permutation.group_key(3, members)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
     pm, maps = scalar_draws(layout, start, 300, k0, k1)
     got_pm = permutation._draws_np(layout, start, 300, k0, k1)
@@ -153,12 +153,13 @@ def test_hits_match_scalar_draws():
     meta = layout_meta(2, 3, 6)
     feats = np.random.default_rng(21).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
-    observed, members, pairs = group_of_q(meta, feats, spec)
+    observed, group, pairs = group_of_q(meta, feats, spec)
     count, identity, pool = permutation.permutation_null(
-        *members, pairs.similarity, 700, 5
+        *group, pairs.similarity, 700, 5
     )
-    layout = permutation._Layout(*members, pairs.similarity, pool)
-    _, maps = scalar_draws(layout, 0, 700, *permutation.group_key(5, members[0]))
+    members, edges, _, block_of = group
+    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    _, maps = scalar_draws(layout, 0, 700, *permutation.group_key(5, members))
     assert count == (maps >= tie_thresholds(identity)).sum()
     assert 0 < count < 700
 

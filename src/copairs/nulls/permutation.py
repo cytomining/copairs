@@ -329,14 +329,15 @@ class _Layout:
     its slot) and then the pool's references.
     """
 
-    def __init__(self, members, edges, blocks, block_of, similarity, pool):
+    def __init__(self, members, edges, block_of, similarity, pool):
         members = np.asarray(members, dtype=np.int64)
         block_of = np.asarray(block_of, dtype=np.int64)
         self.n = n = len(members)
         self.pool = pool
         self.slot_block = block_of
         self.bm_slot = np.argsort(block_of, kind="stable").astype(np.int64)
-        bm_ptr = np.searchsorted(block_of[self.bm_slot], np.arange(len(blocks) + 1))
+        n_block = len(pool.blocks)
+        bm_ptr = np.searchsorted(block_of[self.bm_slot], np.arange(n_block + 1))
         self.bm_ptr = bm_ptr.astype(np.int64)
         self.adjm = adjm = np.zeros((n, n), dtype=np.bool_)
         edges = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
@@ -357,13 +358,13 @@ class _Layout:
         # Each pool code's codes to its block's members, sorted, its own cut off.
         widths = np.diff(self.bm_ptr)
         code_block = np.concatenate(
-            [block_of, np.repeat(np.arange(len(blocks)), pool.cr_hi - pool.cr_lo)]
+            [block_of, np.repeat(np.arange(n_block), pool.cr_hi - pool.cr_lo)]
         )
         self.gptr = np.concatenate([[0], np.cumsum(widths[code_block])]).astype(
             np.int64
         )
         self.grow = np.empty(self.gptr[-1], dtype=np.uint32)
-        for b in range(len(blocks)):
+        for b in range(n_block):
             block_members = self.bm_slot[self.bm_ptr[b] : self.bm_ptr[b + 1]]
             codes = np.concatenate(
                 [block_members, n + np.arange(pool.cr_lo[b], pool.cr_hi[b])]
@@ -689,7 +690,7 @@ def permutation_null(
     """
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
-    layout = _Layout(members, edges, blocks, block_of, similarity, pool)
+    layout = _Layout(members, edges, block_of, similarity, pool)
     k0, k1 = group_key(seed, members)
     identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
     thr = float(tie_thresholds(identity))
