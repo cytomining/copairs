@@ -731,17 +731,19 @@ def label_scratch(n):
     )
 
 
+@pytest.mark.parametrize("lone_table", [False, True], ids=["lone-search", "lone-table"])
 @pytest.mark.parametrize("tables", ["ranked", "search"])
 @pytest.mark.parametrize("ties", [False, True], ids=["distinct", "tied"])
 @pytest.mark.parametrize("design, label", [
     ("one-component", "A"), ("one-component", "B"), ("plates", "A"), ("plates", "C"),
 ])  # fmt: skip
 def test_label_vectorized_matches_scalar_draws(
-    design, label, ties, tables, monkeypatch
+    design, label, ties, tables, lone_table, monkeypatch
 ):
     """The NumPy label moves and mAPs equal the scalar functions', bit for bit.
 
-    Pools up to RANK_POOL read a rank table, larger ones search sorted rows.
+    Pools up to RANK_POOL read a rank table, larger ones search sorted rows;
+    layouts that run many draws read lone partners' counts from a table.
     """
     if tables == "search":
         monkeypatch.setattr(permutation, "RANK_POOL", 0)
@@ -757,7 +759,9 @@ def test_label_vectorized_matches_scalar_draws(
     )
     assert pool.ranked == (tables == "ranked")
     assert len(comps) == (2 if design == "plates" else 1)
-    layout = permutation._LabelLayout(members, edges, lone, block_of, pool)
+    draws = 10**6 if lone_table else 0
+    layout = permutation._LabelLayout(members, edges, lone, block_of, pool, draws)
+    assert (layout.lone_before is not None) == lone_table
     k0, k1 = permutation._label_key(3, members, key)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
     pm, maps = scalar_label_draws(layout, start, 300, k0, k1)

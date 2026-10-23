@@ -1543,7 +1543,7 @@ def _label_pool_bytes(p, n_neg):
 class _LabelLayout:
     """One multilabel group's slots and codes, as the label draw functions take them."""
 
-    def __init__(self, members, edges, lone, block_of, pool):
+    def __init__(self, members, edges, lone, block_of, pool, draws=0):
         self.n = n = len(members)
         self.pool = pool
         self.member_code = pool.code[np.asarray(members, dtype=np.int64)]
@@ -1564,6 +1564,21 @@ class _LabelLayout:
         self.grow = np.concatenate(rows).astype(np.uint32)
         # The rows as one sorted array of (member, code) words, for one searchsorted.
         self.gwords = _row_words(self.gptr, self.grow)
+        # A positive y of a drawn profile that is member i ranks after
+        # lone_before[i, y] of i's lone partners (row n: other profiles have
+        # none). The table is built when ``draws`` draws gather more
+        # positives than it has entries; else the counts are searched in
+        # gwords.
+        self.lone_before = None
+        p = len(pool.profiles)
+        if (n + 1) * p <= min(_FULL_TABLE, draws * int(self.deg.sum())):
+            word = (
+                np.arange(n, dtype=np.uint64)[:, None] << np.uint64(32)
+            ) | pool.keys[self.member_code].astype(np.uint64)
+            self.lone_before = np.zeros((n + 1, p), dtype=np.int32)
+            self.lone_before[:n] = (
+                np.searchsorted(self.gwords, word) - self.gptr[:-1, None]
+            )
 
     def draw_args(self):
         """Arguments of the scalar ``draw_pool`` after ``j``, before the keys."""
@@ -1633,10 +1648,13 @@ def _label_maps_np(layout, pm):
             lo = pool.nptr[xp]
             before = _count_less_np(pool.nrow, lo, pool.nptr[xp + 1], kp) - lo
         # Members sharing only the label ranked before the key: x's sorted g-row.
-        lxp = np.broadcast_to(np.maximum(lx, 0), kp.shape)
-        word = (lxp.astype(np.uint64) << np.uint64(32)) | kp
-        lone_before = np.searchsorted(layout.gwords, word) - layout.gptr[lxp]
-        before = before + np.where(lx >= 0, lone_before, 0)
+        if layout.lone_before is not None:
+            before = before + _gather(layout.lone_before, np.where(lx >= 0, lx, n), yp)
+        else:
+            lxp = np.broadcast_to(np.maximum(lx, 0), kp.shape)
+            word = (lxp.astype(np.uint64) << np.uint64(32)) | kp
+            lone_before = np.searchsorted(layout.gwords, word) - layout.gptr[lxp]
+            before = before + np.where(lx >= 0, lone_before, 0)
         total += _mean_precision(before - np.take_along_axis(drawn, cols, axis=1))
     return total / n
 
@@ -1761,9 +1779,12 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     return layouts, comp_profiles, (nbr_ptr, nbr)
 
 
-def _label_run(members, edges, lone, comps, block_of, key, pool, seed):
-    """Return a multilabel group's ``_Run`` on ``pool``, the ``_LabelPool`` of its ``comps``."""
-    layout = _LabelLayout(members, edges, lone, block_of, pool)
+def _label_run(members, edges, lone, comps, block_of, key, pool, seed, draws=0):
+    """Return a multilabel group's ``_Run`` on ``pool``, the ``_LabelPool`` of its ``comps``.
+
+    ``draws`` is the number of draws it will run (:class:`_LabelLayout`).
+    """
+    layout = _LabelLayout(members, edges, lone, block_of, pool, draws)
     return _Run(layout, _label_key(seed, members, key))
 
 
@@ -1828,7 +1849,7 @@ def label_permutation_pvalues(
         return _LabelPool(comps, comp_profiles, nbr_ptr, nbr, pairs.similarity, table)
 
     def start(g, pool):
-        run = _label_run(*layouts[g], pool, seed)
+        run = _label_run(*layouts[g], pool, seed, null_size)
         _check_identity(g, run.identity, observed)
         return run
 
