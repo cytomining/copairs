@@ -183,7 +183,7 @@ def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
         out = cp.empty(n, dtype=cp.float32)
         if n:
             args = (x, d, device_pairs, np.int64(n), kind, out)
-            _kernel(name)((_cuda.grid(32 * n),), (_cuda.BLOCK,), args)
+            _kernel(name)(_cuda.grid(32 * n), (_cuda.BLOCK,), args)
         if metric == "abs_cosine":
             cp.abs(out, out=out)
         return out
@@ -274,11 +274,11 @@ def ap_from_pairs(
         pairs = _device_pairs(neg_pairs[start : start + step])
         keys = rank_keys(_chunk_sims(neg_sims, start, pairs), cp)
         args = (pairs, keys, np.int64(len(pairs)), ptr, vals, hist)
-        _kernel("negative_hist")((_cuda.grid(2 * len(pairs)),), (_cuda.BLOCK,), args)
+        _kernel("negative_hist")(_cuda.grid(2 * len(pairs)), (_cuda.BLOCK,), args)
         del pairs, keys  # free this chunk before the next one
     ap, n_neg = cp.empty(n, dtype=cp.float64), cp.empty(n, dtype=cp.uint64)
     _kernel("ap_from_hist")(
-        (_cuda.grid(n),), (_cuda.BLOCK,), (ptr, hist, np.int64(n), ap, n_neg)
+        _cuda.grid(n), (_cuda.BLOCK,), (ptr, hist, np.int64(n), ap, n_neg)
     )
     num_pos = cp.diff(ptr).get()
     return ranking.paired_results(ap.get(), num_pos, n_neg.get().astype(np.int64))
@@ -382,7 +382,8 @@ def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.nd
         n_rows = len(chunk) * k
         ap = cp.empty((len(chunk), k), dtype=cp.float64)
         args = (sims, np.int32(k), np.int32(m), np.int64(n_rows), ap)
-        kernel((int(min(n_rows, 65535 * 4)),), (threads,), args, shared_mem=8 * k)
+        blocks = _cuda.grid(n_rows * threads, block=threads)  # a block per row
+        kernel(blocks, (threads,), args, shared_mem=8 * k)
         ap.get(out=out[start : start + len(chunk)])
         del sims, ap  # free this chunk before gathering the next one
     return out

@@ -131,10 +131,17 @@ def _multiprocessors(device_id: int) -> int:
     return runtime.deviceGetAttribute(runtime.cudaDevAttrMultiProcessorCount, device_id)
 
 
-def grid(n: int, blocks_per_sm: int = 32) -> int:
-    """1-D grid for ``n`` threads in blocks of :data:`BLOCK`, capped per multiprocessor."""
+def grid(
+    n: int, block: int = BLOCK, blocks_per_sm: int = 32, rows: int | None = None
+) -> tuple[int, ...]:
+    """Grid for ``n`` threads in blocks of ``block``, capped per multiprocessor.
+
+    The kernels loop over the rest. With ``rows``, the grid also has a y
+    dimension of ``rows`` blocks, capped at CUDA's 65535.
+    """
     sms = _multiprocessors(cp.cuda.Device().id)
-    return int(max(1, min((n + BLOCK - 1) // BLOCK, sms * blocks_per_sm)))
+    x = int(max(1, min((n + block - 1) // block, sms * blocks_per_sm)))
+    return (x,) if rows is None else (x, int(max(1, min(rows, 65535))))
 
 
 def is_device_array(x) -> bool:

@@ -136,7 +136,7 @@ def fake_gpu(monkeypatch, kernels=None):
     for name, value in (
         ("cp", cp),
         ("kernel", kernel),
-        ("grid", lambda *args, **kwargs: 1),
+        ("grid", lambda *args, **kwargs: (1,)),
         ("is_device_array", lambda x: isinstance(x, DeviceArray)),
         ("host", host),
         ("usable", lambda: True),

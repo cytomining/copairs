@@ -324,9 +324,25 @@ def test_cuda_multiprocessor_count_read_once(fake_runtime):
     """
     cuda_runtime, calls = fake_runtime
     for _ in range(3):
-        assert cuda_runtime.grid(10**9) == 3 * 32
-        assert cuda_runtime.grid(1000) == 4
+        assert cuda_runtime.grid(10**9) == (3 * 32,)
+        assert cuda_runtime.grid(1000) == (4,)
     assert calls.queried == [(16, 0)]
+
+
+@needs_cupy
+def test_cuda_grid_shapes(fake_runtime):
+    """Grids cover n threads in blocks of any size, up to 32 blocks per SM.
+
+    A y dimension of ``rows`` blocks stays within CUDA's 65535 and above 0.
+    """
+    cuda_runtime, _ = fake_runtime  # 3 multiprocessors
+    assert cuda_runtime.grid(0) == (1,)
+    assert cuda_runtime.grid(100, block=32) == (4,)
+    assert cuda_runtime.grid(10**9, block=32) == (96,)
+    assert cuda_runtime.grid(10**9, blocks_per_sm=8) == (24,)
+    assert cuda_runtime.grid(300, rows=7) == (2, 7)
+    assert cuda_runtime.grid(300, rows=10**6) == (2, 65535)
+    assert cuda_runtime.grid(300, rows=0) == (2, 1)
 
 
 class _HostCuda:

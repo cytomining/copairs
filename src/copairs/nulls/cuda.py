@@ -266,7 +266,7 @@ def ap_nulls(plan, start: int, size: int, dtype):
     )
     name = "ap_nulls_f64" if out.dtype == np.float64 else "ap_nulls_f32"
     kernel = _cuda.kernel(_AP_NULLS, name)
-    kernel((_cuda.grid(out.size),), (_cuda.BLOCK,), args)
+    kernel(_cuda.grid(out.size), (_cuda.BLOCK,), args)
     return out
 
 
@@ -332,10 +332,8 @@ class GroupCounter:
         """Add the exceedances of one ``(n_conf, size)`` float64 chunk of nulls."""
         null = cp.ascontiguousarray(null, dtype=cp.float64)
         size = null.shape[1]
-        gx = _cuda.grid(size, blocks_per_sm=8)
-        gy = int(min(self.n_groups, 65535))
         _cuda.kernel(_GROUP_GE, "group_ge")(
-            (gx, gy),
+            _cuda.grid(size, blocks_per_sm=8, rows=self.n_groups),
             (_cuda.BLOCK,),
             (null, np.int64(size), np.int64(self.n_groups), *self.args, self._counts),
         )
@@ -433,11 +431,11 @@ def count_ge(null, thr, ptr, counts, budget_bytes: int):
         part = cp.zeros(hi - lo, dtype=cp.int64)
         args = (null, np.int64(size), n_seg, cp.asarray(rows[first:end]), seg)
         _cuda.kernel(_COUNT_GE, "exceed_hist")(
-            (_cuda.grid(int(n_seg) * size),),
+            _cuda.grid(int(n_seg) * size),
             (_cuda.BLOCK,),
             (*args, cp.asarray(thr[lo:hi]), hist),
         )
         _cuda.kernel(_COUNT_GE, "suffix_add")(
-            (_cuda.grid(int(n_seg)),), (_cuda.BLOCK,), (seg, n_seg, hist, part)
+            _cuda.grid(int(n_seg)), (_cuda.BLOCK,), (seg, n_seg, hist, part)
         )
         counts[lo:hi] += host(part)
