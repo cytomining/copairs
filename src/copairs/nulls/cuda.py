@@ -70,15 +70,32 @@ __device__ __forceinline__ double uniform53(unsigned int a, unsigned int b) {
 }
 
 // Gap searches; mirror copairs.nulls.sampler.gap_loop and gap_guided.
-__device__ long long gap_loop(long long remaining, long long k, double u) {
-    long long top = remaining - k, gap = 0;
+
+// Algorithm A's float64 product after g steps, as gap_loop builds it.
+__device__ double gap_product(long long remaining, long long k, long long g) {
+    long long top = remaining - k;
     double quot = (double)top / (double)remaining;
+    for (long long gap = 1; gap <= g; ++gap) {
+        top -= 1;
+        quot = quot * ((double)top / (double)(remaining - gap));
+    }
+    return quot;
+}
+
+// gap_loop resumed at step gap, whose product is quot.
+__device__ long long gap_loop_from(long long remaining, long long k, double u, long long gap,
+                                   double quot) {
+    long long top = remaining - k - gap;
     while (quot > u) {
         gap += 1;
         top -= 1;
         quot = quot * ((double)top / (double)(remaining - gap));
     }
     return gap;
+}
+
+__device__ long long gap_loop(long long remaining, long long k, double u) {
+    return gap_loop_from(remaining, k, u, 0, gap_product(remaining, k, 0));
 }
 
 // gap_loop run mostly in float32 (full rate on GPUs with few float64 units). A step
@@ -106,18 +123,7 @@ __device__ long long gap_loop_f32(long long remaining, long long k, double u) {
         break;
     }
     // Too close to call: replay the float64 product to this gap and finish in float64.
-    long long t = remaining - k;
-    double q = (double)t / (double)remaining;
-    for (long long g = 1; g <= gap; ++g) {
-        t -= 1;
-        q = q * ((double)t / (double)(remaining - g));
-    }
-    while (q > u) {
-        gap += 1;
-        t -= 1;
-        q = q * ((double)t / (double)(remaining - gap));
-    }
-    return gap;
+    return gap_loop_from(remaining, k, u, gap, gap_product(remaining, k, gap));
 }
 
 __device__ bool stops(long long remaining, long long k, long long g, double u, double log_u) {
@@ -128,13 +134,7 @@ __device__ bool stops(long long remaining, long long k, long long g, double u, d
         if (acc < log_u - margin) return true;
         if (acc > log_u + margin) return false;
     }
-    long long top = remaining - k;
-    double quot = (double)top / (double)remaining;
-    for (long long gap = 1; gap <= g; ++gap) {
-        top -= 1;
-        quot = quot * ((double)top / (double)(remaining - gap));
-    }
-    return !(quot > u);
+    return !(gap_product(remaining, k, g) > u);
 }
 
 __device__ long long gap_guided(long long remaining, long long k, double u) {
