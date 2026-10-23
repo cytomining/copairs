@@ -254,8 +254,8 @@ def multilabel_ap(pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, n):
         :func:`copairs.fastap.ap_from_pairs`, or ``pos_counts`` that do not
         sum to the number of positive pairs.
     """
-    pos_pairs, neg_pairs = index_pairs(pos_pairs), index_pairs(neg_pairs)
-    n = profile_count(n, pos_pairs, neg_pairs)
+    n = profile_count(n)
+    pos_pairs, neg_pairs = index_pairs(pos_pairs, n), index_pairs(neg_pairs, n)
     pos_sims, neg_sims = pair_sims(pos_sims, pos_pairs), pair_sims(neg_sims, neg_pairs)
     pos_counts = np.asarray(pos_counts)
     if pos_counts.ndim != 1 or pos_counts.sum() != len(pos_pairs):

@@ -83,16 +83,11 @@ def pair_sims(sims, pairs: np.ndarray) -> np.ndarray:
     return sims
 
 
-def profile_count(n, *pairs: np.ndarray) -> int:
-    """``n`` checked against the :func:`index_pairs` ``pairs``, or found from them."""
-    if n is None:
-        return 1 + max(int(p.max()) if len(p) else -1 for p in pairs)
+def profile_count(n) -> int:
+    """``n`` as a number of profiles: a nonnegative integer."""
     n = operator.index(n)
     if n < 0:
         raise ValueError(f"n must be a nonnegative number of profiles, got {n}")
-    for p in pairs:
-        if len(p) and p.max() >= n:
-            raise IndexError(f"pair index {p.max()} is out of bounds for {n} profiles")
     return n
 
 
@@ -208,8 +203,10 @@ def ap_from_pairs(
     null_confs : np.ndarray
         ``(n, 2)`` uint32 ``(num_pos, total)`` of each profile in ``paired_ix``.
     """
-    pos_pairs, neg_pairs = index_pairs(pos_pairs), index_pairs(neg_pairs)
-    n = profile_count(n, pos_pairs, neg_pairs)
+    n = None if n is None else profile_count(n)
+    pos_pairs, neg_pairs = index_pairs(pos_pairs, n), index_pairs(neg_pairs, n)
+    if n is None:
+        n = 1 + max(int(p.max()) if len(p) else -1 for p in (pos_pairs, neg_pairs))
     pos_sims, neg_sims = pair_sims(pos_sims, pos_pairs), pair_sims(neg_sims, neg_pairs)
     ptr, vals = pair_csr(pos_pairs, pos_sims, n)
     _sort_segments(ptr, vals)
