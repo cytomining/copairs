@@ -64,8 +64,9 @@ scalar functions that define a draw and the NumPy backend computes the same
 draws vectorized. The two backends return bitwise-identical nulls and
 p-values (tested), so `backend="auto"` (default) uses Numba whenever it is
 installed; if Numba fails to import, `"auto"` warns once and uses NumPy. The
-first call of a kernel compiles it (seconds to tens of seconds) and caches
-the compiled code next to copairs' sources, where later processes load it.
+first call of each null under Numba compiles its kernels (a few seconds per
+null) and caches the compiled code next to copairs' sources, where later
+processes load it in under a second.
 
 Numba starts one thread per host CPU. In a container or job with a CPU quota,
 set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs. The
