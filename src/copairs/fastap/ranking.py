@@ -209,10 +209,7 @@ def ap_from_pairs(
     null_confs : np.ndarray
         ``(n, 2)`` uint32 ``(num_pos, total)`` of each profile in ``paired_ix``.
     """
-    n = None if n is None else profile_count(n)
-    pos_pairs, neg_pairs = index_pairs(pos_pairs, n), index_pairs(neg_pairs, n)
-    if n is None:
-        n = 1 + max(int(p.max()) if len(p) else -1 for p in (pos_pairs, neg_pairs))
+    pos_pairs, neg_pairs, n = checked_pairs(pos_pairs, neg_pairs, n)
     pos_sims, neg_sims = pair_sims(pos_sims, pos_pairs), pair_sims(neg_sims, neg_pairs)
     ptr, vals = pair_csr(pos_pairs, pos_sims, n)
     _sort_segments(ptr, vals)
@@ -226,8 +223,23 @@ def ap_from_pairs(
     _negative_hist(neg_pairs, neg_sims, ptr, vals, hist, n_neg)
     # Summed in int64
     hist, n_neg = hist.sum(axis=0, dtype=np.int64), n_neg.sum(axis=0, dtype=np.int64)
-    ap = _ap_from_hist(ptr, hist, n)
-    num_pos = np.diff(ptr)
+    return paired_results(_ap_from_hist(ptr, hist, n), np.diff(ptr), n_neg)
+
+
+def checked_pairs(pos_pairs, neg_pairs, n: int | None):
+    """:func:`ap_from_pairs`' pairs, checked by :func:`index_pairs`, and ``n``.
+
+    ``n`` defaults to one more than the largest index in the pairs.
+    """
+    n = None if n is None else profile_count(n)
+    pos_pairs, neg_pairs = index_pairs(pos_pairs, n), index_pairs(neg_pairs, n)
+    if n is None:
+        n = 1 + max(int(p.max()) if len(p) else -1 for p in (pos_pairs, neg_pairs))
+    return pos_pairs, neg_pairs, n
+
+
+def paired_results(ap, num_pos, n_neg):
+    """:func:`ap_from_pairs`' results from every profile's AP and int64 pair counts."""
     total = num_pos + n_neg
     paired_ix = np.flatnonzero(total)
     null_confs = np.stack([num_pos[paired_ix], total[paired_ix]], axis=1)

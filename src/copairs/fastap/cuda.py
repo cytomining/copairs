@@ -259,11 +259,8 @@ def ap_from_pairs(
     ``n`` of ``2**32`` or more, whose indices the GPU sort cannot pack, runs
     on Numba, where ``budget_bytes`` bounds its histograms.
     """
-    n = None if n is None else ranking.profile_count(n)
     given = pos_pairs, neg_pairs
-    pos_pairs, neg_pairs = index_pairs(pos_pairs, n), index_pairs(neg_pairs, n)
-    if n is None:
-        n = 1 + max(int(p.max()) if len(p) else -1 for p in (pos_pairs, neg_pairs))
+    pos_pairs, neg_pairs, n = ranking.checked_pairs(pos_pairs, neg_pairs, n)
     pos_sims = _pair_sims(pos_sims, pos_pairs, given[0])
     neg_sims = _pair_sims(neg_sims, neg_pairs, given[1])
     if n >= 2**32:
@@ -296,11 +293,8 @@ def ap_from_pairs(
     _kernel("ap_from_hist")(
         (_cuda.grid(n),), (_cuda.BLOCK,), (ptr, hist, np.int64(n), ap, n_neg)
     )
-    ap, num_pos = ap.get(), cp.diff(ptr).get()
-    total = num_pos + n_neg.get().astype(np.int64)
-    paired_ix = np.flatnonzero(total)
-    null_confs = np.stack([num_pos[paired_ix], total[paired_ix]], axis=1)
-    return paired_ix, ap[paired_ix], null_confs.astype(np.uint32)
+    num_pos = cp.diff(ptr).get()
+    return ranking.paired_results(ap.get(), num_pos, n_neg.get().astype(np.int64))
 
 
 # draw_ap holds k float32 keys and k uint32 bins in shared memory, of which a
