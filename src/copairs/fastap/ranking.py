@@ -213,7 +213,8 @@ def ap_from_pairs(
     bins = int(ptr[n]) + n
     # A bin or count of one chunk is at most 2 per negative pair (a self-pair).
     dtype = np.int32 if 2 * len(neg_pairs) <= np.iinfo(np.int32).max else np.int64
-    n_chunks = budget_bytes // (np.dtype(dtype).itemsize * (bins + n))
+    # Without profiles (no pairs, n 0 or omitted) a chunk has no bins at all.
+    n_chunks = budget_bytes // (np.dtype(dtype).itemsize * max(1, bins + n))
     n_chunks = max(1, min(numba.get_num_threads(), n_chunks))
     hist = np.zeros((n_chunks, bins), dtype=dtype)
     n_neg = np.zeros((n_chunks, n), dtype=dtype)
