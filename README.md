@@ -52,7 +52,8 @@ code with [Numba](https://numba.pydata.org), an optional dependency:
 pip install copairs[numba]
 ```
 The two backends return bitwise-identical nulls and p-values, so
-`backend="auto"` (default) uses Numba whenever it is installed.
+`backend="auto"` (default) uses Numba whenever it is installed; if Numba fails
+to import, `"auto"` warns once and uses NumPy.
 
 Numba starts one thread per host CPU. In a container or job with a CPU quota,
 set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs. The

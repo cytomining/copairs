@@ -5,7 +5,9 @@ at module level: :func:`_import_numba_backend` loads the compiled kernels the
 first time the ``"numba"`` backend is used.
 """
 
+import warnings
 import importlib.util
+from functools import cache
 
 METHODS = ("fast", "legacy")
 BACKENDS = ("auto", "numba", "numpy")
@@ -29,18 +31,39 @@ def check_method(method: str, backend: str = "auto") -> None:
 
 
 def available_backends() -> list[str]:
-    """Backends usable in this environment, fastest first."""
-    if importlib.util.find_spec("numba") is None:
+    """Backends usable in this environment, fastest first.
+
+    Numba is listed when the Numba backend imports. An installed Numba that
+    fails to import is left out, with a warning naming the error, once.
+    """
+    if importlib.util.find_spec("numba") is None or not _numba_imports():
         return ["numpy"]
     return ["numba", "numpy"]
+
+
+@cache
+def _numba_imports() -> bool:
+    """Whether the installed Numba backend imports; warn once if it does not."""
+    try:
+        _import_numba_backend()
+    except ImportError as exc:
+        warnings.warn(
+            f"Numba is installed but the Numba backend failed to import ({exc!r}); "
+            "backend='auto' uses NumPy, which gives identical results.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return False
+    return True
 
 
 def resolve_backend(backend: str) -> str:
     """Return a concrete backend name for ``backend``.
 
-    ``"auto"`` picks ``"numba"`` when Numba is installed and ``"numpy"``
-    otherwise. That choice cannot change results: both backends return
-    bitwise-identical null samples and counts (tested).
+    ``"auto"`` picks ``"numba"`` when the Numba backend imports and
+    ``"numpy"`` otherwise, including when an installed Numba fails to import.
+    That choice cannot change results: both backends return bitwise-identical
+    null samples and counts (tested). ``"numba"`` raises if it cannot import.
     """
     _check_backend(backend)
     if backend == "auto":

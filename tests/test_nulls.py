@@ -549,6 +549,50 @@ print(list(p), list(m["p_value"]))
     assert out.strip()
 
 
+def test_auto_falls_back_when_numba_fails_to_import(tmp_path):
+    """An installed Numba that fails to import leaves "auto" on NumPy, warning once.
+
+    ``backend="numba"`` still raises the import error.
+    """
+    fake = tmp_path / "numba"
+    fake.mkdir()
+    (fake / "__init__.py").write_text('raise ImportError("simulated broken numba")\n')
+    out = run_python(
+        f"""
+import sys, warnings
+sys.path.insert(0, {str(tmp_path)!r})
+import numpy as np
+import pandas as pd
+from copairs import nulls, compute
+from copairs.map import mean_average_precision
+
+frame = pd.DataFrame({{"g": ["a", "a"], "average_precision": [0.5, 0.6],
+                      "normalized_average_precision": 0.0, "n_pos_pairs": 1,
+                      "n_total_pairs": 10}})
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    assert nulls.available_backends() == ["numpy"], nulls.available_backends()
+    assert nulls.resolve_backend("auto") == "numpy"
+    p = compute.p_values(np.array([0.5, 1.0]), [[2, 10], [1, 4]], 100, 0,
+                         progress_bar=False)
+    m = mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False)
+shown = [str(w.message) for w in caught if w.category is RuntimeWarning]
+assert len(shown) == 1 and "simulated broken numba" in shown[0], shown
+expected = compute.p_values(np.array([0.5, 1.0]), [[2, 10], [1, 4]], 100, 0,
+                            progress_bar=False, backend="numpy")
+assert np.array_equal(p, expected)
+try:
+    nulls.ap_nulls([[2, 5]], 4, 0, backend="numba")
+except ImportError as exc:
+    assert "simulated broken numba" in str(exc), exc
+else:
+    raise AssertionError("backend='numba' ran with a broken numba")
+print(list(p), list(m["p_value"]))
+"""
+    )
+    assert out.strip()
+
+
 def test_import_does_not_load_numba():
     """With numba installed, importing copairs and its null modules leaves it unloaded."""
     pytest.importorskip("numba")
