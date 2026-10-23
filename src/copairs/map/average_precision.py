@@ -93,7 +93,7 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
     progress_bar: bool = True,
-    backend: Literal["numpy", "numba"] = "numpy",
+    backend: Literal["numpy", "numba", "cuda"] = "numpy",
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -148,7 +148,7 @@ def average_precision(
     progress_bar : bool
         Whether to show progress bars for similarity computation.
 
-    backend : {"numpy", "numba"}
+    backend : {"numpy", "numba", "cuda"}
         The default ``"numpy"`` has no optional dependencies and gives the
         results of copairs <= 0.5.5. ``"numba"`` (install
         ``copairs[numba]``) computes similarities with parallel kernels for
@@ -161,6 +161,11 @@ def average_precision(
         computed in float64, so float32 rows whose norms overflow float32 get
         their actual similarity. The kernels take all pairs at once:
         ``batch_size`` and ``progress_bar`` apply only to the other distances.
+        ``"cuda"`` (install ``copairs[gpu]``; needs a CUDA GPU, else
+        RuntimeError) computes the kernels' similarities and AP on the GPU,
+        keeping similarities there, and normalized AP on Numba. Its APs equal
+        ``"numba"``'s bit for bit given the same similarities; its
+        similarities sum in another order, so they match to float32 rounding.
 
     Returns
     -------
@@ -198,7 +203,11 @@ def average_precision(
     # Get the distance function for similarity calculations (e.g., cosine)
     similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
     if fastap is not None:
-        similarity_fn = fastap.similarity_fn(feats, distance, similarity_fn)
+        # On the GPU, similarities stay there for fastap.ap_from_pairs.
+        on_device = {"on_device": True} if backend == "cuda" else {}
+        similarity_fn = fastap.similarity_fn(
+            feats, distance, similarity_fn, **on_device
+        )
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()

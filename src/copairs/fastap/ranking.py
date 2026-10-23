@@ -14,17 +14,23 @@ import numba
 import numpy as np
 
 
-def sortable_keys(keys: np.ndarray) -> np.ndarray:
-    """uint64 that orders like float32 ``keys`` in NumPy (NaN last)."""
-    keys = np.where(np.isnan(keys), np.float32(np.nan), keys).astype(np.float32)
-    bits = keys.view(np.uint32)
-    flipped = np.where(bits >> 31 == 1, ~bits, bits | np.uint32(0x80000000))
-    return flipped.astype(np.uint64)
+def sortable_keys(keys: np.ndarray, xp=np) -> np.ndarray:
+    """uint64 that orders like float32 ``keys`` in NumPy (NaN last).
+
+    ``xp`` is the array module of ``keys``: NumPy, or CuPy on the GPU.
+    """
+    keys = xp.where(xp.isnan(keys), xp.float32(np.nan), keys).astype(xp.float32)
+    bits = keys.view(xp.uint32)
+    flipped = xp.where(bits >> 31 == 1, ~bits, bits | xp.uint32(0x80000000))
+    return flipped.astype(xp.uint64)
 
 
-def rank_keys(sims) -> np.ndarray:
-    """Ranking keys of similarities, as computed by ``build_rank_lists``."""
-    return np.float32(1) - np.asarray(sims, dtype=np.float32)
+def rank_keys(sims, xp=np) -> np.ndarray:
+    """Ranking keys of similarities, as computed by ``build_rank_lists``.
+
+    ``xp`` is the array module of the result: NumPy, or CuPy on the GPU.
+    """
+    return xp.float32(1) - xp.asarray(sims, dtype=xp.float32)
 
 
 @numba.njit(inline="always")

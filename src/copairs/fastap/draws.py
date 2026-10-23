@@ -12,6 +12,7 @@ each of its sorted positives, so no row is fully sorted.
 import numba
 import numpy as np
 
+from copairs._backend import backend_module
 from copairs.fastap.ranking import _rank_key, upper_bound, ap_from_counts
 from copairs.fastap.similarity import _ROW_BLOCK, _unit_rows
 
@@ -88,6 +89,7 @@ def draw_average_precisions(
     references,
     normalized: bool = False,
     budget_bytes: int = DEFAULT_BUDGET,
+    backend: str = "numba",
 ) -> np.ndarray:
     """Average precision of every query of every draw.
 
@@ -106,13 +108,22 @@ def draw_average_precisions(
         Only the rows that some draw uses are converted, normalized and
         checked: zero-norm or non-finite rows raise ValueError when drawn.
     budget_bytes : int
-        Upper bound on gathered features and similarities held at once.
+        Upper bound on gathered features and similarities held at once (in
+        GPU memory on the CUDA backend).
+    backend : {"numba", "cuda"}
+        ``"cuda"`` (``pip install 'copairs[gpu]'``) computes similarities and
+        APs on the GPU, except for draws of more than
+        :data:`copairs.fastap.cuda.MAX_DRAW_QUERIES` queries, which run on
+        Numba. Its batched similarities sum in another order, so they match
+        Numba's to float32 rounding and near-ties can rank differently.
 
     Returns
     -------
     np.ndarray
         ``(n_draws, k)`` float64 APs.
     """
+    if backend not in ("numba", "cuda"):
+        raise ValueError("backend must be either 'numba' or 'cuda'.")
     queries = np.asarray(queries, dtype=np.int64)
     references = np.asarray(references, dtype=np.int64)
     if queries.ndim != 2 or references.ndim != 2 or len(queries) != len(references):
@@ -127,6 +138,10 @@ def draw_average_precisions(
     idx = np.concatenate([queries, references], axis=1)
     feats, idx = _drawn_rows(np.asarray(feats), idx)
     x = unit_rows(feats, normalized)
+    if backend == "cuda":
+        cuda = backend_module("cuda")
+        if k <= cuda.MAX_DRAW_QUERIES:
+            return cuda.draw_aps(x, idx, k, budget_bytes)
     out = np.empty((n_draws, k), dtype=np.float64)
     step = _chunk(n_draws, k, m, x.shape[1], budget_bytes)
     for start in range(0, n_draws, step):

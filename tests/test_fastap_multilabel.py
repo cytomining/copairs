@@ -6,10 +6,15 @@ import pytest
 
 pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
-from copairs import fastap, compute, matching
+from copairs import nulls, fastap, compute, matching
 from copairs.map import multilabel
 
 N_LABELS = 12
+
+GPU = "cuda" in nulls.available_backends()
+needs_gpu = pytest.mark.skipif(not GPU, reason="needs CuPy and a usable CUDA GPU")
+# "cuda" computes similarities on the GPU and the rest as "numba" does.
+AP_BACKENDS = ["numba", pytest.param("cuda", marks=needs_gpu)]
 
 
 def label_frame(seed=0, n=120, empty=True):
@@ -175,8 +180,9 @@ CONSISTENCY = dict(
 )
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("int_labels", [False, True])
-def test_multilabel_ap_matches_numpy(int_labels):
+def test_multilabel_ap_matches_numpy(backend, int_labels):
     """Per-label APs and label column equal the NumPy loop's."""
     dframe, feats = consistency_input()
     if int_labels:
@@ -188,7 +194,7 @@ def test_multilabel_ap_matches_numpy(int_labels):
         distance=compute.pairwise_cosine,
         progress_bar=False,
     )
-    fast = multilabel.average_precision(dframe, feats, backend="numba", **kwargs)
+    fast = multilabel.average_precision(dframe, feats, backend=backend, **kwargs)
     numpy = multilabel.average_precision(dframe, feats, backend="numpy", **kwargs)
     pd.testing.assert_frame_equal(
         fast.drop(columns=["average_precision", "normalized_average_precision"]),
@@ -218,8 +224,9 @@ def test_numeric_label_keys(big, array_dtype):
     np.testing.assert_array_equal(counts, sql_counts)
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("distance", ["cosine", "euclidean"])
-def test_multilabel_ap_with_sql_fallback(distance):
+def test_multilabel_ap_with_sql_fallback(backend, distance):
     """Labels the index cannot represent match through SQL, with the same APs."""
     dframe, feats = consistency_input(5)
     dframe.loc[0, "labels"] = dframe.loc[0, "labels"] * 2  # a label twice in a row
@@ -231,7 +238,7 @@ def test_multilabel_ap_with_sql_fallback(distance):
         distance=distance,
         progress_bar=False,
     )
-    fast = multilabel.average_precision(dframe, feats, backend="numba", **kwargs)
+    fast = multilabel.average_precision(dframe, feats, backend=backend, **kwargs)
     numpy = multilabel.average_precision(dframe, feats, backend="numpy", **kwargs)
     ap_columns = ["average_precision", "normalized_average_precision"]
     pd.testing.assert_frame_equal(

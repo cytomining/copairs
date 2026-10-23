@@ -2,10 +2,11 @@
 
 This package needs the optional ``numba`` extra (``pip install
 'copairs[numba]'``). copairs imports it only when ``backend="numba"`` is
-requested, through ``copairs._backend.backend_module``. AP values match
-copairs' rank-list implementation to float64 rounding given the same
-similarities. :func:`draw_average_precisions` scores many query-vs-reference
-draws at once.
+requested, through ``copairs._backend.backend_module``; ``backend="cuda"``
+loads :mod:`copairs.fastap.cuda` instead, which runs similarities and AP on
+the GPU. AP values match copairs' rank-list implementation to float64
+rounding given the same similarities. :func:`draw_average_precisions` scores
+many query-vs-reference draws at once.
 """
 
 from typing import Callable
@@ -39,7 +40,11 @@ def similarity_fn(feats: np.ndarray, distance, generic: Callable) -> Callable:
     normalizes once: passing any other object raises ValueError. It scores
     all pairs at once, so ``batch_size`` does not apply.
     """
-    kernel = pair_similarity(feats, distance)
+    return _bind_similarity(feats, pair_similarity(feats, distance), generic)
+
+
+def _bind_similarity(feats, kernel: Callable | None, generic: Callable) -> Callable:
+    """:func:`similarity_fn` for a given ``kernel`` (``generic`` when None)."""
     if kernel is None:
         return generic
 

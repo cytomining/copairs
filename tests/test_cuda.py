@@ -36,13 +36,16 @@ WIDE = np.array(
     [[2, 5000], [3, 3000], [8, 20000], [4, 70000], [200, 30_000], [1000, 5000]]
 )
 
-# Calls that select the CUDA backend for the nulls, run in a child interpreter.
+# Calls that select the CUDA backend, run in a child interpreter: CALLS for the
+# nulls, AP_CALLS for the AP stage.
 _SETUP = """
 import sys
+import importlib.util
 import numpy as np
 import pandas as pd
-from copairs import nulls, compute
-from copairs.map import mean_average_precision
+from copairs import nulls, compute, matching
+from copairs.map import average_precision, mean_average_precision, multilabel
+from copairs.map.normalization import normalize_ap
 
 FRAME = pd.DataFrame({"g": ["a", "a"], "average_precision": [0.5, 0.6],
                       "normalized_average_precision": 0.0, "n_pos_pairs": 1,
@@ -60,10 +63,25 @@ CALLS = [
     " backend='cuda')",
     "mean_average_precision(FRAME.iloc[:0], ['g'], 10, 0.05, 0, backend='cuda')",
 ]
+META = pd.DataFrame({"l": list("aabb"), "p": list("xyxy")})
+LABELS = META.assign(l=[["a"], ["a", "b"], ["b"], ["b"]])
+AP_CALLS = [
+    "average_precision(META, np.eye(4), ['l'], ['p'], [], ['l'], backend='cuda')",
+    "multilabel.average_precision(LABELS, np.eye(4), ['l'], ['p'], [], ['l'], 'l',"
+    " backend='cuda')",
+    "matching.find_pairs_multilabel(LABELS, ['l'], ['p'], 'l', backend='cuda')",
+    "normalize_ap(np.array([0.5]), 3, 10, backend='cuda')",
+]
+if importlib.util.find_spec("numba"):
+    from copairs import fastap
+
+    AP_CALLS.append(
+        "fastap.draw_average_precisions(np.eye(4), [[0, 1]], [[2, 3]], backend='cuda')"
+    )
 
 
-def raises(error, *needles):
-    for call in CALLS:
+def raises(error, *needles, calls=CALLS + AP_CALLS):
+    for call in calls:
         try:
             eval(call)
         except error as exc:
@@ -129,6 +147,22 @@ def test_auto_skips_a_cupy_that_fails_to_import(tmp_path):
         "assert len(shown) == 1 and 'simulated broken cupy' in shown[0], shown\n"
         "raises(ImportError, 'simulated broken cupy')\n"
     )
+    assert result.returncode == 0, result.stderr
+
+
+@needs_cupy
+def test_cuda_ap_stage_without_numba_names_the_extra():
+    """The CUDA AP stage runs some steps on Numba, so without it "cuda" names the extra.
+
+    The probe is stubbed to find a usable GPU, so the Numba import is what fails.
+    """
+    check = (
+        "from copairs import _cuda\n"
+        "_cuda.require = lambda: None\n"
+        "assert len(AP_CALLS) == 4\n"
+        "raises(ImportError, 'Numba', \"pip install 'copairs[gpu]'\", calls=AP_CALLS)\n"
+    )
+    result = run_isolated(without_modules("numba", "llvmlite") + _SETUP + check)
     assert result.returncode == 0, result.stderr
 
 

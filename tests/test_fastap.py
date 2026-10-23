@@ -1,4 +1,8 @@
-"""Tests for the Numba similarity kernels and counting-based average precision."""
+"""Tests for the similarity kernels and counting-based average precision.
+
+Tests parametrized over ``AP_BACKENDS`` run the Numba kernels, and the CUDA
+ones (:mod:`copairs.fastap.cuda`) where CuPy compiles kernels for a GPU.
+"""
 
 import tracemalloc
 
@@ -8,10 +12,15 @@ import pytest
 
 pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
-from copairs import fastap, compute
+from copairs import nulls, fastap, compute
 from copairs.map import average_precision
 from tests.helpers import run_isolated, simulate_random_dframe
+from copairs._backend import backend_module
 from copairs.map.average_precision import build_rank_lists
+
+GPU = "cuda" in nulls.available_backends()
+needs_gpu = pytest.mark.skipif(not GPU, reason="needs CuPy and a usable CUDA GPU")
+AP_BACKENDS = ["numba", pytest.param("cuda", marks=needs_gpu)]
 
 
 def random_pairs(rng, n_profiles, n_pos, n_neg):
@@ -28,8 +37,9 @@ def rank_list_ap(pos, neg, pos_sims, neg_sims):
     return paired_ix, ap_scores, null_confs
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("ties", [False, True])
-def test_ap_from_pairs_matches_rank_lists(ties):
+def test_ap_from_pairs_matches_rank_lists(backend, ties):
     """Counting AP equals rank-list AP, including tied similarities."""
     rng = np.random.default_rng(0)
     pos, neg = random_pairs(rng, 300, 900, 20_000)
@@ -39,14 +49,15 @@ def test_ap_from_pairs_matches_rank_lists(ties):
         pos_sims = np.round(pos_sims * 8) / 8
         neg_sims = np.round(neg_sims * 8) / 8
     expected = rank_list_ap(pos, neg, pos_sims, neg_sims)
-    got = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    got = backend_module(backend).ap_from_pairs(pos, neg, pos_sims, neg_sims)
     np.testing.assert_array_equal(got[0], expected[0])
     np.testing.assert_array_equal(got[2], expected[2])
     assert got[2].dtype == expected[2].dtype
     np.testing.assert_allclose(got[1], expected[1], rtol=1e-12, atol=0)
 
 
-def test_ap_from_pairs_edge_cases():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_ap_from_pairs_edge_cases(backend):
     """Profiles without positives get NaN; NaN similarities rank last."""
     rng = np.random.default_rng(1)
     pos, neg = random_pairs(rng, 50, 40, 500)
@@ -55,34 +66,38 @@ def test_ap_from_pairs_edge_cases():
     pos_sims[::7] = np.nan
     neg_sims[::5] = np.nan
     expected = rank_list_ap(pos, neg, pos_sims, neg_sims)
-    got = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    got = backend_module(backend).ap_from_pairs(pos, neg, pos_sims, neg_sims)
     np.testing.assert_array_equal(got[0], expected[0])
     np.testing.assert_array_equal(np.isnan(got[1]), np.isnan(expected[1]))
     assert np.isnan(got[1]).any()
     np.testing.assert_allclose(got[1], expected[1], rtol=1e-12, atol=0)
 
 
-def test_ap_from_pairs_histogram_chunks():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_ap_from_pairs_histogram_chunks(backend):
     """Splitting negatives over per-thread histograms leaves APs unchanged."""
     rng = np.random.default_rng(7)
     pos, neg = random_pairs(rng, 100, 300, 5000)
     pos_sims = rng.random(len(pos)).astype(np.float32)
     neg_sims = rng.random(len(neg)).astype(np.float32)
-    whole = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims, budget_bytes=1)
-    split = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    kernels = backend_module(backend)
+    whole = kernels.ap_from_pairs(pos, neg, pos_sims, neg_sims, budget_bytes=1)
+    split = kernels.ap_from_pairs(pos, neg, pos_sims, neg_sims)
     # More profiles than the pairs index: the extra ones have no pairs
-    sized = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims, n=130)
+    sized = kernels.ap_from_pairs(pos, neg, pos_sims, neg_sims, n=130)
     for w, s, z in zip(whole, split, sized):
         np.testing.assert_array_equal(w, s)
         np.testing.assert_array_equal(z, s)
 
 
-def test_ap_from_pairs_accepts_series_similarities():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_ap_from_pairs_accepts_series_similarities(backend):
     """Pandas similarities are converted to arrays."""
     pos, neg = np.array([[0, 1]]), np.array([[0, 2], [1, 2]])
     pos_sims, neg_sims = np.array([0.5]), np.array([0.1, 0.9])
-    expected = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)
-    got = fastap.ap_from_pairs(pos, neg, pd.Series(pos_sims), pd.Series(neg_sims))
+    kernels = backend_module(backend)
+    expected = kernels.ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    got = kernels.ap_from_pairs(pos, neg, pd.Series(pos_sims), pd.Series(neg_sims))
     np.testing.assert_array_equal(got[1], expected[1])
 
 
@@ -131,17 +146,18 @@ def test_ap_kernels_reject_malformed_inputs():
 METRICS = list(fastap.FAST_METRICS)
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("metric", METRICS)
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_pair_similarity_matches_generic(metric, dtype):
+def test_pair_similarity_matches_generic(backend, metric, dtype):
     """Kernel similarities match copairs' generic functions to float32 rounding."""
     rng = np.random.default_rng(2)
     feats = rng.normal(size=(200, 37)).astype(dtype)
     pairs = rng.integers(200, size=(3000, 2))
     generic = compute.get_similarity_fn(metric, progress_bar=False)(feats, pairs, 512)
-    kernel = fastap.pair_similarity(feats, metric)
+    kernel = backend_module(backend).pair_similarity(feats, metric)
     got = kernel(pairs)
-    assert got.dtype == np.float32
+    assert isinstance(got, np.ndarray) and got.dtype == np.float32
     np.testing.assert_allclose(got, generic, rtol=1e-5, atol=1e-6)
     # find_pairs' uint32 pairs go to the kernels uncopied, with the same result
     np.testing.assert_array_equal(kernel(pairs.astype(np.uint32)), got)
@@ -158,13 +174,14 @@ def test_pair_similarity_without_kernel():
         fastap.PairSimilarity(feats, "jaccard")
 
 
-def test_similarity_fn_is_bound_to_its_feats():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_similarity_fn_is_bound_to_its_feats(backend):
     """The kernel replacement scores the feats it was built for, no others."""
     rng = np.random.default_rng(3)
     feats = rng.normal(size=(20, 5))
     pairs = np.array([[0, 1], [2, 3]])
     generic = compute.get_similarity_fn("cosine", progress_bar=False)
-    fn = fastap.similarity_fn(feats, "cosine", generic)
+    fn = backend_module(backend).similarity_fn(feats, "cosine", generic)
     assert fn is not generic
     np.testing.assert_allclose(fn(feats, pairs, 1), generic(feats, pairs, 1), rtol=1e-6)
     for other in (feats.copy(), feats[::-1], rng.normal(size=(20, 5))):
@@ -172,14 +189,15 @@ def test_similarity_fn_is_bound_to_its_feats():
             fn(other, pairs, 1)
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("metric", ["euclidean", "manhattan", "chebyshev"])
-def test_pair_similarity_nonfinite_features(metric):
+def test_pair_similarity_nonfinite_features(backend, metric):
     """Inf - inf differences give NaN similarities, as in the generic functions."""
     feats = np.array([[np.inf, 1.0, 0.0], [np.inf, 0.0, 0.0], [1.0, 2.0, 3.0]])
     pairs = np.array([[0, 1], [0, 2], [1, 2]])
     with np.errstate(invalid="ignore"):
         generic = compute.get_similarity_fn(metric, progress_bar=False)(feats, pairs, 8)
-    got = fastap.pair_similarity(feats, metric)(pairs)
+    got = backend_module(backend).pair_similarity(feats, metric)(pairs)
     np.testing.assert_array_equal(np.isnan(got), np.isnan(generic))
     np.testing.assert_allclose(got, generic, rtol=1e-6)
 
@@ -221,28 +239,31 @@ def test_pair_similarity_index_range():
         (np.zeros((3, 2), dtype=bool), "integer"),
     ],
 )
-def test_pair_similarity_rejects_malformed_pairs(pairs, match):
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_pair_similarity_rejects_malformed_pairs(backend, pairs, match):
     """Pairs must be an (n, 2) integer array, not reshaped or cast silently."""
-    kernel = fastap.PairSimilarity(np.eye(4), "cosine")
+    kernel = backend_module(backend).pair_similarity(np.eye(4), "cosine")
     with pytest.raises(ValueError, match=match):
         kernel(pairs)
 
 
-def test_pair_similarity_empty_pairs():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_pair_similarity_empty_pairs(backend):
     """No pairs give no similarities."""
-    kernel = fastap.PairSimilarity(np.eye(4), "euclidean")
+    kernel = backend_module(backend).pair_similarity(np.eye(4), "euclidean")
     for pairs in ([], np.empty((0, 2), dtype=np.uint32)):
         got = kernel(pairs)
         assert got.shape == (0,) and got.dtype == np.float32
 
 
-def test_pair_similarity_float32_overflow():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_pair_similarity_float32_overflow(backend):
     """Rows whose float32 norm overflows get their cosine, not the generic 0."""
     feats = np.array(
         [[1e20, 2e20, 0.0], [2e20, 1e20, 0.0], [1.0, 2.0, 0.0]], np.float32
     )
     pairs = np.array([[0, 1], [0, 2]])
-    got = fastap.pair_similarity(feats, "cosine")(pairs)
+    got = backend_module(backend).pair_similarity(feats, "cosine")(pairs)
     np.testing.assert_allclose(got, [0.8, 1.0], rtol=1e-6)
 
 
@@ -259,12 +280,13 @@ PIPELINE = dict(pos_sameby=["l"], pos_diffby=["p"], neg_sameby=[], neg_diffby=["
 AP_COLUMNS = ["average_precision", "normalized_average_precision"]
 
 
-def test_average_precision_numba_ap_stage():
-    """With the same similarities, both backends agree to float64 rounding."""
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_average_precision_fast_ap_stage(backend):
+    """With the same similarities, the fast and NumPy APs agree to float64 rounding."""
     meta, feats = simulated_pipeline_input()
 
     kwargs = dict(PIPELINE, distance=compute.pairwise_cosine, progress_bar=False)
-    fast = average_precision(meta, feats, backend="numba", **kwargs)
+    fast = average_precision(meta, feats, backend=backend, **kwargs)
     numpy = average_precision(meta, feats, backend="numpy", **kwargs)
     pd.testing.assert_frame_equal(
         fast.drop(columns=AP_COLUMNS), numpy.drop(columns=AP_COLUMNS)
@@ -273,11 +295,12 @@ def test_average_precision_numba_ap_stage():
         np.testing.assert_allclose(fast[col], numpy[col], rtol=1e-12, atol=1e-15)
 
 
-def test_average_precision_numba_similarity():
-    """Numba kernels give the NumPy APs up to float32 near-ties."""
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_average_precision_fast_similarity(backend):
+    """The kernels give the NumPy APs up to float32 near-ties."""
     meta, feats = simulated_pipeline_input(1)
     kwargs = dict(PIPELINE, progress_bar=False)
-    fast = average_precision(meta, feats, backend="numba", **kwargs)
+    fast = average_precision(meta, feats, backend=backend, **kwargs)
     numpy = average_precision(meta, feats, backend="numpy", **kwargs)
     np.testing.assert_array_equal(fast["n_total_pairs"], numpy["n_total_pairs"])
     diff = np.abs(fast["average_precision"] - numpy["average_precision"])
@@ -302,8 +325,9 @@ def reference_draw_ap(query, reference):
     return (np.arange(1, k, dtype=np.float64) / (rel_k + 1)).mean(axis=1)
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("k,m,ties", [(2, 5, False), (10, 40, False), (25, 100, True)])
-def test_draw_average_precisions(k, m, ties):
+def test_draw_average_precisions(backend, k, m, ties):
     """Batched draw APs equal fully sorted rank lists."""
     rng = np.random.default_rng(4)
     feats = rng.normal(size=(500, 8 if ties else 64)).astype(np.float32)
@@ -316,7 +340,7 @@ def test_draw_average_precisions(k, m, ties):
         [reference_draw_ap(feats[q], feats[r]) for q, r in zip(queries, refs)]
     )
     got = fastap.draw_average_precisions(
-        feats, queries, refs, budget_bytes=4 * (k + m) * 100 * 7
+        feats, queries, refs, budget_bytes=4 * (k + m) * 100 * 7, backend=backend
     )
     np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-15)
 
@@ -336,12 +360,13 @@ def exact_draws(case, rng):
     return feats, [rng.choice(60, 36, replace=False) for _ in range(5)], 6
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("case", ["collision", "ties"])
-def test_draw_average_precisions_match_average_precision(case):
+def test_draw_average_precisions_match_average_precision(backend, case):
     """Draw APs equal average_precision(backend="numba") on the same rank lists."""
     feats, draws, k = exact_draws(case, np.random.default_rng(8))
     got = fastap.draw_average_precisions(
-        feats, [r[:k] for r in draws], [r[k:] for r in draws]
+        feats, [r[:k] for r in draws], [r[k:] for r in draws], backend=backend
     )
     for draw, ap in zip(draws, got):
         # Queries share one label; each reference has its own, so it has no
@@ -364,6 +389,8 @@ def test_draw_average_precisions_validation():
         fastap.draw_average_precisions(feats, [[0, 1]], [[2], [3]])
     with pytest.raises(ValueError, match="zero-norm"):
         fastap.draw_average_precisions(np.zeros((4, 2)), [[0, 1]], [[2, 3]])
+    with pytest.raises(ValueError, match="'numba' or 'cuda'"):
+        fastap.draw_average_precisions(feats, [[0, 1]], [[2, 3]], backend="numpy")
 
 
 @pytest.mark.parametrize("bad", [-1, 4])
@@ -376,28 +403,30 @@ def test_draw_average_precisions_index_range(bad):
         fastap.draw_average_precisions(feats, [[0, 1]], [[2, bad]])
 
 
-def test_draw_average_precisions_large_norms():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_draw_average_precisions_large_norms(backend):
     """Rows whose squared norm overflows float32 keep their cosine ranking."""
     rng = np.random.default_rng(6)
     feats = rng.normal(size=(40, 16)).astype(np.float32)
     queries = np.stack([rng.choice(40, 5, replace=False) for _ in range(10)])
     refs = np.stack([rng.choice(40, 20, replace=False) for _ in range(10)])
-    expected = fastap.draw_average_precisions(feats, queries, refs)
+    expected = fastap.draw_average_precisions(feats, queries, refs, backend=backend)
     big = feats.copy()
     big[::2] *= np.float32(2.0**66)  # exact scaling; squares exceed float32
-    got = fastap.draw_average_precisions(big, queries, refs)
+    got = fastap.draw_average_precisions(big, queries, refs, backend=backend)
     np.testing.assert_array_equal(got, expected)
 
 
+@pytest.mark.parametrize("backend", AP_BACKENDS)
 @pytest.mark.parametrize("scale", [1e40, 1e-50])
-def test_draw_average_precisions_float64_beyond_float32(scale):
+def test_draw_average_precisions_float64_beyond_float32(backend, scale):
     """float64 rows that float32 cannot hold keep their direction."""
     rng = np.random.default_rng(12)
     feats = rng.normal(size=(40, 16))
     queries = np.stack([rng.choice(40, 5, replace=False) for _ in range(10)])
     refs = np.stack([rng.choice(40, 20, replace=False) for _ in range(10)])
-    expected = fastap.draw_average_precisions(feats, queries, refs)
-    got = fastap.draw_average_precisions(feats * scale, queries, refs)
+    expected = fastap.draw_average_precisions(feats, queries, refs, backend=backend)
+    got = fastap.draw_average_precisions(feats * scale, queries, refs, backend=backend)
     np.testing.assert_array_equal(got, expected)
 
 
@@ -464,7 +493,8 @@ def test_draw_average_precisions_touch_only_drawn_rows(normalized):
     assert peak < feats.nbytes / 10, peak
 
 
-def test_draw_average_precisions_check_drawn_rows():
+@pytest.mark.parametrize("backend", AP_BACKENDS)
+def test_draw_average_precisions_check_drawn_rows(backend):
     """Drawn rows that are zero or non-finite still raise; others are unused."""
     feats = np.eye(6, dtype=np.float32)
     feats[1] = 0
@@ -473,5 +503,99 @@ def test_draw_average_precisions_check_drawn_rows():
         fastap.draw_average_precisions(feats, [[0, 1]], [[2, 3]])
     with pytest.raises(ValueError, match="non-finite"):
         fastap.draw_average_precisions(feats, [[0, 2]], [[4, 3]], normalized=True)
-    got = fastap.draw_average_precisions(feats, [[0, 2]], [[3, 5]])
+    got = fastap.draw_average_precisions(feats, [[0, 2]], [[3, 5]], backend=backend)
     np.testing.assert_array_equal(got, [[1.0, 1.0]])
+
+
+@needs_gpu
+def test_ap_from_pairs_cuda_negative_chunks(monkeypatch):
+    """Negatives streamed to the GPU in chunks give the APs of one pass.
+
+    Similarities on the host or on the GPU give the same result.
+    """
+    cuda = backend_module("cuda")
+    rng = np.random.default_rng(6)
+    pos, neg = random_pairs(rng, 200, 600, 10_000)
+    pos_sims = rng.random(len(pos)).astype(np.float32)
+    neg_sims = rng.random(len(neg)).astype(np.float32)
+    whole = cuda.ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    monkeypatch.setattr(cuda, "PAIR_CHUNK", 999)
+    for sims in (neg_sims, cuda.cp.asarray(neg_sims)):
+        got = cuda.ap_from_pairs(pos, neg, cuda.cp.asarray(pos_sims), sims)
+        for g, w in zip(got, whole):
+            assert isinstance(g, np.ndarray)
+            np.testing.assert_array_equal(g, w)
+
+
+@needs_gpu
+@pytest.mark.parametrize("ties", [False, True])
+def test_cuda_ap_equals_numba_bitwise(ties):
+    """Given the same similarities, CUDA APs equal Numba's bit for bit.
+
+    Counts are exact and both sum each AP in the same order; NaN similarities
+    and ties included.
+    """
+    rng = np.random.default_rng(13)
+    pos, neg = random_pairs(rng, 500, 3000, 50_000)
+    pos_sims = rng.random(len(pos)).astype(np.float32)
+    neg_sims = rng.random(len(neg)).astype(np.float32)
+    if ties:
+        pos_sims, neg_sims = np.round(pos_sims * 8) / 8, np.round(neg_sims * 8) / 8
+    pos_sims[::11], neg_sims[::13] = np.nan, np.nan
+    expected = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    got = backend_module("cuda").ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    for g, e in zip(got, expected):
+        assert g.dtype == e.dtype and g.tobytes() == e.tobytes()
+    meta, feats = simulated_pipeline_input(2)
+    kwargs = dict(PIPELINE, distance=compute.pairwise_cosine, progress_bar=False)
+    pd.testing.assert_frame_equal(
+        average_precision(meta, feats, backend="cuda", **kwargs),
+        average_precision(meta, feats, backend="numba", **kwargs),
+        check_exact=True,
+    )
+
+
+@needs_gpu
+def test_cuda_similarities_stay_on_device(monkeypatch):
+    """average_precision keeps the kernels' similarities on the GPU for AP."""
+    cuda = backend_module("cuda")
+    feats = np.random.default_rng(14).normal(size=(30, 6))
+    generic = compute.get_similarity_fn("cosine", progress_bar=False)
+    pairs = np.array([[0, 1], [2, 3]])
+    on_device = cuda.similarity_fn(feats, "cosine", generic, on_device=True)
+    sims = on_device(feats, pairs, 1)
+    assert isinstance(sims, cuda.cp.ndarray)
+    host = cuda.similarity_fn(feats, "cosine", generic)(feats, pairs, 1)
+    np.testing.assert_array_equal(sims.get(), host)
+
+    seen = []
+    ap_from_pairs = cuda.ap_from_pairs
+
+    def record(pos_pairs, neg_pairs, pos_sims, neg_sims, **kwargs):
+        seen.append((type(pos_sims), type(neg_sims)))
+        return ap_from_pairs(pos_pairs, neg_pairs, pos_sims, neg_sims, **kwargs)
+
+    monkeypatch.setattr(cuda, "ap_from_pairs", record)
+    meta, feats = simulated_pipeline_input(3)
+    average_precision(meta, feats, **PIPELINE, progress_bar=False, backend="cuda")
+    assert seen == [(cuda.cp.ndarray, cuda.cp.ndarray)]
+
+
+@needs_gpu
+@pytest.mark.parametrize("extra", [0, 1])
+def test_draw_average_precisions_shared_memory_limit(extra):
+    """Draws up to the CUDA kernel's shared memory run on the GPU, larger on Numba.
+
+    Either way their APs equal the Numba backend's up to float32 near-ties.
+    """
+    cuda = backend_module("cuda")
+    k, m = cuda.MAX_DRAW_QUERIES + extra, 16
+    rng = np.random.default_rng(5)
+    feats = rng.normal(size=(k + m, 8)).astype(np.float32)
+    queries, refs = np.arange(k)[None], np.arange(k, k + m)[None]
+    got = fastap.draw_average_precisions(feats, queries, refs, backend="cuda")
+    expected = fastap.draw_average_precisions(feats, queries, refs)
+    if extra:
+        np.testing.assert_array_equal(got, expected)
+    else:
+        np.testing.assert_allclose(got, expected, rtol=0, atol=1e-3)

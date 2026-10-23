@@ -38,10 +38,15 @@ def backend_module(backend: str):
     """Return the kernels for ``backend``: None for ``"numpy"``.
 
     For ``"numba"``, imports the optional Numba kernels, :mod:`copairs.fastap`,
-    on first use (see :func:`import_backend`).
+    on first use (see :func:`import_backend`). For ``"cuda"``,
+    :mod:`copairs.fastap.cuda`, after checking for a usable GPU: a
+    RuntimeError naming the extra without one.
     """
     if backend == "numpy":
         return None
-    if backend != "numba":
-        raise ValueError("backend must be either 'numpy' or 'numba'.")
-    return import_backend("copairs.fastap", backend)
+    if backend == "numba":
+        return import_backend("copairs.fastap", backend)
+    if backend != "cuda":
+        raise ValueError("backend must be 'numpy', 'numba' or 'cuda'.")
+    import_backend("copairs._cuda", backend).require()
+    return import_backend("copairs.fastap.cuda", backend)
