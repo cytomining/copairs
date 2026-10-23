@@ -163,9 +163,10 @@ def average_precision(
         ``batch_size`` and ``progress_bar`` apply only to the other distances.
         ``"cuda"`` (install ``copairs[gpu]``; needs a CUDA GPU, else
         RuntimeError) computes the kernels' similarities and AP on the GPU,
-        keeping similarities there, and normalized AP on Numba. Its APs equal
-        ``"numba"``'s bit for bit given the same similarities; its
-        similarities sum in another order, so they match to float32 rounding.
+        streaming the negative pairs within 1 GiB of GPU memory, and
+        normalized AP on Numba. Its APs equal ``"numba"``'s bit for bit given
+        the same similarities; its similarities sum in another order, so they
+        match to float32 rounding.
 
     Returns
     -------
@@ -203,7 +204,7 @@ def average_precision(
     # Get the distance function for similarity calculations (e.g., cosine)
     similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
     if fastap is not None:
-        # On the GPU, similarities stay there for fastap.ap_from_pairs.
+        # On the GPU, fastap.ap_from_pairs computes them, chunk by chunk.
         on_device = {"on_device": True} if backend == "cuda" else {}
         similarity_fn = fastap.similarity_fn(
             feats, distance, similarity_fn, **on_device

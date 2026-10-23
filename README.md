@@ -85,7 +85,8 @@ cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
   samples are NumPy's, but not by identical arithmetic, and no GPU run has
   tested them bit for bit yet; `"auto"` stays on the CPU.
 - AP stage: `backend="cuda"`, only when asked for, computes pair similarities
-  and AP on the GPU, keeping similarities there, and runs multilabel matching,
+  and AP on the GPU, streaming negative pairs, their similarities and keys
+  through it in chunks of bounded memory, and runs multilabel matching,
   per-label AP and normalized AP on Numba. Given the same similarities, its APs
   equal `"numba"`'s bit for bit; its similarities sum in another order, so
   they match to float32 rounding. `draw_average_precisions(...,

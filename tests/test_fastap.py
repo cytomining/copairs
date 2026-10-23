@@ -512,23 +512,30 @@ def test_draw_average_precisions_check_drawn_rows(backend):
 
 
 @needs_gpu
-def test_ap_from_pairs_cuda_negative_chunks(monkeypatch):
+def test_ap_from_pairs_cuda_negative_chunks():
     """Negatives streamed to the GPU in chunks give the APs of one pass.
 
-    Similarities on the host or on the GPU give the same result.
+    Similarities on the host, on the GPU or computed in the chunks
+    (DeviceSims) give the same result.
     """
     cuda = backend_module("cuda")
     rng = np.random.default_rng(6)
     pos, neg = random_pairs(rng, 200, 600, 10_000)
-    pos_sims = rng.random(len(pos)).astype(np.float32)
-    neg_sims = rng.random(len(neg)).astype(np.float32)
+    feats = rng.normal(size=(200, 7))
+    kernel = cuda.pair_similarity(feats, "cosine", on_device=True)
+    lazy_pos, lazy_neg = kernel(pos), kernel(neg)
+    pos_sims, neg_sims = lazy_pos.get(), lazy_neg.get()
     whole = cuda.ap_from_pairs(pos, neg, pos_sims, neg_sims)
-    monkeypatch.setattr(cuda, "PAIR_CHUNK", 999)
-    for sims in (neg_sims, cuda.cp.asarray(neg_sims)):
-        got = cuda.ap_from_pairs(pos, neg, cuda.cp.asarray(pos_sims), sims)
+    expected = fastap.ap_from_pairs(pos, neg, pos_sims, neg_sims)
+    for g, e in zip(whole, expected):
+        np.testing.assert_array_equal(g, e)
+    for sims in (neg_sims, cuda.cp.asarray(neg_sims), lazy_neg):
+        got = cuda.ap_from_pairs(pos, neg, lazy_pos, sims, budget_bytes=16 * 999)
         for g, w in zip(got, whole):
             assert isinstance(g, np.ndarray)
             np.testing.assert_array_equal(g, w)
+    with pytest.raises(ValueError, match="other pairs"):
+        cuda.ap_from_pairs(pos, neg[::-1], lazy_pos, lazy_neg)
 
 
 @needs_gpu
@@ -560,15 +567,15 @@ def test_cuda_ap_equals_numba_bitwise(ties):
 
 
 @needs_gpu
-def test_cuda_similarities_stay_on_device(monkeypatch):
-    """average_precision keeps the kernels' similarities on the GPU for AP."""
+def test_cuda_similarities_computed_in_the_ap_count(monkeypatch):
+    """average_precision leaves the kernels' similarities to the GPU AP count."""
     cuda = backend_module("cuda")
     feats = np.random.default_rng(14).normal(size=(30, 6))
     generic = compute.get_similarity_fn("cosine", progress_bar=False)
     pairs = np.array([[0, 1], [2, 3]])
     on_device = cuda.similarity_fn(feats, "cosine", generic, on_device=True)
     sims = on_device(feats, pairs, 1)
-    assert isinstance(sims, cuda.cp.ndarray)
+    assert isinstance(sims, cuda.DeviceSims) and len(sims) == 2
     host = cuda.similarity_fn(feats, "cosine", generic)(feats, pairs, 1)
     np.testing.assert_array_equal(sims.get(), host)
 
@@ -582,7 +589,7 @@ def test_cuda_similarities_stay_on_device(monkeypatch):
     monkeypatch.setattr(cuda, "ap_from_pairs", record)
     meta, feats = simulated_pipeline_input(3)
     average_precision(meta, feats, **PIPELINE, progress_bar=False, backend="cuda")
-    assert seen == [(cuda.cp.ndarray, cuda.cp.ndarray)]
+    assert seen == [(cuda.DeviceSims, cuda.DeviceSims)]
 
 
 @needs_gpu
@@ -624,3 +631,50 @@ def test_cuda_pairs_cast_to_uint32_on_the_host(monkeypatch):
     for _, args in launches:
         pairs = [a for a in args if isinstance(a, np.ndarray) and a.ndim == 2]
         assert all(a.dtype == np.uint32 for a in pairs)
+
+
+@needs_cupy
+def test_cuda_ap_stage_streams_negatives_within_budget(monkeypatch):
+    """The GPU AP count holds at most budget_bytes of negatives at a time.
+
+    Their similarities are computed chunk by chunk, not all beforehand.
+    """
+    cp, launches = fake_gpu(monkeypatch)
+    cuda = backend_module("cuda")
+    rng = np.random.default_rng(16)
+    pos, neg = random_pairs(rng, 40, 10, 5000)
+    feats = rng.normal(size=(40, 4))
+    generic = compute.get_similarity_fn("cosine", progress_bar=False)
+    similarity = cuda.similarity_fn(feats, "cosine", generic, on_device=True)
+    cp.allocated.clear()
+    pos_sims, neg_sims = similarity(feats, pos, 1), similarity(feats, neg, 1)
+    assert not cp.allocated, "no similarities computed before the AP count"
+    budget = 16 * 100
+    cuda.ap_from_pairs(pos, neg, pos_sims, neg_sims, budget_bytes=budget)
+    assert max(cp.allocated) <= budget, cp.allocated
+    assert sum(name == "negative_hist" for name, _ in launches) == len(neg) // 100
+
+
+@needs_cupy
+@pytest.mark.parametrize("resident", [True, False])
+def test_cuda_draws_within_budget(monkeypatch, resident):
+    """GPU draws hold one chunk's rows, similarities and APs within the budget.
+
+    APs go to the host chunk by chunk; the drawn rows stay on the GPU only
+    when they take at most half of the budget.
+    """
+    cp, launches = fake_gpu(monkeypatch)
+    rng = np.random.default_rng(17)
+    k, m, n_draws = 4, 12, 200  # all APs: 6400 bytes
+    feats = rng.normal(size=(40, 8)).astype(np.float32)
+    queries = np.stack([rng.choice(40, k, replace=False) for _ in range(n_draws)])
+    refs = np.stack([rng.choice(40, m, replace=False) for _ in range(n_draws)])
+    per_draw = 4 * (k + m) * (8 + k)
+    budget = 3 * per_draw + (2 * feats.nbytes if resident else 0)
+    got = fastap.draw_average_precisions(
+        feats, queries, refs, budget_bytes=budget, backend="cuda"
+    )
+    assert isinstance(got, np.ndarray) and got.shape == (n_draws, k)
+    assert max(cp.allocated) <= budget, cp.allocated
+    assert (feats.nbytes in cp.allocated) == resident
+    assert sum(name == "draw_ap" for name, _ in launches) > 1

@@ -5,9 +5,10 @@ install 'copairs[gpu]'``). It offers the interface of :mod:`copairs.fastap`
 that the AP functions use:
 
 - :func:`similarity_fn` and :func:`pair_similarity` compute pair similarities
-  on the GPU, optionally keeping them there;
+  on the GPU, returning them, or with ``on_device`` a :class:`DeviceSims`
+  that :func:`ap_from_pairs` computes chunk by chunk;
 - :func:`ap_from_pairs` computes AP by counting on the GPU, streaming the
-  negative pairs in chunks of :data:`PAIR_CHUNK`;
+  negative pairs, their similarities and keys within ``budget_bytes``;
 - multilabel APs, the multilabel matcher and normalized AP run on Numba, on the
   CPU (:mod:`copairs.fastap.multilabel`, :func:`expected_ap_array`).
 
@@ -28,6 +29,7 @@ from copairs.fastap.normalization import expected_ap_array
 __all__ = [
     "MAX_DRAW_QUERIES",
     "PAIR_CHUNK",
+    "DeviceSims",
     "ap_from_pairs",
     "expected_ap_array",
     "multilabel",
@@ -36,8 +38,11 @@ __all__ = [
 ]
 
 cp = _cuda.cp
-# Pairs, and negatives' keys, copied to the GPU at a time.
+# Pairs whose similarities the GPU computes at a time for the host.
 PAIR_CHUNK = 1 << 24
+# GPU bytes per negative pair that ap_from_pairs streams: the uint32 pair, its
+# float32 similarity and its float32 key.
+_NEGATIVE_BYTES = 16
 
 _SOURCE = r"""
 // NumPy ordering: NaN sorts after every number and ties with NaN.
@@ -158,13 +163,43 @@ def _device_pairs(pairs):
     return cp.asarray(np.ascontiguousarray(pairs, dtype=np.uint32).reshape(-1, 2))
 
 
+class DeviceSims:
+    """Similarities of ``pairs``, computed on the GPU only when they are used.
+
+    :func:`ap_from_pairs` computes them chunk by chunk with its own pairs,
+    so all of them are never held at once, and :meth:`get` returns them all
+    as a NumPy array. ``source`` is the pairs object they were made for.
+    """
+
+    def __init__(self, sims_of, pairs: np.ndarray, source):
+        self._sims_of = sims_of
+        self.pairs = pairs
+        self.source = source
+
+    def __len__(self) -> int:
+        """Return the number of pairs."""
+        return len(self.pairs)
+
+    def of(self, device_pairs):
+        """Float32 similarities of ``device_pairs`` (uint32, on the GPU), on the GPU."""
+        return self._sims_of(device_pairs)
+
+    def get(self) -> np.ndarray:
+        """All similarities as a NumPy array, computed :data:`PAIR_CHUNK` at a time."""
+        out = np.empty(len(self.pairs), dtype=np.float32)
+        for start in range(0, len(out), PAIR_CHUNK):
+            chunk = self.pairs[start : start + PAIR_CHUNK]
+            self.of(_device_pairs(chunk)).get(out=out[start : start + len(chunk)])
+        return out
+
+
 def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
     """GPU counterpart of :func:`copairs.fastap.pair_similarity`.
 
     The kernel computes in float64 like the Numba one, from the same unit
     rows, and returns float32 similarities: a NumPy array, or with
-    ``on_device`` a CuPy array. Pairs are checked on the host and copied to
-    the GPU :data:`PAIR_CHUNK` at a time.
+    ``on_device`` a :class:`DeviceSims`. Pairs are checked on the host and
+    copied to the GPU in chunks.
     """
     feats = np.asarray(feats)
     # The kernels index rows with uint32 pairs.
@@ -181,17 +216,19 @@ def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
     name += "_f64" if x.dtype == cp.float64 else "_f32"
     d = np.int64(x.shape[1])
 
-    def similarity(pairs):
-        pairs = index_pairs(pairs, len(x))
-        out = cp.empty(len(pairs), dtype=cp.float32)
-        for start in range(0, len(pairs), PAIR_CHUNK):
-            chunk = _device_pairs(pairs[start : start + PAIR_CHUNK])
-            n = len(chunk)
-            args = (x, d, chunk, np.int64(n), *extra, out[start : start + n])
+    def sims_of(device_pairs):
+        n = len(device_pairs)
+        out = cp.empty(n, dtype=cp.float32)
+        if n:
+            args = (x, d, device_pairs, np.int64(n), *extra, out)
             _kernel(name)((_cuda.grid(32 * n),), (_cuda.BLOCK,), args)
         if metric == "abs_cosine":
             cp.abs(out, out=out)
-        return out if on_device else out.get()
+        return out
+
+    def similarity(pairs):
+        sims = DeviceSims(sims_of, index_pairs(pairs, len(x)), pairs)
+        return sims if on_device else sims.get()
 
     return similarity
 
@@ -199,14 +236,22 @@ def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
 def similarity_fn(feats, distance, generic, on_device: bool = False):
     """:func:`copairs.fastap.similarity_fn` with the GPU kernels.
 
-    With ``on_device``, the kernels' similarities stay on the GPU for
-    :func:`ap_from_pairs`; distances without a kernel use ``generic``.
+    With ``on_device``, the kernels' similarities are :class:`DeviceSims`
+    for :func:`ap_from_pairs`; distances without a kernel use ``generic``.
     """
     return _bind_similarity(feats, pair_similarity(feats, distance, on_device), generic)
 
 
-def _pair_sims(sims, pairs):
-    """:func:`copairs.fastap.ranking.pair_sims` for NumPy or CuPy similarities."""
+def _pair_sims(sims, pairs, given):
+    """:func:`copairs.fastap.ranking.pair_sims` for NumPy, CuPy or device sims.
+
+    :class:`DeviceSims` must belong to these pairs: ``given``, the pairs
+    object passed in, or equal pairs.
+    """
+    if isinstance(sims, DeviceSims):
+        if sims.source is not given and not np.array_equal(sims.pairs, pairs):
+            raise ValueError("these similarities were computed for other pairs")
+        return sims
     if not _cuda.is_device_array(sims):
         return ranking.pair_sims(sims, pairs)
     if sims.shape != (len(pairs),):
@@ -215,6 +260,17 @@ def _pair_sims(sims, pairs):
             f"{sims.shape}"
         )
     return sims
+
+
+def _chunk_sims(sims, start: int, device_pairs):
+    """Similarities of ``device_pairs``, pairs ``start:`` of ``sims``, on the GPU."""
+    if isinstance(sims, DeviceSims):
+        return sims.of(device_pairs)
+    return cp.asarray(sims[start : start + len(device_pairs)])
+
+
+def _host_sims(sims) -> np.ndarray:
+    return sims.get() if isinstance(sims, DeviceSims) else _cuda.host(sims)
 
 
 def ap_from_pairs(
@@ -227,43 +283,48 @@ def ap_from_pairs(
 ):
     """:func:`copairs.fastap.ap_from_pairs` on the GPU; returns NumPy arrays.
 
-    Similarities may be NumPy or CuPy arrays. Beyond them the GPU holds the
-    positive pairs, their sorted keys and the histograms; negative pairs and
-    their keys are copied :data:`PAIR_CHUNK` at a time, and the histograms
-    add up across chunks, so chunking does not change the result. ``n`` of
-    ``2**32`` or more, whose indices the GPU sort cannot pack, runs on Numba,
-    the only place ``budget_bytes`` applies.
+    Similarities may be NumPy or CuPy arrays, or :class:`DeviceSims`, which
+    are computed here. The GPU holds the positive pairs, their sorted keys
+    and the histograms, and streams the negative pairs with their
+    similarities and keys, at most ``budget_bytes`` of them at a time. The
+    histograms add up across chunks, so chunking does not change the result.
+    ``n`` of ``2**32`` or more, whose indices the GPU sort cannot pack, runs
+    on Numba, where ``budget_bytes`` bounds its histograms.
     """
     n = None if n is None else ranking.profile_count(n)
+    given = pos_pairs, neg_pairs
     pos_pairs, neg_pairs = index_pairs(pos_pairs, n), index_pairs(neg_pairs, n)
     if n is None:
         n = 1 + max(int(p.max()) if len(p) else -1 for p in (pos_pairs, neg_pairs))
-    pos_sims = _pair_sims(pos_sims, pos_pairs)
-    neg_sims = _pair_sims(neg_sims, neg_pairs)
+    pos_sims = _pair_sims(pos_sims, pos_pairs, given[0])
+    neg_sims = _pair_sims(neg_sims, neg_pairs, given[1])
     if n >= 2**32:
         return ranking.ap_from_pairs(
             pos_pairs,
             neg_pairs,
-            _cuda.host(pos_sims),
-            _cuda.host(neg_sims),
+            _host_sims(pos_sims),
+            _host_sims(neg_sims),
             budget_bytes,
             n,
         )
-    profile = _device_pairs(pos_pairs).ravel()
-    keys = cp.repeat(rank_keys(pos_sims, cp), 2)
+    pairs = _device_pairs(pos_pairs)
+    keys = cp.repeat(rank_keys(_chunk_sims(pos_sims, 0, pairs), cp), 2)
+    profile = pairs.ravel()
     order = cp.argsort((profile.astype(cp.uint64) << 32) | sortable_keys(keys, cp))
     vals = cp.ascontiguousarray(keys[order])
     ptr = cp.searchsorted(
         profile[order].astype(cp.int64), cp.arange(n + 1, dtype=cp.int64)
     )
-    del profile, keys, order
+    del pairs, profile, keys, order
     hist = cp.zeros(int(ptr[-1]) + n, dtype=cp.uint64)
     n_neg = cp.zeros(n, dtype=cp.uint64)
-    for start in range(0, len(neg_pairs), PAIR_CHUNK):
-        pairs = _device_pairs(neg_pairs[start : start + PAIR_CHUNK])
-        keys = rank_keys(neg_sims[start : start + PAIR_CHUNK], cp)
+    step = max(1, budget_bytes // _NEGATIVE_BYTES)
+    for start in range(0, len(neg_pairs), step):
+        pairs = _device_pairs(neg_pairs[start : start + step])
+        keys = rank_keys(_chunk_sims(neg_sims, start, pairs), cp)
         args = (pairs, keys, np.int64(len(pairs)), ptr, vals, hist, n_neg)
         _kernel("negative_hist")((_cuda.grid(2 * len(pairs)),), (_cuda.BLOCK,), args)
+        del pairs, keys  # free this chunk before the next one
     ap = cp.empty(n, dtype=cp.float64)
     _kernel("ap_from_hist")(
         (_cuda.grid(n),), (_cuda.BLOCK,), (ptr, hist, np.int64(n), ap)
@@ -344,26 +405,29 @@ def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.nd
     Takes its checked float32 unit rows ``x`` and ``(n_draws, k + m)`` row
     indices ``idx`` (queries first), for ``k <= MAX_DRAW_QUERIES``. Each
     chunk of draws' similarities comes from one batched matrix product on
-    the GPU, within ``budget_bytes`` of GPU memory.
+    the GPU, and its APs are copied to the host before the next. The rows
+    stay on the GPU when they take at most half of ``budget_bytes``, and the
+    chunks get the rest; otherwise each chunk's rows are gathered on the
+    host and copied.
     """
-    x = cp.asarray(x)
     n_draws, width = idx.shape
     m = width - k
-    out = cp.empty((n_draws, k), dtype=cp.float64)
+    resident = 2 * x.nbytes <= budget_bytes
+    rows_of = cp.asarray(x) if resident else x
+    budget_bytes -= x.nbytes if resident else 0
+    out = np.empty((n_draws, k), dtype=np.float64)
     kernel = _cuda.kernel(_DRAW_SOURCE, "draw_ap")
     threads = 128 if k + m >= 128 else 32
     step = draws._chunk(n_draws, k, m, x.shape[1], budget_bytes)
     for start in range(0, n_draws, step):
-        rows = x[cp.asarray(idx[start : start + step])]  # (b, k + m, d)
+        chunk = idx[start : start + step]
+        rows = rows_of[cp.asarray(chunk)] if resident else cp.asarray(x[chunk])
         sims = cp.ascontiguousarray(cp.matmul(rows[:, :k], rows.transpose(0, 2, 1)))
-        n_rows = sims.shape[0] * k
-        args = (
-            sims,
-            np.int32(k),
-            np.int32(m),
-            np.int64(n_rows),
-            out[start : start + step],
-        )
+        del rows
+        n_rows = len(chunk) * k
+        ap = cp.empty((len(chunk), k), dtype=cp.float64)
+        args = (sims, np.int32(k), np.int32(m), np.int64(n_rows), ap)
         kernel((int(min(n_rows, 65535 * 4)),), (threads,), args, shared_mem=8 * k)
-        del rows, sims  # free this chunk before gathering the next one
-    return out.get()
+        ap.get(out=out[start : start + len(chunk)])
+        del sims, ap  # free this chunk before gathering the next one
+    return out
