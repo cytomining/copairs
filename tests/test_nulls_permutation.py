@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from scipy import stats
 
+from copairs import compute
 from copairs.map import average_precision, mean_average_precision
 from copairs.nulls import permutation, tie_thresholds
 
@@ -86,6 +87,12 @@ def map_scratch(n):
         np.empty(n, np.int32),
         np.empty(n, np.float64),
     )
+
+
+def permutation_similarity(feats):
+    """Cosine ``pairs -> similarities`` of ``feats``, as average_precision's."""
+    cosine = compute.get_similarity_fn("cosine", progress_bar=False)
+    return lambda pairs: cosine(feats, np.asarray(pairs), 20000)
 
 
 def scalar_draws(layout, start, size, k0, k1):
@@ -405,6 +412,36 @@ def test_rank_table_matches_binary_search(monkeypatch):
     searched = draws_of(meta, feats, spec, 5000)
     assert ranked[1:3] == searched[1:3]
     np.testing.assert_array_equal(ranked[3], searched[3])
+
+
+def test_interleaved_pools_are_built_once(monkeypatch):
+    """Groups ranking pools A, B, A build two pools, also when A and B share a prefix."""
+    refs = {0: [10, 11, 12], 1: [10, 11, 13], 2: [10, 11, 12]}  # A, B, A
+    groups = [np.array([2 * g, 2 * g + 1]) for g in refs]
+    pos = np.array([[2 * g, 2 * g + 1] for g in refs])
+    neg = np.array([[m, r] for g in refs for m in groups[g] for r in refs[g]])
+    feats = np.random.default_rng(8).standard_normal((14, 5))
+    similarity = permutation_similarity(feats)
+    built = []
+
+    class CountedPool(permutation._Pool):
+        def __init__(self, blocks, similarity):
+            built.append([b.tolist() for b in blocks])
+            super().__init__(blocks, similarity)
+
+    monkeypatch.setattr(permutation, "_Pool", CountedPool)
+    args = (groups, np.arange(6), np.ones(6), np.full(6, 4), pos, neg, similarity)
+    p = permutation.permutation_pvalues(*args, 200, 0)
+    assert sorted(built) == [[[10, 11, 12]], [[10, 11, 13]]]
+    monkeypatch.setattr(permutation, "_Pool", CountedPool.__base__)
+    alone = [
+        permutation.permutation_pvalues(
+            [np.array([0, 1])], groups[g], np.ones(2), np.full(2, 4), pos[[g]],
+            neg[neg[:, 0] // 2 == g], similarity, 200, 0,
+        )[0]
+        for g in refs
+    ]  # fmt: skip
+    assert p.tolist() == alone
 
 
 def test_pvalues_do_not_depend_on_workers(monkeypatch):
