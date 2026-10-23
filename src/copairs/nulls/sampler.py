@@ -275,42 +275,32 @@ def _ap_null_numpy(num_pos, total, start, size, k0, k1):
     remaining = np.full(size, total, dtype=np.int64)
     rank = np.zeros(size, dtype=np.int64)
     acc = np.zeros(size, dtype=np.float64)
-    u_next = np.empty(size)  # second uniform of each Philox block, for odd i
-    live = np.arange(size)
     for i in range(num_pos):
         k = num_pos - i
-        full = remaining[live] == k
-        if full.any():
-            ix = live[full]
-            for step in range(k):
-                rank[ix] += 1
-                acc[ix] += (i + step + 1) / rank[ix]
-            live = live[~full]
-        if live.size == 0:
-            break
+        # Positive i takes words 0-1 of Philox block i // 2, and i + 1 words 2-3.
         if i % 2 == 0:
-            w = philox4x32(c0[live], c1[live], np.uint64(i // 2), np.uint64(0), k0, k1)
+            w = philox4x32(c0, c1, np.uint64(i // 2), np.uint64(0), k0, k1)
             u = uniform53(w[0], w[1])
-            u_next[live] = uniform53(w[2], w[3])
         else:
-            u = u_next[live]
-        rem = remaining[live]
+            u = uniform53(w[2], w[3])
+        # A sample whose remaining ranks all hold positives gets gaps of 0 here,
+        # without the scalar sampler's early exit.
         if k == 1:
-            gap = np.minimum(np.floor(rem * u).astype(np.int64), rem - 1)
+            gap = np.minimum(np.floor(remaining * u).astype(np.int64), remaining - 1)
         else:
-            gap = np.empty(live.size, dtype=np.int64)
+            gap = np.empty(size, dtype=np.int64)
             # Checked first, the k bound also keeps k * (k + 1) inside int64.
             wide = (
-                rem - k > NUMPY_GUIDED_RATIO * k * (k + 1)
+                remaining - k > NUMPY_GUIDED_RATIO * k * (k + 1)
                 if k <= _GUIDED_MAX_K
                 else False
             )
-            guided = (u > 0) & (rem < GUIDED_MAX_TOTAL) & wide
-            gap[guided] = _gap_bisect_numpy(rem[guided], k, u[guided])
-            gap[~guided] = _gap_loop_numpy(rem[~guided], k, u[~guided])
-        rank[live] += gap + 1
-        acc[live] += (i + 1) / rank[live]
-        remaining[live] = rem - gap - 1
+            guided = (u > 0) & (remaining < GUIDED_MAX_TOTAL) & wide
+            gap[guided] = _gap_bisect_numpy(remaining[guided], k, u[guided])
+            gap[~guided] = _gap_loop_numpy(remaining[~guided], k, u[~guided])
+        rank += gap + 1
+        acc += (i + 1) / rank
+        remaining -= gap + 1
     return acc / num_pos
 
 
