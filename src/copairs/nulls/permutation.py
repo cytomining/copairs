@@ -448,6 +448,7 @@ class _Layout:
         members = np.asarray(members, dtype=np.int64)
         block_of = np.asarray(block_of, dtype=np.int64)
         self.n = n = len(members)
+        self.identity = np.arange(n)  # the observed labels' codes
         self.pool = pool
         self.slot_block = block_of
         self.bm_slot = np.argsort(block_of, kind="stable").astype(np.int64)
@@ -560,6 +561,14 @@ class _Layout:
     def chunk(self):
         """Draws per vectorized chunk, bounding the per-slot arrays."""
         return _draw_chunk(self.n)
+
+    def draws(self, start, size, k0, k1):
+        """``pm`` of draws ``start, ...`` (:func:`_draws_np`)."""
+        return _draws_np(self, start, size, k0, k1)
+
+    def maps(self, pm):
+        """Return the mAP of each draw in ``pm`` (:func:`_group_maps_np`)."""
+        return _group_maps_np(self, pm)
 
 
 def _draw_chunk(n):
@@ -934,34 +943,49 @@ def _label_key(seed: int, members, label) -> tuple[np.uint64, np.uint64]:
     return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
 
 
+class _Run:
+    """One group's draws on its layout (``_Layout`` or ``_LabelLayout``).
+
+    ``key`` is the Philox key of the group's draws. ``identity`` is the
+    observed labels' mAP, recomputed from the pairs, and ``thr`` its
+    :func:`~copairs.nulls.common.tie_thresholds`.
+    """
+
+    def __init__(self, layout, key):
+        self.layout = layout
+        self.key = key
+        self.identity = float(layout.maps(layout.identity[None])[0])
+        self.thr = float(tie_thresholds(self.identity))
+
+    def maps_of(self, start, size):
+        """Return the mAPs of draws ``start, ..., start + size - 1``."""
+        return self.layout.maps(self.layout.draws(start, size, *self.key))
+
+    def count(self, null_size, stop_after=None, out=None):
+        """``(count, draws)`` of up to ``null_size`` draws, as :func:`_count_hits`."""
+        return _count_hits(
+            self.maps_of, null_size, self.thr, self.layout.chunk(), stop_after, out
+        )
+
+
 def permutation_null(
     members, edges, blocks, block_of, similarity, null_size, seed, pool=None,
-    out=None, stop_after=None,
+    out=None,
 ):  # fmt: skip
-    """Run up to ``null_size`` label permutations of one group.
+    """Run ``null_size`` label permutations of one group.
 
-    Returns ``(count, identity, pool, draws)``: the draws whose mAP ties or
-    exceeds the observed labels' (``identity``, within
-    :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP, the
-    reference pool, reusable by groups ranking the same references, and the
-    draws run, fewer than ``null_size`` when ``stop_after`` hits came first
-    (:func:`_sequential_pvalue`). ``out`` receives the mAPs of the draws run
-    (whole rounds, see :func:`_count_hits`) if given.
+    Returns ``(count, identity, pool)``: the draws whose mAP ties or exceeds
+    the observed labels' (``identity``, within
+    :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP,
+    and the reference pool, reusable by groups ranking the same references.
+    ``out`` receives the draws' mAPs if given.
     """
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
     layout = _Layout(members, edges, block_of, similarity, pool, int(null_size))
-    k0, k1 = group_key(seed, members)
-    identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
-    thr = float(tie_thresholds(identity))
-
-    def maps_of(start, size):
-        return _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
-
-    count, draws = _count_hits(
-        maps_of, int(null_size), thr, layout.chunk(), stop_after, out
-    )
-    return count, identity, pool, draws
+    run = _Run(layout, group_key(seed, members))
+    count, _ = run.count(int(null_size), out=out)
+    return count, run.identity, pool
 
 
 def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
@@ -997,7 +1021,7 @@ def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
 
 
 def _sequential_pvalue(count, draws, null_size, stop_after=None) -> float:
-    """P-value of a run of :func:`permutation_null` or :func:`_label_permutation_null`.
+    """P-value of a group's run of draws (:meth:`_Run.count`).
 
     ``(count + 1) / (null_size + 1)`` after all draws, and ``count / draws``
     when the run stopped at its ``stop_after``-th hit (Besag and Clifford,
@@ -1166,14 +1190,16 @@ def permutation_pvalues(
         check_pos_diffby(layouts, pos_diffby)
 
     def pvalue(g):
+        members, edges, _, block_of = layouts[g]
         try:
-            pool = pools.acquire(g)
-            count, identity, _, draws = permutation_null(
-                *layouts[g], similarity, null_size, seed, pool, stop_after=stop_after
+            layout = _Layout(
+                members, edges, block_of, similarity, pools.acquire(g), null_size
             )
+            run = _Run(layout, group_key(seed, members))
+            count, draws = run.count(null_size, stop_after)
         finally:
             pools.release(g)
-        _check_identity(g, identity, observed)
+        _check_identity(g, run.identity, observed)
         return _sequential_pvalue(count, draws, null_size, stop_after)
 
     pvals = np.empty(len(groups), dtype=np.float64)
@@ -1405,6 +1431,7 @@ class _LabelLayout:
         self.n = n = len(members)
         self.pool = pool
         self.member_code = pool.code[np.asarray(members, dtype=np.int64)]
+        self.identity = self.member_code  # the observed labels' codes
         block_of = np.asarray(block_of, dtype=np.int64)
         self.bm_slot = np.argsort(block_of, kind="stable").astype(np.int64)
         bm_ptr = np.searchsorted(block_of[self.bm_slot], np.arange(len(pool.comps) + 1))
@@ -1438,6 +1465,14 @@ class _LabelLayout:
     def chunk(self):
         """Draws per vectorized chunk, bounding the per-slot arrays."""
         return _draw_chunk(self.n)
+
+    def draws(self, start, size, k0, k1):
+        """``pm`` of draws ``start, ...`` (:func:`_draws_pool_np`)."""
+        return _draws_pool_np(self, start, size, k0, k1)
+
+    def maps(self, pm):
+        """Return the mAP of each draw in ``pm`` (:func:`_label_maps_np`)."""
+        return _label_maps_np(self, pm)
 
 
 def _draws_pool_np(layout, start, size, k0, k1):
@@ -1635,27 +1670,10 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     return layouts, comp_profiles, (nbr_ptr, nbr)
 
 
-def _label_permutation_null(
-    members, edges, lone, comps, block_of, key, pool, null_size, seed, out=None,
-    stop_after=None,
-):  # fmt: skip
-    """Run up to ``null_size`` moves of one multilabel group's label on its pool.
-
-    ``pool`` is the ``_LabelPool`` of its ``comps``. Returns ``(count,
-    identity, draws)`` as :func:`permutation_null`.
-    """
+def _label_run(members, edges, lone, comps, block_of, key, pool, seed):
+    """Return a multilabel group's ``_Run`` on ``pool``, the ``_LabelPool`` of its ``comps``."""
     layout = _LabelLayout(members, edges, lone, block_of, pool)
-    k0, k1 = _label_key(seed, members, key)
-    identity = float(_label_maps_np(layout, layout.member_code[None])[0])
-    thr = float(tie_thresholds(identity))
-
-    def maps_of(start, size):
-        return _label_maps_np(layout, _draws_pool_np(layout, start, size, k0, k1))
-
-    count, draws = _count_hits(
-        maps_of, int(null_size), thr, layout.chunk(), stop_after, out
-    )
-    return count, identity, draws
+    return _Run(layout, _label_key(seed, members, key))
 
 
 def label_permutation_pvalues(
@@ -1720,13 +1738,11 @@ def label_permutation_pvalues(
 
     def pvalue(g):
         try:
-            pool = pools.acquire(g)
-            count, identity, draws = _label_permutation_null(
-                *layouts[g], pool, null_size, seed, stop_after=stop_after
-            )
+            run = _label_run(*layouts[g], pools.acquire(g), seed)
+            count, draws = run.count(null_size, stop_after)
         finally:
             pools.release(g)
-        _check_identity(g, identity, observed)
+        _check_identity(g, run.identity, observed)
         return _sequential_pvalue(count, draws, null_size, stop_after)
 
     pvals = np.empty(len(groups), dtype=np.float64)

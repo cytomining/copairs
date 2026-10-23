@@ -76,10 +76,9 @@ def draws_of(meta, feats, spec, null_size, seed=0):
     """Observed mAP and the null's draws for group "q"."""
     observed, layout, pairs = group_of_q(meta, feats, spec)
     out = np.empty(null_size)
-    count, identity, _, draws = permutation.permutation_null(
+    count, identity, _ = permutation.permutation_null(
         *layout, pairs.similarity, null_size, seed, out=out
     )
-    assert draws == null_size
     return observed, identity, count, out
 
 
@@ -168,10 +167,9 @@ def test_hits_match_scalar_draws():
     feats = np.random.default_rng(21).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
     observed, group, pairs = group_of_q(meta, feats, spec)
-    count, identity, pool, draws = permutation.permutation_null(
+    count, identity, pool = permutation.permutation_null(
         *group, pairs.similarity, 700, 5
     )
-    assert draws == 700
     members, edges, _, block_of = group
     layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
     _, maps = scalar_draws(layout, 0, 700, *permutation.group_key(5, members))
@@ -655,11 +653,10 @@ def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0):
     """Observed mAP of ``label`` and the null's draws for it."""
     observed, layout, pool, _ = label_group(meta, feats, label, spec)
     out = np.empty(null_size)
-    count, identity, draws = permutation._label_permutation_null(
-        *layout, pool, null_size, seed, out=out
-    )
+    run = permutation._label_run(*layout, pool, seed)
+    count, draws = run.count(null_size, out=out)
     assert draws == null_size
-    return observed, identity, count, out
+    return observed, run.identity, count, out
 
 
 def scalar_label_draws(layout, start, size, k0, k1):
@@ -939,11 +936,13 @@ def test_stop_after_follows_the_draw_sequence(stop_after, monkeypatch):
     feats = np.random.default_rng(13).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
     _, identity, _, full = draws_of(meta, feats, spec, null_size)
-    _, layout, pairs = group_of_q(meta, feats, spec)
+    _, (members, edges, blocks, block_of), pairs = group_of_q(meta, feats, spec)
+    pool = permutation._Pool(blocks, pairs.similarity)
+    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    run = permutation._Run(layout, permutation.group_key(0, members))
+    assert run.identity == identity
     out = np.full(null_size, np.nan)
-    count, _, _, draws = permutation.permutation_null(
-        *layout, pairs.similarity, null_size, 0, out=out, stop_after=stop_after
-    )
+    count, draws = run.count(null_size, stop_after, out)
     got = permutation._sequential_pvalue(count, draws, null_size, stop_after)
     assert got == sequential_expected(full, identity, null_size, stop_after)
     np.testing.assert_array_equal(out[:draws], full[:draws])
