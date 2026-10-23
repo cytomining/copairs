@@ -1541,6 +1541,13 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
             f"the permutation null of multilabel APs needs {pairs.label_col!r} "
             "among the negative pairs' diffby columns (and not their sameby)"
         )
+    if len(rows) and rows.max() >= len(pairs.profile):
+        raise ValueError(
+            f"the AP scores' index reaches row {rows.max()}, but the frame "
+            "multilabel.average_precision returned with these pairs has "
+            f"{len(pairs.profile)} rows; pass the pairs of the frame these "
+            "scores come from"
+        )
     profile = np.asarray(pairs.profile, dtype=np.int64)[rows]
     pos = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
     neg = np.asarray(pairs.neg, dtype=np.int64).reshape(-1, 2)

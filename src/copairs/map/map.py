@@ -75,7 +75,8 @@ def get_map_pvalue(
         `return_pairs=True` gives them, as `pairs.pos`); `ap_scores` must keep
         that frame's index. Pairs whose counts disagree with `n_pos_pairs`
         raise. When omitted, they are taken from ``pairs`` or, failing that,
-        from the pairs `average_precision` attached to ``ap_scores``. Frames
+        from the pairs `average_precision` attached to ``ap_scores`` (for
+        multilabel APs, the `LabelPairs` as pairs of AP rows). Frames
         without either assume each group's positives are its other members,
         which is the replicate-retrieval case
         (`n_pos_pairs == len(group) - 1`), and a group of one profile gets
@@ -120,7 +121,10 @@ def get_map_pvalue(
         them; frames that lost them (built, reloaded, pickled, or
         concatenated from several AP calls) need ``pairs=`` or another null.
         The joint null takes its positive pairs from ``pairs`` too, or from
-        the attached pairs (see ``pos_pairs``), except `LabelPairs`.
+        the attached pairs (see ``pos_pairs``); a `LabelPairs` pair joins
+        the AP rows of its two profiles for the label they share, and pairs
+        to rows dropped from ``ap_scores`` join a member to a profile
+        outside its group.
     stop_after : int, optional
         Permutation null only: stop a group's draws at its ``stop_after``-th
         draw whose mAP reaches the group's, and report ``stop_after / draws``
@@ -156,9 +160,9 @@ def get_map_pvalue(
     stop_after = permutation.check_stop_after(stop_after)
     if null != "copied" and pos_pairs is None and pairs is None:
         pairs = attached_pairs(ap_scores)
-    if null == "joint" and isinstance(pairs, LabelPairs):
-        pairs = None  # multilabel APs: edges inferred from the pair counts
-    if null == "joint" and pos_pairs is None and pairs is not None:
+    if null == "joint" and pos_pairs is None and isinstance(pairs, LabelPairs):
+        pos_pairs = _label_row_pairs(ap_scores, pairs)
+    elif null == "joint" and pos_pairs is None and pairs is not None:
         pos_pairs = pairs.pos
     if null == "permutation" and pairs is None:
         raise ValueError(
@@ -293,6 +297,44 @@ def _check_row_index(index: pd.Index) -> None:
             + ("" if index.dtype.kind not in "iu" else " with negative labels")
             + ". Keep that frame's index (no set_index or reset_index)."
         )
+
+
+def _label_row_pairs(ap_scores: pd.DataFrame, pairs: LabelPairs) -> np.ndarray:
+    """Positive pairs of multilabel APs as pairs of ``ap_scores``' rows.
+
+    The positive pair ``(a, b)`` on label ``k`` joins the AP rows of profiles
+    ``a`` and ``b`` for ``k``. Rows that ``ap_scores`` no longer holds get
+    numbers past all of the AP frame's rows, so their pairs leave the group.
+    """
+    if pairs.label_col not in ap_scores:
+        raise ValueError(
+            f"null='joint' of multilabel APs reads their {pairs.label_col!r} "
+            "column to find their pairs' rows"
+        )
+    _check_row_index(ap_scores.index)
+    rows = ap_scores.index.to_numpy().astype(np.int64)
+    n_rows, n_keys = len(pairs.profile), len(pairs.keys)
+    if len(rows) and rows.max() >= n_rows:
+        raise ValueError(
+            f"the AP scores' index reaches row {rows.max()}, but the frame "
+            f"multilabel.average_precision returned with these pairs has {n_rows} "
+            "rows; pass the pairs of the frame these scores come from"
+        )
+    key = pd.Index(pairs.keys).get_indexer(ap_scores[pairs.label_col])
+    rows, key = rows[key >= 0], key[key >= 0]  # labels without pairs join no row
+    word = np.asarray(pairs.profile, dtype=np.int64)[rows] * n_keys + key
+    order = np.argsort(word, kind="stable")
+    word, rows = word[order], rows[order]
+    pos = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
+    ends = pos * n_keys + np.asarray(pairs.pos_key, dtype=np.int64)[:, None]
+    at = np.searchsorted(word, ends)
+    found = at < len(word)
+    found[found] = word[at[found]] == ends[found]
+    out = np.empty_like(ends)
+    out[found] = rows[at[found]]
+    _, missing = np.unique(ends[~found], return_inverse=True)
+    out[~found] = n_rows + missing.ravel()
+    return out
 
 
 def _copied_pvalues(

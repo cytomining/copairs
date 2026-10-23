@@ -609,6 +609,72 @@ def test_multilabel_frames_carry_label_pairs():
     )
 
 
+def test_joint_null_reads_label_pairs():
+    """The joint null joins multilabel AP rows by their LabelPairs' positive pairs.
+
+    Positives must differ in "plate", so most label groups are not cliques:
+    without the pairs they fall back to the copied null, and with them they
+    get the joint null of their exact edges, as explicit pos_pairs give it.
+    """
+    meta = label_meta().assign(plate=[0, 1] * 4 + [0], cpd=range(9))
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
+    spec = (["target"], ["plate"], [], ["target"])
+    ap, pairs = multilabel_average_precision(
+        meta, feats, *spec, "target", progress_bar=False, return_pairs=True
+    )
+    rows = list(zip(ap.index, ap["cpd"], ap["target"]))
+    explicit = np.array(
+        [
+            (r, s)
+            for (r, a, k), (s, b, m) in itertools.combinations(rows, 2)
+            if k == m and meta["plate"][a] != meta["plate"][b]
+        ]
+    )
+
+    def as_set(found):
+        return {tuple(sorted(e)) for e in found.tolist()}
+
+    for order in (ap, ap.iloc[::-1]):  # whatever the rows' order
+        assert as_set(map_module._label_row_pairs(order, pairs)) == as_set(explicit)
+    kwargs = dict(
+        null_size=2000, threshold=0.05, seed=SEED, progress_bar=False, null="joint"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        read = mean_average_precision(ap, ["target"], **kwargs)
+    given = mean_average_precision(ap, ["target"], pos_pairs=explicit, **kwargs)
+    assert read["p_value"].tolist() == given["p_value"].tolist()
+    with pytest.warns(UserWarning, match="Falling back"):
+        bare = mean_average_precision(
+            pickle.loads(pickle.dumps(ap)), ["target"], **kwargs
+        )
+    assert bare["p_value"].tolist() != read["p_value"].tolist()
+    # Pairs to a dropped row join its group to a profile outside it.
+    part = ap.drop(index=ap.index[(ap["target"] == "A") & (ap["cpd"] == 0)])
+    found = map_module._label_row_pairs(part, pairs)
+    assert (found >= len(ap)).any(axis=1).sum() == 3  # compound 0's A positives
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        read = mean_average_precision(part, ["target"], **kwargs)
+    given = mean_average_precision(part, ["target"], pos_pairs=explicit, **kwargs)
+    assert read["p_value"].tolist() == given["p_value"].tolist()
+    # Label groups that are cliques get what the pair counts imply.
+    clique = multilabel_average_precision(
+        meta, feats, *ML_SPEC, "target", progress_bar=False
+    )
+    inferred = mean_average_precision(
+        pickle.loads(pickle.dumps(clique)), ["target"], **kwargs
+    )
+    assert (
+        mean_average_precision(clique, ["target"], **kwargs)["p_value"].tolist()
+        == inferred["p_value"].tolist()
+    )
+    with pytest.raises(ValueError, match="reads their 'target' column"):
+        mean_average_precision(ap.drop(columns="target"), ["cpd"], **kwargs)
+    with pytest.raises(ValueError, match="index reaches row"):
+        mean_average_precision(ap.set_axis(ap.index + 100), ["target"], **kwargs)
+
+
 @pytest.mark.parametrize("distance", ["cosine", "correlation", "cityblock"])
 def test_pair_similarity_runs_in_the_calling_thread(distance, monkeypatch):
     """The pairs' similarity starts no thread pool and matches the AP stage's."""

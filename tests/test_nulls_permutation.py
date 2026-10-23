@@ -837,6 +837,8 @@ def test_label_guards():
         mean_average_precision(
             ap.set_axis(ap.index.astype(str)), *args, progress_bar=False
         )
+    with pytest.raises(ValueError, match="index reaches row"):
+        mean_average_precision(ap.set_axis(ap.index + 100), *args, progress_bar=False)
     # Positives must differ in "well"; one well on each plate is shared by
     # two compounds, so moved labels could pair profiles in one well.
     wells = meta.assign(well=[0, 1, 2, 3, 3, 0, 1, 2, 3, 3])
