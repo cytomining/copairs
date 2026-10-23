@@ -81,9 +81,8 @@ perfect retrieval) counts the atom.
   or `"copied"`. For frames without pairs, recompute the APs, pass
   `pairs=` (`average_precision(..., return_pairs=True)` also returns them),
   or choose another null. The attached pairs keep the features and
-  every positive and negative pair (and a multilabel frame's lone pairs,
-  which share one label) alive with the frame (8 bytes per pair, e.g.
-  800 MB for 10^8 negative pairs), whichever null is used;
+  every positive and negative pair alive with the frame (8 bytes per pair,
+  e.g. 800 MB for 10^8 negative pairs), whichever null is used;
   `ap.attrs.pop("copairs_pairs")` drops them. A multilabel group needs every
   AP row of its label, since any profile holding the label could hold it
   under the null. The null recomputes similarities from the features,

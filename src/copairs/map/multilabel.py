@@ -2,6 +2,7 @@
 
 import logging
 from typing import List
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -98,10 +99,10 @@ def average_precision(
     needs, are attached to the returned frame as
     ``frame.attrs["copairs_pairs"]``, as in
     :func:`copairs.map.average_precision`; ``return_pairs=True`` also returns
-    them, as a ``(DataFrame, LabelPairs)`` tuple. They keep ``feats`` and
-    every positive, negative and lone pair (8 bytes per pair) alive with the
-    frame, whichever null is used; drop them with
-    ``frame.attrs.pop("copairs_pairs")``.
+    them, as a ``(DataFrame, LabelPairs)`` tuple. They keep ``feats``, every
+    positive and negative pair (8 bytes per pair) and each AP row's profile
+    and label (12 bytes per row) alive with the frame, whichever null is
+    used; drop them with ``frame.attrs.pop("copairs_pairs")``.
 
     See Also
     --------
@@ -172,14 +173,22 @@ def average_precision(
     # the AP frame is profile ix[i] for label keys[row_key[i]].
     profile = results["ix"].to_numpy().astype(np.int64)
     row_key = np.repeat(np.arange(len(keys), dtype=np.int32), list(map(len, ix_list)))
-    lone = lone_key = None
-    if multilabel_col in _columns(neg_diffby) and multilabel_col not in _columns(
-        neg_sameby
-    ):
-        lone, lone_key = _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, keys)
+    pos_rows = _row_pairs(pos_pairs, pos_counts, profile, row_key)
+    lone = None
+    sameby, other = _columns(neg_sameby), _columns(neg_diffby)
+    if multilabel_col in other and multilabel_col not in sameby:
+        other = [c for c in other if c != multilabel_col]
+        if set(_columns(pos_sameby)) == {multilabel_col, *sameby} and set(
+            _columns(pos_diffby)
+        ) == set(other):
+            # The negative rules without the label are the positive rules.
+            lone = partial(_lone_of_positives, pos_rows, profile, row_key)
+        else:
+            cols = list(dict.fromkeys([multilabel_col, *sameby, *other]))
+            lone = partial(_lone_pairs, meta[cols], multilabel_col, sameby, other, keys)
     diffby = [c for c in _columns(pos_diffby) if c != multilabel_col]
     pairs = LabelPairs(
-        _row_pairs(pos_pairs, pos_counts, profile, row_key),
+        pos_rows,
         np.asarray(neg_pairs),
         _FeatureSimilarity(feats, distance, batch_size),
         _diffby_codes(meta, diffby),
@@ -187,8 +196,7 @@ def average_precision(
         row_key=row_key,
         label_col=multilabel_col,
         keys=np.asarray(keys),
-        lone=lone,
-        lone_key=lone_key,
+        _lone=lone,
     )
     meta = meta.drop(multilabel_col, axis=1)
     results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
@@ -218,13 +226,14 @@ def _columns(cols) -> list:
     return [cols] if isinstance(cols, str) else list(cols)
 
 
-def _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, keys):
+def _lone_pairs(meta, multilabel_col, neg_sameby, other, keys):
     """Pairs sharing exactly one label that the negative rules join without it.
 
-    Returns ``(pairs, key)``, ``pairs`` oriented ``(min, max)`` and ``key``
-    indexing ``keys``; pairs of labels without positive pairs are dropped.
+    ``neg_sameby`` and ``other`` are the negative rules' sameby and diffby
+    columns without the label. Returns ``(pairs, key)`` as
+    :func:`_shared_once`; pairs of labels without positive pairs are
+    dropped.
     """
-    other = [c for c in _columns(neg_diffby) if c != multilabel_col]
     # Only profiles holding a label with positive pairs can share one; the
     # rest (say, a control compound's replicates under a control-only
     # label) would add pairs to discard. Kept profiles keep all their
@@ -236,24 +245,46 @@ def _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, keys):
             for labels in meta[multilabel_col]
         ]
     )
-    if len(held) < 2:
-        return np.zeros((0, 2), dtype=np.int64), np.zeros(0, dtype=np.int64)
-    pairs, found_keys, counts = find_pairs_multilabel(
-        meta.iloc[held].reset_index(drop=True),
-        sameby=[multilabel_col, *_columns(neg_sameby)],
-        diffby=other,
-        multilabel_col=multilabel_col,
-    )
-    pairs = held[np.asarray(pairs, dtype=np.int64).reshape(-1, 2)]
-    if not len(pairs):
-        return pairs, np.zeros(0, dtype=np.int64)
-    index = {k: i for i, k in enumerate(np.asarray(keys).tolist())}
-    key = np.repeat(
-        [index.get(k, -1) for k in np.asarray(found_keys).tolist()], counts
-    ).astype(np.int64)
+    pairs, key = np.zeros((0, 2), dtype=np.int64), np.zeros(0, dtype=np.int64)
+    if len(held) >= 2:
+        found, found_keys, counts = find_pairs_multilabel(
+            meta.iloc[held].reset_index(drop=True),
+            sameby=[multilabel_col, *neg_sameby],
+            diffby=other,
+            multilabel_col=multilabel_col,
+        )
+        pairs = held[np.asarray(found, dtype=np.int64).reshape(-1, 2)]
+    if len(pairs):
+        index = {k: i for i, k in enumerate(np.asarray(keys).tolist())}
+        key = np.repeat(
+            [index.get(k, -1) for k in np.asarray(found_keys).tolist()], counts
+        ).astype(np.int64)
+    return _shared_once(pairs, key, len(meta))
+
+
+def _lone_of_positives(pos, profile, row_key):
+    """Lone pairs when the negative rules without the label are the positive rules.
+
+    A pair meeting those rules is then a positive pair of every label its
+    profiles share, so the lone pairs are the positive pairs (``pos``, AP
+    rows) listed once. Returns ``(pairs, key)`` as :func:`_shared_once`.
+    """
+    pos = np.asarray(pos).reshape(-1, 2)
+    key = row_key[pos[:, 0]].astype(np.int64)
+    return _shared_once(profile[pos], key, 1 + int(profile.max(initial=-1)))
+
+
+def _shared_once(pairs, key, n):
+    """Return the profile pairs listed once, under a label with positive pairs.
+
+    ``pairs`` (profiles below ``n``) are listed once per label ``key[i]``
+    they share, -1 for labels without positive pairs. Returns ``(pairs,
+    key)``: uint32 pairs oriented ``(min, max)`` and int32 keys.
+    """
     a, b = pairs.min(axis=1), pairs.max(axis=1)
-    _, inverse, shared = np.unique(
-        a * len(meta) + b, return_inverse=True, return_counts=True
-    )
+    _, inverse, shared = np.unique(a * n + b, return_inverse=True, return_counts=True)
     keep = (shared[inverse.ravel()] == 1) & (key >= 0)
-    return np.stack([a[keep], b[keep]], axis=1), key[keep]
+    dtype = np.uint32 if n <= 2**32 else np.int64
+    return np.stack([a[keep], b[keep]], axis=1).astype(dtype), key[keep].astype(
+        np.int32
+    )

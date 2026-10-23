@@ -1706,7 +1706,7 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     neighbours : tuple of np.ndarray
         CSR ``(ptr, partners)`` of each profile's negatives.
     """
-    if pairs.lone is None:
+    if pairs._lone is None:
         raise ValueError(
             f"the permutation null of multilabel APs needs {pairs.label_col!r} "
             "among the negative pairs' diffby columns (and not their sameby)"
@@ -1725,12 +1725,13 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     pos_rows = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
     pos, pos_key = profile_of[pos_rows], row_key[pos_rows[:, 0]]
     neg = np.asarray(pairs.neg).reshape(-1, 2)  # no int64 copy
-    lone = np.asarray(pairs.lone, dtype=np.int64).reshape(-1, 2)
+    lone, lone_key = pairs._lone()
+    lone = np.asarray(lone).reshape(-1, 2)
     n_prof = 1 + max(
         int(profile.max(initial=-1)),
         int(pos.max(initial=-1)),
         int(neg.max()) if len(neg) else -1,
-        int(lone.max(initial=-1)),
+        int(lone.max()) if len(lone) else -1,
     )
     nbr_ptr, nbr = _adjacency(n_prof, neg)
     comp = _components(nbr_ptr, nbr)
@@ -1743,7 +1744,7 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     labels = np.asarray(pairs.keys).tolist()
     n_keys = len(labels)
     pos_order, pos_ptr = _segments(pos_key, n_keys)
-    lone_order, lone_ptr = _segments(np.asarray(pairs.lone_key), n_keys)
+    lone_order, lone_ptr = _segments(lone_key, n_keys)
     local = np.full(n_prof, -1, dtype=np.int64)
     layouts = []
     for ix in groups:

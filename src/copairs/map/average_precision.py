@@ -2,7 +2,7 @@
 
 import logging
 from typing import List, Callable
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 
 import numpy as np
 import pandas as pd
@@ -149,9 +149,12 @@ class LabelPairs(RankPairs):
     returns (and returned with it by ``return_pairs=True``). ``pos`` pairs
     rows of that frame, as in :class:`RankPairs`: the two rows of a positive
     pair hold the label the pair shares, and a pair sharing several labels
-    appears once per label. ``neg``, ``lone`` and the rows of ``pos_diffby``
-    index profiles (rows of the metadata); ``profile`` and ``row_key`` map
-    AP rows to profiles and labels.
+    appears once per label. ``neg`` and the rows of ``pos_diffby`` index
+    profiles (rows of the metadata); ``profile`` and ``row_key`` map AP rows
+    to profiles and labels. The permutation null also needs the pairs that
+    share exactly one label and meet the negative rules on the other
+    columns (negatives but for that label); they are found when it asks,
+    not kept with the frame.
 
     Attributes
     ----------
@@ -163,19 +166,18 @@ class LabelPairs(RankPairs):
         The multilabel column.
     keys : np.ndarray
         The labels with positive pairs.
-    lone, lone_key : np.ndarray or None
-        ``(n, 2)`` pairs that share exactly one label, ``keys[lone_key]``,
-        and meet the negative rules on the other columns, so that without
-        that label they would be negatives. None when the label column is
-        not one of the negative pairs' ``diffby`` columns.
     """
 
     profile: np.ndarray
     row_key: np.ndarray
     label_col: str
     keys: np.ndarray
-    lone: np.ndarray | None
-    lone_key: np.ndarray | None
+    # () -> (pairs, key): the pairs sharing exactly one label, keys[key],
+    # that meet the negative rules on the other columns; None when the
+    # label column is not one of the negative pairs' diffby columns.
+    _lone: Callable[[], tuple[np.ndarray, np.ndarray]] | None = field(
+        default=None, repr=False
+    )
 
 
 def build_rank_lists(

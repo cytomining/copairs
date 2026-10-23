@@ -599,18 +599,61 @@ def test_multilabel_frames_carry_label_pairs():
     np.testing.assert_array_equal(
         np.bincount(pairs.pos.ravel(), minlength=len(ap))[ap.index], ap["n_pos_pairs"]
     )
-    # Lone pairs share exactly one label, which has positive pairs.
-    lone = {(int(a), int(b), keys[k]) for (a, b), k in zip(pairs.lone, pairs.lone_key)}
+    # Lone pairs share exactly one label, which has positive pairs. Under
+    # these rules they come from the positive pairs, as a search finds them.
+    assert pairs._lone.func is multilabel_module._lone_of_positives
+    found, key = pairs._lone()
+    assert found.dtype == np.uint32 and key.dtype == np.int32
+    lone = {(int(a), int(b), keys[k]) for (a, b), k in zip(found, key)}
     expected = {
         (a, b, next(iter(labels[a] & labels[b])))
         for a, b in itertools.combinations(range(len(meta)), 2)
         if len(labels[a] & labels[b]) == 1 and labels[a] & labels[b] <= set(keys)
     }
     assert lone == expected and len(lone) > 0
+    searched = multilabel_module._lone_pairs(meta, "target", [], [], pairs.keys)
+    assert {(int(a), int(b), keys[k]) for (a, b), k in zip(*searched)} == lone
     similarity = compute.get_similarity_fn("cosine", progress_bar=False)
     np.testing.assert_array_equal(
         pairs.similarity(pairs.neg), similarity(feats, pairs.neg, 20000)
     )
+
+
+@pytest.mark.parametrize("neg_sameby", [[], ["plate"]])
+def test_lone_pairs_wait_for_the_null(neg_sameby, monkeypatch):
+    """Multilabel APs search pairs twice; lone pairs come when the null asks.
+
+    With neg_sameby=["plate"] the negative rules without the label are not
+    the positive rules, so the lone pairs need a third search, run then;
+    otherwise they come from the positive pairs, with no search.
+    """
+    meta = label_meta().assign(plate=[0, 1] * 4 + [0])
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
+    calls, find = [], multilabel_module.find_pairs_multilabel
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs)
+        return find(*args, **kwargs)
+
+    monkeypatch.setattr(multilabel_module, "find_pairs_multilabel", counted)
+    _, pairs = multilabel_average_precision(
+        meta, feats, ["target"], [], neg_sameby, ["target"], "target",
+        progress_bar=False, return_pairs=True,
+    )  # fmt: skip
+    assert len(calls) == 2  # positives and negatives
+    found, key = pairs._lone()
+    assert len(calls) == (3 if neg_sameby else 2)
+    labels, keys = [set(t) for t in meta["target"]], pairs.keys.tolist()
+    plate = meta["plate"].to_numpy()
+    expected = {
+        (a, b, next(iter(labels[a] & labels[b])))
+        for a, b in itertools.combinations(range(len(meta)), 2)
+        if len(labels[a] & labels[b]) == 1
+        and labels[a] & labels[b] <= set(keys)
+        and (not neg_sameby or plate[a] == plate[b])
+    }
+    assert {(int(a), int(b), keys[k]) for (a, b), k in zip(found, key)} == expected
+    assert len(expected) > 0
 
 
 def test_lone_pairs_skip_profiles_without_positive_labels(monkeypatch):
@@ -632,9 +675,7 @@ def test_lone_pairs_skip_profiles_without_positive_labels(monkeypatch):
         return find(dframe, *args, **kwargs)
 
     monkeypatch.setattr(multilabel_module, "find_pairs_multilabel", recorded)
-    lone, key = multilabel_module._lone_pairs(
-        meta, "target", ["plate"], ["target"], keys
-    )
+    lone, key = multilabel_module._lone_pairs(meta, "target", ["plate"], [], keys)
     assert seen == [6]  # the profiles holding A, B or C
     labels = [set(t) for t in targets]
     expected = {
