@@ -18,7 +18,12 @@ import pytest
 from copairs import nulls, compute
 from copairs.map import mean_average_precision
 from copairs.nulls import backend, pvalues, sampler
-from tests.helpers import run_isolated, without_modules, brute_map_pvalues
+from tests.helpers import (
+    fake_gpu,
+    run_isolated,
+    without_modules,
+    brute_map_pvalues,
+)
 
 HAS_CUPY = importlib.util.find_spec("cupy") is not None
 HAS_NUMBA = importlib.util.find_spec("numba") is not None
@@ -275,6 +280,9 @@ class _HostCuda:
         self.calls += 1
         return sampler._ap_nulls(plan, size, start, "numpy", dtype)
 
+    def ap_nulls_to_host(self, plan, start, size, dtype, budget_bytes):
+        return self.ap_nulls(plan, start, size, dtype)
+
     class ScoreCounter:
         def __init__(self, thr):
             self.thr = thr
@@ -359,6 +367,39 @@ def test_auto_never_runs_cuda(host_cuda):
     compute.p_values(scores[:5], confs[conf_ix[:5]], 200, 1, progress_bar=False)
     mean_average_precision(frame, ["g"], 200, 0.05, 1, progress_bar=False)
     assert not host_cuda.calls
+
+
+def _numpy_ap_nulls(num_pos, total, k0, k1, start, size, n_conf, out):
+    """Run the sampler kernel on the fake GPU's arrays with the NumPy backend."""
+    plan = (num_pos, total, k0, k1)
+    out[...] = sampler._ap_nulls(plan, int(size), int(start), "numpy", out.dtype)
+
+
+@needs_cupy
+@pytest.mark.parametrize("budget", [1, 64, 2**30])
+def test_cuda_nulls_sampled_within_budget(monkeypatch, budget):
+    """On the GPU, ap_nulls holds at most its budget of samples at a time.
+
+    Chunks of rows, or of one row, are copied into the host output, which
+    equals NumPy's; get_null_dists uses the same path.
+    """
+    kernels = {"ap_nulls_f32": _numpy_ap_nulls, "ap_nulls_f64": _numpy_ap_nulls}
+    _, launches = fake_gpu(monkeypatch, kernels)
+    monkeypatch.setattr(sampler, "DEFAULT_BUDGET", budget)
+    confs = np.concatenate([CONFS, [[0, 5]]])  # no positives: NaN, not sampled
+    for dtype in (np.float64, np.float32):
+        expected = nulls.ap_nulls(CONFS, 40, 3, start=5, backend="numpy", dtype=dtype)
+        launches.clear()
+        got = nulls.ap_nulls(CONFS, 40, 3, start=5, backend="cuda", dtype=dtype)
+        assert isinstance(got, np.ndarray) and got.dtype == dtype
+        np.testing.assert_array_equal(got, expected)
+        sizes = [args[-1].nbytes for _, args in launches]
+        assert max(sizes) <= max(budget, np.dtype(dtype).itemsize), sizes
+        assert sum(sizes) == expected.nbytes
+        assert (len(launches) > 1) == (budget < expected.nbytes)
+    expected = compute.get_null_dists(confs, 40, 3, progress_bar=False, backend="numpy")
+    got = compute.get_null_dists(confs, 40, 3, progress_bar=False, backend="cuda")
+    np.testing.assert_array_equal(got, expected)
 
 
 @needs_cupy

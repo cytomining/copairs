@@ -3,6 +3,7 @@
 import os
 import sys
 import subprocess
+import importlib.util
 from typing import Dict
 from pathlib import Path
 from itertools import product
@@ -66,6 +67,92 @@ def without_modules(*names: str) -> str:
     returns None for them.
     """
     return _WITHOUT_MODULES.format(names=names)
+
+
+class DeviceArray(np.ndarray):
+    """A NumPy array standing in for a CuPy one: ``get()`` copies it to the host."""
+
+    def get(self, out=None):
+        """Copy to a new host array, or into ``out``, as CuPy checks it."""
+        host = np.array(self.view(np.ndarray))
+        if out is None:
+            return host
+        assert isinstance(out, np.ndarray) and not isinstance(out, DeviceArray)
+        assert out.dtype == self.dtype and out.shape == self.shape
+        assert out.flags.c_contiguous or out.flags.f_contiguous
+        out[...] = host
+        return out
+
+
+class FakeCuPy:
+    """NumPy posing as CuPy: functions return DeviceArray and record its bytes."""
+
+    ndarray = DeviceArray
+
+    def __init__(self):
+        self.allocated = []
+
+    def __getattr__(self, name):
+        """NumPy's ``name``, wrapped to return DeviceArray when it is a function."""
+        func = getattr(np, name)
+        if not callable(func) or isinstance(func, type):
+            return func
+
+        def wrapped(*args, **kwargs):
+            result = func(*args, **kwargs)
+            if isinstance(result, np.ndarray):
+                result = result.view(DeviceArray)
+                self.allocated.append(result.nbytes)
+            return result
+
+        return wrapped
+
+
+def fake_gpu(monkeypatch, kernels=None):
+    """Run copairs' CUDA host code on the CPU, with a usable fake GPU.
+
+    CuPy is replaced by :class:`FakeCuPy`, and each kernel launch appends
+    ``(name, args)`` to the returned list, then runs ``kernels[name](*args)``
+    when given (kernels default to doing nothing). Needs CuPy installed, for
+    the modules to import; no GPU.
+    """
+    from copairs import _cuda
+    from copairs.nulls import cuda as nulls_cuda
+
+    cp, launches = FakeCuPy(), []
+    kernels = kernels or {}
+
+    def kernel(source, name):
+        def launch(grid, block, args, shared_mem=0):
+            launches.append((name, args))
+            if name in kernels:
+                kernels[name](*args)
+
+        return launch
+
+    def host(x):
+        return x.get() if isinstance(x, DeviceArray) else np.asarray(x)
+
+    for name, value in (
+        ("cp", cp),
+        ("kernel", kernel),
+        ("grid", lambda *args, **kwargs: 1),
+        ("is_device_array", lambda x: isinstance(x, DeviceArray)),
+        ("host", host),
+        ("usable", lambda: True),
+        ("require", lambda: None),
+    ):
+        monkeypatch.setattr(_cuda, name, value)
+    modules = [nulls_cuda]
+    if importlib.util.find_spec("numba") is not None:
+        from copairs.fastap import cuda as fastap_cuda
+
+        modules.append(fastap_cuda)
+    for module in modules:
+        monkeypatch.setattr(module, "cp", cp)
+        if hasattr(module, "host"):
+            monkeypatch.setattr(module, "host", host)
+    return cp, launches
 
 
 def simulate_plates(n_compounds, n_replicates, plate_size):

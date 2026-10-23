@@ -269,6 +269,27 @@ def ap_nulls(plan, start: int, size: int, dtype):
     return out
 
 
+def ap_nulls_to_host(plan, start: int, size: int, dtype, budget_bytes: int):
+    """:func:`ap_nulls` as a NumPy array, sampled on the GPU chunk by chunk.
+
+    Each chunk holds at most ``budget_bytes`` of samples on the GPU (at least
+    one sample): whole configurations' rows while one fits, else pieces of
+    one row. The chunk is copied to the host before the next is sampled.
+    """
+    dtype = np.dtype(dtype)
+    plan = plan_on_device(plan)
+    n_conf = len(plan[0])
+    out = np.empty((n_conf, size), dtype=dtype)
+    cols = max(1, min(size, budget_bytes // dtype.itemsize))
+    rows = max(1, budget_bytes // (dtype.itemsize * cols)) if cols == size else 1
+    for r in range(0, n_conf, rows):
+        part = tuple(a[r : r + rows] for a in plan)
+        for s in range(0, size, cols):
+            n = min(cols, size - s)
+            ap_nulls(part, start + s, n, dtype).get(out=out[r : r + rows, s : s + n])
+    return out
+
+
 _GROUP_GE = r"""
 // counts[g] += #{t : sum_e conf_cnt[e] * null[conf_ix[e], t] / n_group[g] >= thr[g]}
 extern "C" __global__ void group_ge(const double* null, long long size, long long n_groups,

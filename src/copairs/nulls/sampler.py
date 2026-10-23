@@ -366,7 +366,8 @@ def ap_nulls(
         ``"cuda"`` runs only when asked for: it also steps long gaps in
         float32, which is faster on GPUs with few float64 units, and error
         bounds rather than identical arithmetic make its samples NumPy's
-        (see :mod:`copairs.nulls.cuda`).
+        (see :mod:`copairs.nulls.cuda`). It holds at most 1 GiB of samples
+        on the GPU at a time.
     dtype : np.float32 or np.float64
         Output precision. Samples are computed in float64 and rounded once.
 
@@ -377,8 +378,12 @@ def ap_nulls(
     """
     plan = null_plan(confs, seed)
     backend = resolve_backend(backend)
-    out = _ap_nulls(plan, null_size, start, backend, dtype)
-    return _import_cuda_backend().host(out) if backend == "cuda" else out
+    if backend == "cuda":
+        # Sampled within DEFAULT_BUDGET of GPU memory at a time.
+        return _import_cuda_backend().ap_nulls_to_host(
+            plan, start, null_size, _check_dtype(dtype), DEFAULT_BUDGET
+        )
+    return _ap_nulls(plan, null_size, start, backend, dtype)
 
 
 def _ap_nulls(
@@ -399,9 +404,7 @@ def _ap_nulls(
     backend runs on Numba's threads. Samples do not depend on the threads.
     The CUDA backend returns a CuPy array.
     """
-    dtype = np.dtype(dtype)
-    if dtype not in (np.float32, np.float64):
-        raise ValueError(f"dtype must be float32 or float64, got {dtype}")
+    dtype = _check_dtype(dtype)
     if backend == "cuda":
         return _import_cuda_backend().ap_nulls(plan, start, null_size, dtype)
     num_pos, total, k0, k1 = plan
@@ -433,6 +436,14 @@ def _ap_nulls(
         with ThreadPoolExecutor(min(workers, len(tasks))) as ex:
             list(ex.map(sample, tasks))
     return out
+
+
+def _check_dtype(dtype) -> np.dtype:
+    """``dtype`` as a NumPy dtype; ValueError unless float32 or float64."""
+    dtype = np.dtype(dtype)
+    if dtype not in (np.float32, np.float64):
+        raise ValueError(f"dtype must be float32 or float64, got {dtype}")
+    return dtype
 
 
 def _numpy_workers() -> int:
