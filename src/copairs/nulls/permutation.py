@@ -33,10 +33,10 @@ its draws, and :func:`_draws_pool_np` and :func:`_label_maps_np` are their
 vectorized twins.
 """
 
+import os
 import hashlib
-import threading
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import numpy as np
 from scipy.sparse import coo_matrix
@@ -67,9 +67,9 @@ _INSERTION = 128
 # Reference profiles per group pool; a pool keeps its key matrix and each
 # reference's sorted keys, about 2 * MAX_POOL**2 float32 (2 GiB).
 MAX_POOL = 2**14
-# Estimated bytes of the pools alive at once (:func:`_pool_bytes`): threads
-# wait to build a pool until it fits beside the others, so concurrent pools
-# hold at most this much, or one pool if it alone is larger (MAX_POOL
+# Estimated bytes of the pools alive at once (:func:`_pool_bytes`): a group
+# with a new pool starts once the pool fits beside the others, so concurrent
+# pools hold at most this much, or one pool if it alone is larger (MAX_POOL
 # references take about 2 GiB unranked).
 POOL_BUDGET = 2**32
 # Bytes of one key table over the profiles of all pools of a call, which
@@ -89,6 +89,8 @@ _FIRST_ROUND = 256
 
 # Rank code of a NaN key: after every number.
 _NAN = np.uint32(0xFFFFFFFF)
+# The CPU count of ThreadPoolExecutor's default threads (3.13+: usable CPUs).
+_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
 
 
 def _make_count_less(jit=lambda f: f):
@@ -988,36 +990,77 @@ def permutation_null(
     return count, run.identity, pool
 
 
+class _Hits:
+    """A group's draws that reach its mAP, counted as their mAPs arrive.
+
+    Without ``stop_after`` all ``null_size`` draws run, in chunks of
+    ``chunk`` that may arrive in any order. With it, rounds start at
+    :data:`_FIRST_ROUND` draws and double up to ``chunk``, one round at a
+    time, and the run stops at its ``stop_after``-th hit: ``draws`` is then
+    the draw of that hit. Draw ``j`` does not depend on the chunks or
+    rounds, so neither does the result.
+    """
+
+    def __init__(self, null_size, thr, chunk, stop_after=None):
+        self.null_size = null_size
+        self.thr = thr
+        self.chunk = chunk
+        self.stop_after = stop_after
+        self.size = chunk if stop_after is None else min(_FIRST_ROUND, chunk)
+        self.count = 0  # hits so far
+        self.draws = null_size  # draws the hits came from
+        self.issued = 0  # draws handed out by tasks()
+        self.arrived = 0  # draws whose mAPs were added
+        self.done = null_size == 0
+
+    def tasks(self):
+        """``(start, size)`` of the draws to run next: every chunk, or one round."""
+        if self.stop_after is None:
+            todo = list(chunks(self.null_size, self.chunk))
+        else:
+            todo = [(self.issued, min(self.size, self.null_size - self.issued))]
+            self.size = min(2 * self.size, self.chunk)
+        self.issued = sum(todo[-1])
+        return todo
+
+    def add(self, start, maps):
+        """Count the mAPs of draws ``start, ...``; return whether the run is done."""
+        hits = maps >= self.thr
+        if self.stop_after is not None:
+            seen = np.cumsum(hits)
+            if self.count + seen[-1] >= self.stop_after:
+                at = int(np.searchsorted(seen, self.stop_after - self.count))
+                self.count, self.draws = self.stop_after, start + at + 1
+                self.done = True
+                return True
+        self.count += int(hits.sum())
+        self.arrived += len(maps)
+        self.done = self.arrived == self.null_size
+        return self.done
+
+    def pvalue(self):
+        """Return the run's p-value (:func:`_sequential_pvalue`)."""
+        return _sequential_pvalue(
+            self.count, self.draws, self.null_size, self.stop_after
+        )
+
+
 def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
-    """Count a group's draws whose mAP reaches ``thr``, stopping at ``stop_after``.
+    """Count a group's draws whose mAP reaches ``thr``, one task after another.
 
     ``maps_of(start, size)`` returns the mAPs of draws ``start, ...,
-    start + size - 1``. Without ``stop_after`` all ``null_size`` draws run in
-    chunks of ``chunk``; with it, rounds start at :data:`_FIRST_ROUND` draws
-    and double up to ``chunk``, and the run stops at its ``stop_after``-th
-    hit. Returns ``(count, draws)``: the hits and the draws they came from,
-    which is the draw of the ``stop_after``-th hit when the run stops early.
-    Draw ``j`` does not depend on the rounds, so neither does the result.
-    ``out`` receives the mAPs of the rounds run.
+    start + size - 1``; chunks, rounds and ``stop_after`` as in
+    :class:`_Hits`. Returns ``(count, draws)``: the hits and the draws they
+    came from. ``out`` receives the mAPs of the draws run.
     """
-    count = 0
-    start = 0
-    size = chunk if stop_after is None else min(_FIRST_ROUND, chunk)
-    while start < null_size:
-        size = min(size, null_size - start)
-        maps = maps_of(start, size)
-        if out is not None:
-            out[start : start + size] = maps
-        hits = maps >= thr
-        if stop_after is not None:
-            seen = np.cumsum(hits)
-            if count + seen[-1] >= stop_after:
-                at = int(np.searchsorted(seen, stop_after - count))
-                return stop_after, start + at + 1
-            size = min(2 * size, chunk)
-        count += int(hits.sum())
-        start += len(hits)
-    return count, null_size
+    hits = _Hits(null_size, thr, chunk, stop_after)
+    while not hits.done:
+        for start, size in hits.tasks():
+            maps = maps_of(start, size)
+            if out is not None:
+                out[start : start + size] = maps
+            hits.add(start, maps)
+    return hits.count, hits.draws
 
 
 def _sequential_pvalue(count, draws, null_size, stop_after=None) -> float:
@@ -1055,66 +1098,39 @@ class _SharedPools:
     """The pools of a set of groups, each built once and freed after its last group.
 
     Groups ranking the same references share one read-only pool, so threads
-    can run them concurrently. A pool is built only when its estimated
-    bytes fit in ``POOL_BUDGET`` beside the pools alive (or none is alive);
-    until then its thread waits for other pools to be freed. Groups must be
-    visited pool by pool: a waiting thread then holds no pool, and every
-    alive pool's remaining groups have started, so its pools are freed.
-
-    ``keys[g]`` names group ``g``'s pool, ``build(g)`` builds it and
+    can run them concurrently. Only the thread that schedules the groups
+    (:func:`_schedule`) uses this: it starts a group whose pool is new once
+    ``reserve`` finds the pool's estimated bytes fit in ``POOL_BUDGET``
+    beside the pools alive (or none is alive), and ``release`` frees a pool
+    after its last group. ``keys[g]`` names group ``g``'s pool and
     ``nbytes(g)`` estimates its bytes.
     """
 
-    def __init__(self, keys, build, nbytes):
+    def __init__(self, keys, nbytes):
         self.key = list(keys)
-        self.build = build
         self.nbytes = nbytes
         self.left = Counter(self.key)
         self.pools = {}
         self.bytes = {}
-        self.building = {}
-        self.lock = threading.Lock()
-        self.freed = threading.Condition(self.lock)
-        self.budget = POOL_BUDGET
         self.used = 0
 
-    def acquire(self, g):
-        """Return group ``g``'s pool, building it once."""
-        key = self.key[g]
-        with self.lock:
-            building = self.building.setdefault(key, threading.Lock())
-        with building:
-            if key not in self.pools:
-                need = self.nbytes(g)
-                with self.freed:
-                    while self.used and self.used + need > self.budget:
-                        self.freed.wait()
-                    self.used += need
-                try:
-                    pool = self.build(g)
-                except BaseException:
-                    self._free(need)
-                    raise
-                with self.lock:
-                    self.pools[key], self.bytes[key] = pool, need
-            return self.pools[key]
-
-    def _free(self, size):
-        with self.freed:
-            self.used -= size
-            self.freed.notify_all()
+    def reserve(self, g):
+        """Count group ``g``'s new pool in the budget; False if it does not fit yet."""
+        need = self.nbytes(g)
+        if self.used and self.used + need > POOL_BUDGET:
+            return False
+        self.used += need
+        self.bytes[self.key[g]] = need
+        return True
 
     def release(self, g):
         """Free group ``g``'s pool if no other group needs it."""
         key = self.key[g]
-        with self.lock:
-            self.left[key] -= 1
-            if self.left[key]:
-                return
-            self.pools.pop(key, None)
-            self.building.pop(key, None)
-            size = self.bytes.pop(key, 0)
-        self._free(size)
+        self.left[key] -= 1
+        if self.left[key]:
+            return
+        self.pools.pop(key, None)
+        self.used -= self.bytes.pop(key, 0)
 
 
 def _check_identity(g, identity, observed):
@@ -1159,11 +1175,12 @@ def permutation_pvalues(
     progress_bar : bool
         Whether to show a progress bar over groups.
     max_workers : int, optional
-        Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s).
-        Each group's p-value depends only on its own draws, so results do not
-        depend on it. The pools they build at once hold at most
-        ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or one
-        pool if it alone is larger.
+        Threads that run the groups' draws (default: ``ThreadPoolExecutor``'s),
+        a group's chunks of draws on several threads at once, and at most this
+        many groups at a time. Each group's p-value depends only on its own
+        draws, so results do not depend on it. The pools built at once hold
+        at most ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or
+        one pool if it alone is larger.
     pos_diffby : np.ndarray, optional
         ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
         columns, indexed like the pairs; layouts whose draws could break
@@ -1215,7 +1232,7 @@ def _run_groups(
     keys, refs, similarity, build, nbytes, start, null_size, stop_after,
     progress_bar, max_workers,
 ):  # fmt: skip
-    """P-value of each group of a permutation null, running groups on threads.
+    """P-value of each group of a permutation null, its draws run on threads.
 
     ``keys[g]`` names group ``g``'s pool and ``refs`` the profiles of each
     named pool. ``build(g, table)`` builds group ``g``'s pool, slicing its
@@ -1223,32 +1240,91 @@ def _run_groups(
     ``nbytes(g)`` estimates the pool's bytes (:class:`_SharedPools`), and
     ``start(g, pool)`` returns the group's ``_Run``.
     """
-
-    def pvalue(g):
-        try:
-            run = start(g, pools.acquire(g))
-            count, draws = run.count(null_size, stop_after)
-        finally:
-            pools.release(g)
-        return _sequential_pvalue(count, draws, null_size, stop_after)
-
+    if max_workers is None:  # ThreadPoolExecutor's default
+        max_workers = min(32, (_cpu_count() or 1) + 4)
     pvals = np.empty(len(keys), dtype=np.float64)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         try:
             # Pools ranking overlapping profiles slice one key table.
             table = _key_table(list(refs.values()), similarity, ex.map)
-            pools = _SharedPools(keys, lambda g: build(g, table), nbytes)
-            # Visit groups pool by pool, so few pools are alive at a time.
-            order = sorted(range(len(keys)), key=lambda g: pools.key[g])
-            done = progress(
-                ex.map(pvalue, order), len(order), progress_bar, "permutation null"
-            )
-            for g, p in zip(order, done):
+            done = _schedule(
+                ex, max_workers, keys, lambda g: build(g, table), nbytes, start,
+                null_size, stop_after,
+            )  # fmt: skip
+            for g, p in progress(done, len(keys), progress_bar, "permutation null"):
                 pvals[g] = p
         except BaseException:
             ex.shutdown(wait=False, cancel_futures=True)
             raise
     return pvals
+
+
+def _schedule(ex, workers, keys, build, nbytes, start, null_size, stop_after):
+    """Yield ``(g, p_value)`` as groups finish, running their steps on ``ex``.
+
+    A group's pool is built once (``build(g)``), the group starts on it
+    (``start(g, pool)`` gives its ``_Run``), and its draws run as chunk
+    tasks, or round by round with ``stop_after`` (:class:`_Hits`), so the
+    draws of a large group spread over the threads. Only this thread submits
+    tasks, and no task waits for another: a group starts once its pool is
+    built, and a group with a new pool only once ``_SharedPools.reserve``
+    admits it. Groups start pool by pool, at most ``workers`` at a time, so
+    every pool alive has unfinished groups, which free it, and few layouts
+    are alive at once.
+    """
+    pools = _SharedPools(keys, nbytes)
+    order = sorted(range(len(keys)), key=lambda g: keys[g])
+    tasks = {}  # future -> (step, group, first draw)
+    waiting = {}  # pool key -> groups waiting for its build
+    runs = {}  # group -> (_Run, _Hits)
+    nxt = active = 0
+
+    def draw(g):
+        run, hits = runs[g]
+        for first, size in hits.tasks():
+            tasks[ex.submit(run.maps_of, first, size)] = ("draws", g, first)
+
+    while nxt < len(order) or tasks:
+        while nxt < len(order) and active < workers:
+            g = order[nxt]
+            key = keys[g]
+            if key in waiting:
+                waiting[key].append(g)
+            elif key in pools.pools:
+                tasks[ex.submit(start, g, pools.pools[key])] = ("start", g, 0)
+            elif pools.reserve(g):
+                waiting[key] = [g]
+                tasks[ex.submit(build, g)] = ("build", g, 0)
+            else:  # wait until a pool is freed
+                break
+            nxt += 1
+            active += 1
+        finished, _ = wait(tasks, return_when=FIRST_COMPLETED)
+        for future in finished:
+            step, g, first = tasks.pop(future)
+            result = future.result()
+            if step == "build":
+                pools.pools[keys[g]] = result
+                for h in waiting.pop(keys[g]):
+                    tasks[ex.submit(start, h, result)] = ("start", h, 0)
+                continue
+            if step == "start":
+                runs[g] = (
+                    result,
+                    _Hits(null_size, result.thr, result.layout.chunk(), stop_after),
+                )
+                done = runs[g][1].done
+                if not done:
+                    draw(g)
+            else:
+                done = runs[g][1].add(first, result)
+                if not done and stop_after is not None:
+                    draw(g)  # the next round
+            if done:
+                _, hits = runs.pop(g)
+                pools.release(g)
+                active -= 1
+                yield g, hits.pvalue()
 
 
 # Multilabel groups: a draw moves one label to other profiles.

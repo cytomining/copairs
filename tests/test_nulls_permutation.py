@@ -5,6 +5,7 @@ import time
 import pickle
 import itertools
 import threading
+from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -469,7 +470,7 @@ def shared_pool_aps():
 
 
 def test_pool_memory_is_bounded(monkeypatch):
-    """Under POOL_BUDGET, threads wait to build a pool until others are freed."""
+    """Under POOL_BUDGET, a group with a new pool waits until others are freed."""
     ap = shared_pool_aps()
     args = (["g"], 300, 0.05, 0)
     expected = mean_average_precision(ap, *args, progress_bar=False, max_workers=1)
@@ -573,6 +574,53 @@ def test_pvalues_do_not_depend_on_workers(monkeypatch):
     ]
     assert p[0] == p[1] == alone
     assert len(set(alone)) > 1
+
+
+@pytest.mark.parametrize("stop_after", [None, 20])
+def test_split_draws_do_not_change_pvalues(stop_after, monkeypatch):
+    """A group's draws run as several tasks, on any threads, with the same p-values.
+
+    Chunks of 32 split each group's 300 draws into 10 tasks (rounds of 32
+    with stop_after, which here stops after 1 to 9 rounds), on 1 or 4
+    threads and with POOL_BUDGET = 1; the p-values match a run with the
+    default chunks on one thread.
+    """
+    meta = plate_label_meta()
+    feats = np.random.default_rng(15).standard_normal((len(meta), 5))
+    frames = [
+        (shared_pool_aps(), ["g"]),
+        (multilabel_ap(meta, feats, PLATE_SPEC), ["target"]),
+    ]
+
+    def pvalues(workers):
+        return [
+            mean_average_precision(
+                ap, by, 300, 0.05, 0, progress_bar=False, max_workers=workers,
+                stop_after=stop_after,
+            )["p_value"].tolist()
+            for ap, by in frames
+        ]  # fmt: skip
+
+    expected = pvalues(1)
+    calls, maps_of = [], permutation._Run.maps_of
+
+    def counted(self, start, size):
+        calls.append(self.key)  # one key per group
+        return maps_of(self, start, size)
+
+    monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 32)
+    monkeypatch.setattr(permutation._LabelLayout, "chunk", lambda self: 32)
+    monkeypatch.setattr(permutation._Run, "maps_of", counted)
+    for workers, budget in ((1, 2**32), (4, 2**32), (4, 1)):
+        monkeypatch.setattr(permutation, "POOL_BUDGET", budget)
+        calls.clear()
+        assert pvalues(workers) == expected
+        tasks = Counter(calls)
+        assert len(tasks) == 9  # 6 groups and 3 labels
+        if stop_after is None:
+            assert set(tasks.values()) == {10}
+        else:
+            assert min(tasks.values()) == 1 and max(tasks.values()) > 2
 
 
 ML_SPEC = dict(
