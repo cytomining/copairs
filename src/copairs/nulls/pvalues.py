@@ -78,7 +78,7 @@ def _prepare(
         raise ValueError(f"conf_ix must index the {len(confs)} rows of confs")
     null_size = check_null_size(null_size)
     _check_max_workers(max_workers)
-    backend = resolve_backend(backend, gpu=True)
+    backend = resolve_backend(backend, "ap_nulls")
     plan = null_plan(confs, resolve_seed(seed))
     sample = partial(
         _ap_nulls, backend=backend, dtype=np.float64, budget_bytes=budget_bytes,

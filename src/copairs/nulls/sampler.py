@@ -377,7 +377,7 @@ def ap_nulls(
         ``(n, null_size)`` AP samples.
     """
     plan = null_plan(confs, seed)
-    backend = resolve_backend(backend, gpu=True)
+    backend = resolve_backend(backend, "ap_nulls")
     if backend == "cuda":
         # Sampled within DEFAULT_BUDGET of GPU memory at a time.
         return _import_cuda_backend().ap_nulls_to_host(

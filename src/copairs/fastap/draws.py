@@ -126,9 +126,9 @@ def draw_average_precisions(
     np.ndarray
         ``(n_draws, k)`` float64 APs.
     """
-    if backend not in ("numba", "cuda"):
-        raise ValueError("backend must be either 'numba' or 'cuda'.")
     kernels = backend_module(backend)
+    if kernels is None:
+        raise ValueError("backend must be 'numba' or 'cuda': draws have no NumPy code.")
     queries = np.asarray(queries, dtype=np.int64)
     references = np.asarray(references, dtype=np.int64)
     if queries.ndim != 2 or references.ndim != 2 or len(queries) != len(references):

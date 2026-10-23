@@ -8,6 +8,7 @@ from scipy import stats
 
 from copairs import nulls, compute
 from copairs.nulls import joint, common, permutation
+from copairs._backend import cpu_backends
 
 COMPLETE4 = [(i, j) for i in range(4) for j in range(i + 1, 4)]
 SIGNATURES = [
@@ -20,7 +21,8 @@ SIGNATURES = [
     ([(40, 5000), (40, 3000)], [(0, 1)]),
     ([(5, 20_000)] * 3, [(0, 1), (0, 2), (1, 2)]),
 ]
-BACKENDS = nulls.available_backends()
+# This null has no GPU kernels; "cuda" runs it as "numba" (test_cuda).
+BACKENDS = cpu_backends()
 
 
 def null_of(members, edges, size, seed=0, start=0):

@@ -174,17 +174,24 @@ def test_installed_backends_looked_up_once(monkeypatch):
     assert sorted(looked_up) == ["cupy", "numba"]
 
 
-def test_cpu_steps_take_no_cuda_backend():
-    """normalize_ap and find_pairs_multilabel run on the CPU: "cuda" is no backend.
+@pytest.mark.skipif(not HAS_NUMBA, reason="Numba optional extra is unavailable")
+def test_cpu_steps_run_on_numba_under_cuda():
+    """normalize_ap and find_pairs_multilabel have no GPU kernels: "cuda" runs them on Numba.
 
-    The AP functions give them "numba" for their own "cuda", so neither asks
-    for a GPU or CuPy.
+    They give Numba's results and ask for no GPU, which would raise here
+    (no CuPy or no GPU).
     """
     frame = pd.DataFrame({"l": [["a"], ["a", "b"], ["b"]], "p": [0, 1, 2]})
-    with pytest.raises(ValueError, match="either 'numpy' or 'numba'"):
-        normalize_ap(0.5, 2, 3, backend="cuda")
-    with pytest.raises(ValueError, match="either 'numpy' or 'numba'"):
-        matching.find_pairs_multilabel(frame, ["l"], [], "l", backend="cuda")
+    ap, num_pos, num_neg = np.array([0.5, 0.25, 1.0]), np.array([2, 1, 3]), 4
+    np.testing.assert_array_equal(
+        normalize_ap(ap, num_pos, num_neg, backend="cuda"),
+        normalize_ap(ap, num_pos, num_neg, backend="numba"),
+    )
+    got = matching.find_pairs_multilabel(frame, ["l"], [], "l", backend="cuda")
+    expected = matching.find_pairs_multilabel(frame, ["l"], [], "l", backend="numba")
+    assert len(got) == len(expected) == 3
+    for g, e in zip(got, expected):
+        np.testing.assert_array_equal(g, e)
 
 
 @needs_cupy
@@ -525,11 +532,12 @@ def test_auto_never_runs_cuda(host_cuda):
     assert not host_cuda.calls
 
 
+@pytest.mark.skipif(not HAS_NUMBA, reason="Numba optional extra is unavailable")
 @pytest.mark.parametrize("null", ["joint", "permutation"])
-def test_cpu_only_nulls_reject_cuda(host_cuda, null):
-    """The joint and permutation nulls have no GPU kernels: "cuda" raises.
+def test_cpu_only_nulls_run_on_numba_under_cuda(host_cuda, null):
+    """The joint and permutation nulls have no GPU kernels: "cuda" runs them on Numba.
 
-    Where a GPU is usable too, instead of running them on the CPU.
+    Their p-values are Numba's, and no GPU kernel runs where a GPU is usable.
     """
     meta = pd.DataFrame({"g": np.repeat(list("abcdef"), 4), "p": np.tile(range(4), 6)})
     feats = np.random.default_rng(1).standard_normal((len(meta), 5))
@@ -541,11 +549,12 @@ def test_cpu_only_nulls_reject_cuda(host_cuda, null):
         ),
     )
     for frame in frames:
-        with pytest.raises(ValueError, match="backend='cuda' runs only the AP"):
-            mean_average_precision(
-                frame, ["g"], 50, 0.05, 0, progress_bar=False, null=null,
-                backend="cuda",
-            )  # fmt: skip
+        options = dict(progress_bar=False, null=null)
+        got = [
+            mean_average_precision(frame, ["g"], 50, 0.05, 0, backend=b, **options)
+            for b in ("cuda", "numba")
+        ]
+        pd.testing.assert_frame_equal(*got)
     assert not host_cuda.calls
 
 

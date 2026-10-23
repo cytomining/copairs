@@ -10,8 +10,8 @@ that the AP functions use:
   the host;
 - :func:`ap_from_pairs` computes AP by counting on the GPU, streaming the
   negative pairs, their similarities and keys within ``budget_bytes``;
-- multilabel APs, the multilabel matcher and normalized AP run on Numba, on the
-  CPU (:mod:`copairs.fastap.multilabel`, :func:`expected_ap_array`).
+- the AP stage's steps without GPU kernels (multilabel matching and APs,
+  normalized AP) run on Numba under ``"cuda"`` (``copairs._backend.kernels``).
 
 Given the same similarities, APs equal the Numba backend's bit for bit: the
 counts are exact and the AP sums run in the same order. The kernels'
@@ -22,17 +22,14 @@ rounding and near-tied pairs can rank differently.
 import numpy as np
 
 from copairs import _cuda
-from copairs.fastap import draws, ranking, multilabel, _bind_similarity
+from copairs.fastap import draws, ranking, _bind_similarity
 from copairs.fastap.ranking import rank_keys, index_pairs, sortable_keys
 from copairs.fastap.similarity import kernel_rows
-from copairs.fastap.normalization import expected_ap_array
 
 __all__ = [
     "PAIR_CHUNK",
     "DeviceSims",
     "ap_from_pairs",
-    "expected_ap_array",
-    "multilabel",
     "pair_similarity",
     "similarity_fn",
 ]

@@ -13,7 +13,7 @@ import numpy as np
 import duckdb
 import pandas as pd
 
-from copairs._backend import backend_module
+from copairs._backend import kernels
 
 logger = logging.getLogger("copairs")
 ColumnList = Union[Sequence[str], pd.Index]
@@ -547,7 +547,7 @@ def find_pairs_multilabel(
     sameby: Union[str, ColumnList],
     diffby: Union[str, ColumnList],
     multilabel_col: str,
-    backend: Literal["numpy", "numba"] = "numpy",
+    backend: Literal["numpy", "numba", "cuda"] = "numpy",
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     Find pairs of rows in a DataFrame that have the same or different values in certain columns.
@@ -564,12 +564,13 @@ def find_pairs_multilabel(
         List of column names to consider for finding different values.
     multilabel_col : str
         Name of the column containing multiple labels.
-    backend : {"numpy", "numba"}
+    backend : {"numpy", "numba", "cuda"}
         ``"numpy"`` (default) matches in DuckDB SQL. ``"numba"`` (install
         ``copairs[numba]``) enumerates pairs through an inverted label index
         when the input allows it (a DataFrame with a default index, list cells
         without missing or repeated labels, one label type), and uses SQL
         otherwise. Both find the same pairs, possibly in a different order.
+        ``"cuda"`` has no GPU kernels here and runs as ``"numba"``.
 
     Returns
     -------
@@ -582,16 +583,14 @@ def find_pairs_multilabel(
     -----
     The function asserts that `multilabel_col` is present in either `sameby` or `diffby`.
     """
-    find = _multilabel_matcher(
-        dframe, multilabel_col, backend_module(backend, gpu=False)
-    )
+    find = _multilabel_matcher(dframe, multilabel_col, kernels("ap_cpu", backend))
     return find(sameby, diffby)
 
 
 def _multilabel_matcher(dframe, multilabel_col: str, fastap=None):
     """Return ``find(sameby, diffby)``, :func:`find_pairs_multilabel` on ``dframe``.
 
-    Given ``fastap`` (the Numba or CUDA backend), every call takes its pairs
+    Given ``fastap`` (:mod:`copairs.fastap`), every call takes its pairs
     from one inverted label index built here, where the input allows it (see
     :func:`find_pairs_multilabel`), and uses SQL otherwise.
     """

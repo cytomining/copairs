@@ -41,43 +41,59 @@ def import_backend(module: str, backend: str) -> ModuleType:
         ) from exc
 
 
-def import_kernels(module: str, backend: str) -> ModuleType:
-    """Import ``module``, kernels of ``backend``, as :func:`import_backend` does.
+# Each step's kernel modules on the optional backends. Under "cuda", a step
+# without GPU kernels runs on Numba, which the gpu extra installs.
+_KERNELS = {
+    # The AP stage: similarities, APs by counting, batched draws.
+    "ap": {"numba": "copairs.fastap", "cuda": "copairs.fastap.cuda"},
+    # The AP stage's CPU steps: multilabel matching and APs, normalized AP.
+    "ap_cpu": {"numba": "copairs.fastap"},
+    # The AP nulls and their p-values (the copied mAP null).
+    "ap_nulls": {"numba": "copairs.nulls._numba", "cuda": "copairs.nulls.cuda"},
+    # The joint and permutation mAP nulls.
+    "map_nulls": {"numba": "copairs.nulls._numba"},
+}
+# The CUDA backend's GPU check (copairs._cuda.usable, require).
+_CUDA = "copairs._cuda"
 
-    For ``"cuda"``, first checks for a usable GPU: a RuntimeError naming the
-    extra without one (:func:`copairs._cuda.require`).
+
+def step_backend(step: str, backend: str) -> str:
+    """Return the backend that ``step`` (a key of ``_KERNELS``) runs on for ``backend``.
+
+    ``backend`` where the step has its kernels, and NumPy always; otherwise
+    ``"numba"``: under ``"cuda"``, a step without GPU kernels runs on the
+    CPU. Raises ValueError unless ``backend`` is numpy, numba or cuda.
     """
-    if backend == "cuda":
-        import_backend("copairs._cuda", backend).require()
-    return import_backend(module, backend)
+    if backend not in ("numpy", "numba", "cuda"):
+        raise ValueError("backend must be 'numpy', 'numba' or 'cuda'.")
+    if backend == "numpy" or backend in _KERNELS[step]:
+        return backend
+    return "numba"
 
 
-# The AP stage's kernels of each optional backend.
-_AP_KERNELS = {"numba": "copairs.fastap", "cuda": "copairs.fastap.cuda"}
+def kernels(step: str, backend: str) -> ModuleType | None:
+    """Return ``step``'s kernels for ``backend``, or None where it runs on NumPy.
 
-
-def backend_module(backend: str, gpu: bool = True):
-    """Return the kernels for ``backend``: None for ``"numpy"``.
-
-    For ``"numba"``, imports the optional Numba kernels, :mod:`copairs.fastap`,
-    on first use; for ``"cuda"``, :mod:`copairs.fastap.cuda`, after checking
-    for a usable GPU (see :func:`import_kernels`). With ``gpu=False``, for
-    functions that run only on the CPU, ``"cuda"`` is not a backend.
+    Imports the module :func:`step_backend` picks on first use. GPU kernels
+    first check for a usable GPU: a RuntimeError naming the extra without
+    one (:func:`copairs._cuda.require`). A missing package names the extra
+    of ``backend``, so ``"cuda"`` names the gpu extra for its Numba steps too.
     """
-    if backend == "numpy":
+    runs_on = step_backend(step, backend)
+    if runs_on == "numpy":
         return None
-    if backend not in _AP_KERNELS or (backend == "cuda" and not gpu):
-        names = "'numpy', 'numba' or 'cuda'" if gpu else "either 'numpy' or 'numba'"
-        raise ValueError(f"backend must be {names}.")
-    return import_kernels(_AP_KERNELS[backend], backend)
+    if runs_on == "cuda":
+        import_backend(_CUDA, "cuda").require()
+    return import_backend(_KERNELS[step][runs_on], backend)
 
 
-def cpu_backend(backend: str) -> str:
-    """Return the backend of the steps that ``backend`` runs on the CPU.
+def backend_module(backend: str) -> ModuleType | None:
+    """Return the AP stage's kernels for ``backend``: None for ``"numpy"``.
 
-    ``"cuda"`` runs them on Numba, as ``"numba"`` does.
+    :mod:`copairs.fastap` for ``"numba"``, :mod:`copairs.fastap.cuda` for
+    ``"cuda"`` (see :func:`kernels`).
     """
-    return "numba" if backend == "cuda" else backend
+    return kernels("ap", backend)
 
 
 def available_backends() -> list[str]:
@@ -114,12 +130,12 @@ def _installed(package: str) -> bool:
 # packages work, what failed to import, and what that leaves.
 _PROBES = {
     "numba": (
-        "copairs.nulls._numba",
+        _KERNELS["map_nulls"]["numba"],
         "Numba is installed but the Numba backend",
         "backend='auto' uses NumPy, which gives identical results",
     ),
     "cuda": (
-        "copairs._cuda",
+        _CUDA,
         "CuPy is installed but",
         "the CUDA backend is unavailable",
     ),
@@ -147,4 +163,4 @@ def _imports(backend: str) -> bool:
 
 def _cuda_usable() -> bool:
     """Whether the CUDA backend can run here (see :func:`copairs._cuda.usable`)."""
-    return _imports("cuda") and import_backend("copairs._cuda", "cuda").usable()
+    return _imports("cuda") and import_backend(_CUDA, "cuda").usable()

@@ -104,7 +104,7 @@ cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
 
 - AP nulls and p-values (the copied mAP null): `backend="cuda"`, only when
   asked for, samples and counts on the GPU; the joint and permutation nulls
-  have no GPU kernels and raise a ValueError under it. It steps long gaps of
+  have no GPU kernels and run on Numba under it. It steps long gaps of
   Algorithm A in float32, which is faster on GPUs with few float64 units, and
   its guided gap search uses CUDA's `log1p`, not glibc's. Error bounds keep
   the gaps equal to the CPU's, so samples are NumPy's, but not by identical

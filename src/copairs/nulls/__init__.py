@@ -14,7 +14,7 @@ and ``"numpy"``, bitwise identical; ``"auto"`` picks Numba when it imports
 (:func:`~copairs.nulls.backend.resolve_backend`). The AP nulls and their
 p-values also run on ``"cuda"`` (optional, ``pip install 'copairs[gpu]'``),
 only when asked for (see :mod:`copairs.nulls.cuda`); the joint and
-permutation nulls raise ValueError under it.
+permutation nulls run on Numba under it.
 """
 
 from copairs.nulls import joint, permutation

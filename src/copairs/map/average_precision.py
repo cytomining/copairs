@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs._backend import cpu_backend, backend_module, import_backend
+from copairs._backend import backend_module, import_backend
 from copairs.matching import UnpairedException, find_pairs
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
@@ -468,7 +468,7 @@ def average_precision(
     M = null_confs[:, 0]  # n_pos_pairs
     L = null_confs[:, 1]  # n_total_pairs
     N = L - M  # n_neg_pairs
-    normalized_scores = normalize_ap(ap_scores, M, N, backend=cpu_backend(backend))
+    normalized_scores = normalize_ap(ap_scores, M, N, backend=backend)
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")

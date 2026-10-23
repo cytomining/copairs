@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs._backend import cpu_backend, backend_module
+from copairs._backend import kernels, backend_module
 from copairs.matching import (
     UnpairedException,
     _unique_pairs,
@@ -128,6 +128,7 @@ def average_precision(
     copairs.map.average_precision : Average precision without multilabel support.
     """
     fastap = backend_module(backend)
+    cpu = kernels("ap_cpu", backend)  # matching and APs, on the CPU under cuda
 
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
@@ -145,7 +146,7 @@ def average_precision(
     logger.info("Indexing metadata...")
 
     # One label index, under Numba, for both positive and negative pairs
-    find_pairs = _multilabel_matcher(meta, multilabel_col, fastap)
+    find_pairs = _multilabel_matcher(meta, multilabel_col, cpu)
 
     logger.info("Finding positive pairs...")
     pos_pairs, keys, pos_counts = find_pairs(pos_sameby, pos_diffby)
@@ -168,7 +169,7 @@ def average_precision(
 
     if fastap is not None:
         logger.info("Computing AP per label...")
-        label, ix, ap, num_pos, total = fastap.multilabel.multilabel_ap(
+        label, ix, ap, num_pos, total = cpu.multilabel.multilabel_ap(
             pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, len(meta)
         )
         # The per-label frames below broadcast each key: NumPy keys keep their
@@ -180,7 +181,7 @@ def average_precision(
             {
                 "average_precision": ap,
                 "normalized_average_precision": normalize_ap(
-                    ap, num_pos, total - num_pos, backend=cpu_backend(backend)
+                    ap, num_pos, total - num_pos, backend=backend
                 ),
                 "n_pos_pairs": num_pos,
                 "n_total_pairs": total,

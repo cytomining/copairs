@@ -18,6 +18,7 @@ from copairs import nulls, compute
 from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import permutation, tie_thresholds
 from tests.helpers import ML_SPEC, label_meta
+from copairs._backend import cpu_backends
 from tests.test_nulls import run_python
 from copairs.nulls.common import stream_key
 
@@ -29,7 +30,8 @@ LAYOUTS = [
     (3, 3, 20, dict(SPEC, neg_sameby=["plate"])),
 ]
 LAYOUT_IDS = ["one-pool", "plate-blocks", "plate-blocks-diffby", "three-plates"]
-BACKENDS = nulls.available_backends()
+# This null has no GPU kernels; "cuda" runs it as "numba" (test_cuda).
+BACKENDS = cpu_backends()
 
 
 @pytest.fixture
