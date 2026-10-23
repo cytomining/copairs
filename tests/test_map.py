@@ -1,5 +1,8 @@
 """Tests for (mean) Average Precision calculation."""
 
+import warnings
+import itertools
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -421,3 +424,31 @@ def test_map_pvalue_falls_back_with_warning(tmp_path):
         )
     p = result.set_index("g")["p_value"]
     assert 0 < p["odd"] <= 1 and 0 < p["rep"] <= 1
+
+
+def test_map_pvalue_one_profile_groups_use_their_ap_null():
+    """A group of one profile, positives in other groups, gets that AP's null."""
+    from copairs.map import get_map_pvalue
+    from copairs.matching import find_pairs
+
+    genes = ["a"] * 4 + ["b"] * 4 + ["neg"] * 10  # one profile per guide
+    meta = pd.DataFrame({"gene": genes, "guide": range(len(genes))})
+    meta["ref"] = np.where(meta["gene"] == "neg", meta.index, -1)
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 8))
+    ap = average_precision(
+        meta, feats, ["gene", "ref"], [], [], ["gene", "ref"], progress_bar=False
+    )
+    ap = ap[ap["gene"] != "neg"]
+    kwargs = dict(progress_bar=False, null="joint")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        inferred = get_map_pvalue(ap, ["guide"], 20_000, SEED, **kwargs)
+    pos_pairs = find_pairs(meta, sameby=["gene", "ref"], diffby=[])
+    explicit = get_map_pvalue(
+        ap, ["guide"], 20_000, SEED, pos_pairs=pos_pairs, **kwargs
+    )
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    ranks = itertools.combinations(range(13), 3)  # 3 sibling guides, 10 controls
+    null = np.array([np.mean(np.arange(1, 4) / (np.array(r) + 1)) for r in ranks])
+    exact = [(null >= m - 1e-9).mean() for m in inferred["mean_average_precision"]]
+    np.testing.assert_allclose(inferred["p_value"], exact, atol=0.01)

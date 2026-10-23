@@ -66,8 +66,9 @@ def get_map_pvalue(
         given to `average_precision`; `ap_scores` must keep the index that
         `average_precision` returned. When omitted, each group's positives are
         assumed to be its other members, which is the replicate-retrieval case
-        (`n_pos_pairs == len(group) - 1`). Groups where that does not hold fall
-        back to the copied null with a warning. Joint null only.
+        (`n_pos_pairs == len(group) - 1`), and a group of one profile gets
+        that profile's AP null. Other groups fall back to the copied null with
+        a warning. Joint null only.
     null : str
         Null of the group mAP. ``"joint"`` (default) samples the members' APs
         together (`copairs.nulls.joint`): a positive pair inside the group is
@@ -169,12 +170,12 @@ def _group_edges(groups, num_pos, profile, pos_pairs):
 
     Without ``pos_pairs``, a group whose members each have ``len(group) - 1``
     positives is taken to be a replicate group (all its pairs are positives),
-    and other groups get None.
+    a group of one profile has no pairs inside it, and other groups get None.
     """
     if pos_pairs is None:
         return [
             [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
-            if (num_pos[ix] == len(ix) - 1).all()
+            if len(ix) == 1 or (num_pos[ix] == len(ix) - 1).all()
             else None
             for ix in groups
         ]
