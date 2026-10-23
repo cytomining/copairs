@@ -207,18 +207,25 @@ def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col, found):
 
 
 @numba.njit(parallel=True, cache=True)
-def _rows_ap(pos_ptr, pos_vals, row_profile, neg_ptr, neg_vals):
-    """AP of rows with sorted positive keys and their profile's negatives."""
+def _rows_ap(pos_ptr, pos_vals, row_profile, neg_ptr, neg_vals, max_pos, n_tasks):
+    """AP of rows with sorted positive keys and their profile's negatives.
+
+    Each of ``n_tasks`` parallel tasks scores a block of rows with one
+    histogram of ``max_pos + 1`` bins, the most positives of any row.
+    """
     n_rows = len(row_profile)
     ap = np.empty(n_rows, dtype=np.float64)
-    for r in numba.prange(n_rows):
-        lo, hi = pos_ptr[r], pos_ptr[r + 1]
-        num_pos = hi - lo
-        i = row_profile[r]
-        hist = np.zeros(num_pos + 1, dtype=np.int64)
-        for e in range(neg_ptr[i], neg_ptr[i + 1]):
-            hist[upper_bound(pos_vals, lo, hi, neg_vals[e]) - lo] += 1
-        ap[r] = ap_from_counts(hist, 0, num_pos)
+    step = (n_rows + n_tasks - 1) // n_tasks
+    for task in numba.prange(n_tasks):
+        hist = np.empty(max_pos + 1, dtype=np.int64)
+        for r in range(task * step, min(n_rows, (task + 1) * step)):
+            lo, hi = pos_ptr[r], pos_ptr[r + 1]
+            num_pos = hi - lo
+            i = row_profile[r]
+            hist[: num_pos + 1] = 0
+            for e in range(neg_ptr[i], neg_ptr[i + 1]):
+                hist[upper_bound(pos_vals, lo, hi, neg_vals[e]) - lo] += 1
+            ap[r] = ap_from_counts(hist, 0, num_pos)
     return ap
 
 
@@ -272,6 +279,8 @@ def multilabel_ap(pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, n):
     pos_ptr = np.append(pos_start, len(row_key)).astype(np.int64)
     neg_ptr, neg_vals = pair_csr(neg_pairs, neg_sims, n)
     profile = rows % n
-    ap = _rows_ap(pos_ptr, end_keys, profile, neg_ptr, neg_vals)
     num_pos = np.diff(pos_ptr)
+    max_pos = int(num_pos.max()) if len(num_pos) else 0
+    n_tasks = max(1, min(len(rows), 4 * numba.get_num_threads()))
+    ap = _rows_ap(pos_ptr, end_keys, profile, neg_ptr, neg_vals, max_pos, n_tasks)
     return rows // n, profile, ap, num_pos, num_pos + np.diff(neg_ptr)[profile]
