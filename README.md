@@ -58,7 +58,8 @@ to import, `"auto"` warns once and uses NumPy.
 Numba starts one thread per host CPU. In a container or job with a CPU quota,
 set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs. The
 NumPy backend samples on one thread per CPU the process may run on (its CPU
-affinity, which follows `taskset` and Slurm allocations but not a CPU quota). If
+affinity, which follows `taskset` and Slurm allocations but not a CPU quota),
+or on `max_workers` threads where the function takes it. If
 Numba uses its GNU OpenMP threading layer (the default when it cannot load
 TBB), a process forked after copairs ran a Numba kernel stops when it runs one
 itself ("Terminating: fork() called from a process already using GNU

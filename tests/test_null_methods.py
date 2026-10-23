@@ -1,6 +1,7 @@
 """Tests for method= and backend= of copairs' public AP and mAP p-value functions."""
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ from copairs.map import (
     mean_average_precision,
     mean_average_precision_hierarchical,
 )
+from copairs.nulls import sampler
 from tests.helpers import brute_ap_pvalues, brute_map_pvalues
 from copairs.map.normalization import expected_ap
 from copairs.map.average_precision import p_values as frame_p_values
@@ -279,6 +281,54 @@ def test_map_column_is_the_score(keys, monkeypatch):
     assert column.dtype == np.float32
     np.testing.assert_array_equal(column.loc[expected.index], expected)
     assert seen[0].tobytes() == got["mean_average_precision"].to_numpy().tobytes()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_max_workers_sets_numpy_threads(backend, monkeypatch):
+    """max_workers sets the NumPy sampler's threads; p-values do not depend on it.
+
+    Numba runs on its own threads, so its calls open no NumPy thread pool.
+    """
+    monkeypatch.setattr(sampler, "_numpy_workers", lambda: 16)
+    pools = []
+
+    def pool(n):
+        pools.append(n)
+        return ThreadPoolExecutor(n)
+
+    monkeypatch.setattr(sampler, "ThreadPoolExecutor", pool)
+    frame = random_ap_frame(np.random.default_rng(5))
+    scores = frame["average_precision"].to_numpy()
+    confs = frame[["n_pos_pairs", "n_total_pairs"]].to_numpy()
+    kwargs = dict(null_size=2000, seed=0, progress_bar=False, backend=backend)
+    runs = {
+        "ap": lambda w: compute.p_values(scores, confs, max_workers=w, **kwargs),
+        "map": lambda w: mean_average_precision(
+            frame, ["g"], threshold=0.05, max_workers=w, **kwargs
+        )["p_value"].to_numpy(),
+    }
+    for name, run in runs.items():
+        got = {}
+        for workers in (None, 1, 4):
+            pools.clear()
+            got[workers] = run(workers)
+            if backend == "numba":
+                assert pools == [], name
+            else:  # one worker samples without a pool
+                assert max(pools, default=1) == (workers or 16), (name, pools)
+        for workers in (1, 4):
+            assert got[workers].tobytes() == got[None].tobytes(), (name, workers)
+
+
+@pytest.mark.parametrize("max_workers", [0, -1, 1.5])
+def test_max_workers_validated(max_workers):
+    """The fast method rejects worker counts ThreadPoolExecutor would."""
+    with pytest.raises(ValueError, match="max_workers"):
+        compute.p_values([0.5], [[2, 10]], 10, 0, max_workers=max_workers)
+    with pytest.raises(ValueError, match="max_workers"):
+        nulls.map_pvalues(
+            [0.5], [0, 1], [0], [1], CONFS[:1], 10, 0, max_workers=max_workers
+        )
 
 
 def test_map_fast_vs_legacy(tmp_path):

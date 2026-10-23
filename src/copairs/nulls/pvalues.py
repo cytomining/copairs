@@ -37,13 +37,20 @@ def _count_ge_host(null, thr, ptr, counts):
         counts[lo:hi] += np.cumsum(hist[::-1])[::-1][1:]
 
 
-def _prepare(scores, conf_ix, confs, null_size, seed, backend):
+def _check_max_workers(max_workers: int | None) -> None:
+    """Raise ValueError unless ``max_workers`` is None or a positive integer."""
+    if max_workers is not None and (int(max_workers) != max_workers or max_workers < 1):
+        raise ValueError(f"max_workers must be a positive integer, got {max_workers}")
+
+
+def _prepare(scores, conf_ix, confs, null_size, seed, backend, max_workers):
     """Thresholds, checked inputs and the null plan shared by the p-value functions."""
     thr = tie_thresholds(scores)
     conf_ix = np.asarray(conf_ix, dtype=np.int64)
     if len(conf_ix) and (conf_ix.min() < 0 or conf_ix.max() >= len(confs)):
         raise ValueError(f"conf_ix must index the {len(confs)} rows of confs")
     null_size = check_null_size(null_size)
+    _check_max_workers(max_workers)
     backend = resolve_backend(backend)
     plan = null_plan(confs, resolve_seed(seed))
     return thr, conf_ix, null_size, backend, plan
@@ -58,6 +65,7 @@ def ap_pvalues(
     backend: str = "auto",
     budget_bytes: int = DEFAULT_BUDGET,
     progress_bar: bool = False,
+    max_workers: int | None = None,
 ) -> np.ndarray:
     """P-value of each AP score against the null of its configuration.
 
@@ -80,11 +88,15 @@ def ap_pvalues(
         NumPy sampler's temporaries.
     progress_bar : bool
         Show a progress bar over chunks.
+    max_workers : int, optional
+        Threads of the NumPy sampler (default: the CPUs this process may run
+        on). The Numba backend uses Numba's threads (``NUMBA_NUM_THREADS`` or
+        ``numba.set_num_threads``). P-values do not depend on the threads.
     """
     if len(conf_ix) != len(scores):
         raise ValueError(f"{len(scores)} scores but {len(conf_ix)} conf_ix")
     thr, conf_ix, null_size, backend, plan = _prepare(
-        scores, conf_ix, confs, null_size, seed, backend
+        scores, conf_ix, confs, null_size, seed, backend, max_workers
     )
     order = np.lexsort((thr, conf_ix))
     thr = thr[order]
@@ -105,7 +117,9 @@ def ap_pvalues(
     for b, start, size in progress(work, n_work, progress_bar, "AP null"):
         sl = slice(b, min(b + batch, len(confs)))
         part = tuple(a[sl] for a in plan)
-        null = _ap_nulls(part, size, start, backend, np.float64, budget_bytes)
+        null = _ap_nulls(
+            part, size, start, backend, np.float64, budget_bytes, max_workers
+        )
         count(null, thr, ptr[sl.start : sl.stop + 1], counts)
         del null  # free this chunk before sampling the next
     pvals = np.empty(len(thr), dtype=np.float64)
@@ -141,6 +155,7 @@ def map_pvalues(
     backend: str = "auto",
     budget_bytes: int = DEFAULT_BUDGET,
     progress_bar: bool = False,
+    max_workers: int | None = None,
 ) -> np.ndarray:
     """P-value of each group's mAP against the mean of its members' AP nulls.
 
@@ -151,7 +166,7 @@ def map_pvalues(
     ``sum_e conf_cnt[e] * AP_{conf_ix[e]}(j) / sum_e conf_cnt[e]`` and
     ``p_g = (1 + #{null_g >= thr_g}) / (null_size + 1)``, with ``thr_g`` from
     :func:`tie_thresholds`. Counts must be non-negative, and every group needs
-    at least one member.
+    at least one member. Other parameters are those of :func:`ap_pvalues`.
     """
     ptr = np.asarray(ptr, dtype=np.int64)
     conf_cnt = np.asarray(conf_cnt, dtype=np.int64)
@@ -175,7 +190,7 @@ def map_pvalues(
             f"{len(map_scores)} mAP scores but {len(ptr) - 1} groups in ptr"
         )
     thr, conf_ix, null_size, backend, plan = _prepare(
-        map_scores, conf_ix, confs, null_size, seed, backend
+        map_scores, conf_ix, confs, null_size, seed, backend, max_workers
     )
     if len(thr) == 0:
         return np.zeros(0, dtype=np.float64)
@@ -190,7 +205,9 @@ def map_pvalues(
     for start, size in progress(
         chunks(null_size, chunk), n_work, progress_bar, "mAP null"
     ):
-        null = _ap_nulls(plan, size, start, backend, np.float64, budget_bytes)
+        null = _ap_nulls(
+            plan, size, start, backend, np.float64, budget_bytes, max_workers
+        )
         kernel(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
         del null  # free this chunk before sampling the next
     return (counts + 1) / (null_size + 1)

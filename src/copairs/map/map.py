@@ -51,7 +51,11 @@ def get_map_pvalue(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+        Number of threads: of the legacy method's p-value loop (default defined
+        by tqdm's `thread_map`), and of the fast method's NumPy backend
+        (default: the CPUs this process may run on). The Numba backend uses
+        Numba's threads, set by ``NUMBA_NUM_THREADS`` or
+        ``numba.set_num_threads``. P-values do not depend on the threads.
     cache_dir : str or Path
         Location to save the cache (``method="legacy"`` only).
     method : str
@@ -167,6 +171,7 @@ def _copied_pvalues(
             seed,
             backend=backend,
             progress_bar=progress_bar,
+            max_workers=max_workers,
         )
 
     logger.info("Computing null_dist...")
@@ -233,7 +238,7 @@ def mean_average_precision(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+        Number of threads, see :func:`get_map_pvalue`.
     cache_dir : str or Path
         Location to save the cache (``method="legacy"`` only).
     method : str
@@ -329,7 +334,7 @@ def mean_average_precision_hierarchical(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Number of workers used. Default defined by tqdm's `thread_map`.
+        Number of threads, see :func:`get_map_pvalue`.
     cache_dir : str or Path
         Location to save the cache (``method="legacy"`` only).
     method : str

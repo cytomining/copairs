@@ -365,13 +365,22 @@ def ap_nulls(
     return _ap_nulls(plan, null_size, start, backend, dtype)
 
 
-def _ap_nulls(plan, null_size, start, backend, dtype, budget_bytes=DEFAULT_BUDGET):
+def _ap_nulls(
+    plan,
+    null_size,
+    start,
+    backend,
+    dtype,
+    budget_bytes=DEFAULT_BUDGET,
+    max_workers=None,
+):
     """:func:`ap_nulls` from a :func:`null_plan` and a resolved backend.
 
     The NumPy backend samples blocks of configurations' samples on a thread
-    pool of :func:`_numpy_workers` threads, sized so the blocks in flight keep
-    their temporaries within ``budget_bytes``; the output is allocated on top
-    of that.
+    pool of at most ``max_workers`` threads (default :func:`_numpy_workers`),
+    sized so the blocks in flight keep their temporaries within
+    ``budget_bytes``; the output is allocated on top of that. The Numba
+    backend runs on Numba's threads. Samples do not depend on the threads.
     """
     dtype = np.dtype(dtype)
     if dtype not in (np.float32, np.float64):
@@ -383,7 +392,9 @@ def _ap_nulls(plan, null_size, start, backend, dtype, budget_bytes=DEFAULT_BUDGE
         return out
     # Each worker holds one block, so their temporaries together fit the budget.
     slots = max(1, budget_bytes // _NUMPY_SAMPLE_BYTES)
-    workers = max(1, min(_numpy_workers(), slots // _MIN_BLOCK))
+    if max_workers is None:
+        max_workers = _numpy_workers()
+    workers = max(1, min(int(max_workers), slots // _MIN_BLOCK))
     # Split configurations into blocks when there are fewer than workers.
     per_conf = -(-workers // max(len(num_pos), 1))
     block = min(slots // workers, max(_MIN_BLOCK, -(-null_size // per_conf)))

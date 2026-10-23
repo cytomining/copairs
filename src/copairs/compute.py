@@ -630,7 +630,9 @@ def _fast_null_dists(confs, null_size, seed, backend) -> np.ndarray:
     return out
 
 
-def _fast_p_values(ap_scores, confs, rev_ix, null_size, seed, backend, progress_bar):
+def _fast_p_values(
+    ap_scores, confs, rev_ix, null_size, seed, backend, progress_bar, max_workers
+):
     """:func:`p_values` with ``method="fast"``."""
     ranked = ~_without_positives(confs)
     pvals = np.ones(len(rev_ix), dtype=np.float32)
@@ -644,6 +646,7 @@ def _fast_p_values(ap_scores, confs, rev_ix, null_size, seed, backend, progress_
         seed,
         backend=backend,
         progress_bar=progress_bar,
+        max_workers=max_workers,
     )
     return pvals
 
@@ -656,6 +659,7 @@ def p_values(
     progress_bar: bool = True,
     method: str = "fast",
     backend: str = "auto",
+    max_workers: Optional[int] = None,
 ):
     """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
@@ -682,6 +686,11 @@ def p_values(
         method and counts null scores ``>= score`` exactly.
     backend : str
         Backend of the fast method, see :func:`get_null_dists`.
+    max_workers : int, optional
+        Threads of the fast method's NumPy backend (default: the CPUs this
+        process may run on). The Numba backend uses Numba's threads, set by
+        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``. P-values do not
+        depend on the threads.
 
     Returns
     -------
@@ -693,7 +702,14 @@ def p_values(
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
     if method == "fast":
         return _fast_p_values(
-            ap_scores, confs, rev_ix.ravel(), null_size, seed, backend, progress_bar
+            ap_scores,
+            confs,
+            rev_ix.ravel(),
+            null_size,
+            seed,
+            backend,
+            progress_bar,
+            max_workers,
         )
 
     # Generate null distributions for each unique configuration
