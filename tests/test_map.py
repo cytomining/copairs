@@ -341,6 +341,7 @@ def test_mean_average_precision_independent_of_other_groups(tmp_path):
         progress_bar=False,
         null="copied",  # the cache belongs to the copied null
     )
+    kwargs["method"] = "legacy"  # the method that caches
     shared = tmp_path / "shared"
     both = mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
     cached = list(shared.rglob("*.npy"))
@@ -376,6 +377,7 @@ def test_mean_average_precision_unknown_cpu_count(tmp_path, monkeypatch):
         progress_bar=False,
         cache_dir=tmp_path,
         null="copied",  # a mock AP table has no pairs to permute
+        method="legacy",  # the method that runs a thread pool
     )
     assert len(result) == 2
 

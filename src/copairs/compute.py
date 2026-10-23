@@ -11,6 +11,10 @@ import numpy as np
 from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
 
+from copairs import nulls
+from copairs.nulls.common import resolve_seed, check_null_size
+from copairs.nulls.backend import check_method
+
 
 def parallel_map(
     par_func: Callable[[int], None],
@@ -548,6 +552,8 @@ def get_null_dists(
     seed: int,
     cache_dir: Optional[Union[str, Path]] = None,
     progress_bar: bool = True,
+    method: str = "fast",
+    backend: str = "auto",
 ) -> np.ndarray:
     """Generate null distributions for each configuration of positive and total pairs.
 
@@ -562,15 +568,33 @@ def get_null_dists(
         Random seed for reproducibility. Each configuration's null is seeded by
         ``(seed, num_pos, total)``, so it does not depend on the other
         configurations. With ``None``, nulls are fresh draws and are not cached.
+    cache_dir : str or Path, optional
+        Cache location of ``method="legacy"`` (default ``~/.copairs``). The fast
+        method regenerates nulls deterministically and does not cache them.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    method : str
+        ``"fast"`` (default) samples each null exactly with
+        :func:`copairs.nulls.ap_nulls`: sample ``j`` depends only on
+        ``(seed, num_pos, total, j)`` (seed in ``[0, 2**64)``), in O(1) memory
+        per sample. ``"legacy"`` permutes a ``null_size x total`` matrix per
+        configuration and caches it, as copairs 0.5.5 did; its nulls are those
+        of 0.5.5 within Monte Carlo error, not bitwise, since each
+        configuration is now seeded by its values rather than its position.
+    backend : str
+        Backend of the fast method: ``"auto"`` (default), ``"numba"`` or
+        ``"numpy"``. All return identical values, so ``"auto"`` picks
+        ``"numba"`` whenever it is installed.
 
     Returns
     -------
     np.ndarray
-        A 2D array where each row corresponds to a null distribution for a specific
-        configuration.
+        A 2D float32 array where each row corresponds to a null distribution for
+        a specific configuration. Configurations without positives get NaN.
     """
+    check_method(method, backend)
+    if method == "fast":
+        return _fast_null_dists(confs, null_size, seed, backend)
     cache_dir = Path.home() / ".copairs" if cache_dir is None else Path(cache_dir)
     cache_dir = cache_dir / f"seed{seed}" / f"ns{null_size}"
     if seed is not None:
@@ -591,12 +615,64 @@ def get_null_dists(
     return null_dists
 
 
+def _without_positives(confs: np.ndarray) -> np.ndarray:
+    """Mask of the ``(n, 2)`` configurations with no positives (undefined AP).
+
+    The legacy method gives them NaN nulls and p-values of 1; sample ``j`` of
+    any other configuration does not depend on them.
+    """
+    return (confs[:, 0] == 0) & (confs[:, 1] >= 0)
+
+
+def _fast_null_dists(confs, null_size, seed, backend) -> np.ndarray:
+    """:func:`get_null_dists` with ``method="fast"``."""
+    # Like the legacy method, take (n, 2) rows, or no configurations at all.
+    confs = np.asarray(confs)
+    if confs.size == 0:
+        confs = confs.reshape(0, 2)
+    elif confs.ndim != 2 or confs.shape[1] != 2:
+        raise ValueError(f"confs must have shape (n, 2), got {confs.shape}")
+    null_size = check_null_size(null_size)
+    seed = resolve_seed(seed)
+    ranked = ~_without_positives(confs)
+    if ranked.all():
+        return nulls.ap_nulls(confs, null_size, seed, backend=backend)
+    out = np.full((len(confs), null_size), np.nan, dtype=np.float32)
+    if ranked.any():
+        out[ranked] = nulls.ap_nulls(confs[ranked], null_size, seed, backend=backend)
+    return out
+
+
+def _fast_p_values(
+    ap_scores, confs, rev_ix, null_size, seed, backend, progress_bar, max_workers
+):
+    """:func:`p_values` with ``method="fast"``."""
+    ranked = ~_without_positives(confs)
+    pvals = np.ones(len(rev_ix), dtype=np.float32)
+    rows = ranked[rev_ix]
+    index = np.cumsum(ranked) - 1  # configuration -> row of confs[ranked]
+    pvals[rows] = nulls.ap_pvalues(
+        np.asarray(ap_scores)[rows],
+        index[rev_ix[rows]],
+        confs[ranked],
+        null_size,
+        seed,
+        backend=backend,
+        progress_bar=progress_bar,
+        max_workers=max_workers,
+    )
+    return pvals
+
+
 def p_values(
     ap_scores: np.ndarray,
     null_confs: np.ndarray,
     null_size: int,
     seed: int,
     progress_bar: bool = True,
+    method: str = "fast",
+    backend: str = "auto",
+    max_workers: Optional[int] = None,
 ):
     """Calculate p-values for an array of Average Precision (AP) scores using a null distribution.
 
@@ -614,17 +690,45 @@ def p_values(
         distribution.
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
+    method : str
+        ``"fast"`` (default) streams exact null samples (see
+        :func:`get_null_dists`) in bounded memory, without a cache, and counts
+        null scores ``>= score``, treating values within the scores' rounding
+        as ties (see :func:`copairs.nulls.tie_thresholds`). ``"legacy"``
+        materializes and caches the nulls of :func:`get_null_dists`'s legacy
+        method and counts null scores ``>= score`` exactly.
+    backend : str
+        Backend of the fast method, see :func:`get_null_dists`.
+    max_workers : int, optional
+        Threads of the fast method's NumPy backend (default: the CPUs this
+        process may run on). The Numba backend uses Numba's threads, set by
+        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``. P-values do not
+        depend on the threads.
 
     Returns
     -------
     np.ndarray
         An array of p-values corresponding to the input AP scores.
     """
+    check_method(method, backend)
     # Identify unique configurations and their indices
     confs, rev_ix = np.unique(null_confs, axis=0, return_inverse=True)
+    if method == "fast":
+        return _fast_p_values(
+            ap_scores,
+            confs,
+            rev_ix.ravel(),
+            null_size,
+            seed,
+            backend,
+            progress_bar,
+            max_workers,
+        )
 
     # Generate null distributions for each unique configuration
-    null_dists = get_null_dists(confs, null_size, seed, progress_bar=progress_bar)
+    null_dists = get_null_dists(
+        confs, null_size, seed, progress_bar=progress_bar, method="legacy"
+    )
 
     # Sort null distributions for efficient p-value computation
     null_dists.sort(axis=1)

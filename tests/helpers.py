@@ -6,6 +6,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
+from copairs import nulls
 from copairs.matching import ColumnList
 
 SEED = 0
@@ -95,3 +96,34 @@ def query_meta(others: int = 0) -> pd.DataFrame:
     """
     groups = ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * others
     return pd.DataFrame({"g": groups})
+
+
+def brute_ap_pvalues(scores, conf_ix, confs, null_size, seed):
+    """Count null values >= each score over the materialized nulls."""
+    null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
+    num = (null[conf_ix] >= nulls.tie_thresholds(scores)[:, None]).sum(axis=1)
+    return (num + 1) / (null_size + 1)
+
+
+def brute_group_nulls(ptr, conf_ix, conf_cnt, confs, null_size, seed):
+    """Materialized mAP nulls: each group's mean of its members' AP nulls.
+
+    Group ``g`` has ``conf_cnt[e]`` members with configuration
+    ``confs[conf_ix[e]]`` for ``e`` in ``ptr[g]:ptr[g + 1]``; members sharing a
+    configuration share null samples.
+    """
+    null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
+    group_null = np.empty((len(ptr) - 1, null_size))
+    for g in range(len(ptr) - 1):
+        acc = np.zeros(null_size)
+        for e in range(ptr[g], ptr[g + 1]):
+            acc += conf_cnt[e] * null[conf_ix[e]]
+        group_null[g] = acc / np.sum(conf_cnt[ptr[g] : ptr[g + 1]])
+    return group_null
+
+
+def brute_map_pvalues(map_scores, ptr, conf_ix, conf_cnt, confs, null_size, seed):
+    """Count group null values >= each mAP over :func:`brute_group_nulls`."""
+    group_null = brute_group_nulls(ptr, conf_ix, conf_cnt, confs, null_size, seed)
+    num = (group_null >= nulls.tie_thresholds(map_scores)[:, None]).sum(axis=1)
+    return (num + 1) / (null_size + 1)

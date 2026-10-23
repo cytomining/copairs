@@ -10,9 +10,10 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 
-from copairs import compute
-from copairs.nulls import joint, permutation, tie_thresholds
+from copairs import nulls, compute
+from copairs.nulls import joint, permutation
 from copairs.methods import check_null
+from copairs.nulls.backend import check_method
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     check_hierarchical_by,
@@ -35,6 +36,8 @@ def get_map_pvalue(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    method: str = "fast",
+    backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
     pairs: RankPairs | None = None,
@@ -62,11 +65,31 @@ def get_map_pvalue(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Threads that compute the copied null's p-values or run the
-        permutation null's groups. Default defined by
-        `concurrent.futures.ThreadPoolExecutor`.
+        Threads that run the permutation null's groups (default defined by
+        `concurrent.futures.ThreadPoolExecutor`), compute the legacy copied
+        null's p-values (default defined by tqdm's `thread_map`), or run the
+        fast copied null's NumPy backend (default: the CPUs this process may
+        run on). The Numba backend uses Numba's threads, set by
+        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``. P-values do not
+        depend on the threads.
     cache_dir : str or Path
-        Location to save the cache of the copied null's AP samples.
+        Location to save the cache of the copied null's AP samples
+        (``method="legacy"`` only).
+    method : str
+        Method of the copied null. Both average the members' AP nulls,
+        members with equal pair counts sharing samples, as copairs 0.5.5 did.
+        ``"fast"`` (default) samples them exactly and streams them in bounded
+        memory, without a cache (:func:`copairs.nulls.map_pvalues`), and
+        counts group nulls ``>= mAP``, treating values within the scores'
+        rounding as ties (see :func:`copairs.nulls.tie_thresholds`).
+        ``"legacy"`` materializes the nulls of
+        :func:`copairs.compute.get_null_dists` and counts group nulls
+        ``> mAP``, as copairs 0.5.5 did, which gives too small p-values when
+        the mAP equals an atom of the null (e.g. perfect retrieval).
+    backend : str
+        Backend of the fast copied null: ``"auto"`` (default), ``"numba"`` or
+        ``"numpy"``. All give identical p-values, so ``"auto"`` picks
+        ``"numba"`` whenever it is installed.
     pos_pairs : np.ndarray, optional
         The `(n_pairs, 2)` positive pairs used to compute the AP scores,
         indexing the rows of the frame `average_precision` returned (its
@@ -123,6 +146,7 @@ def get_map_pvalue(
         - `indices`: List of indices in the original ap_scores for this group.
 
     """
+    check_method(method, backend)
     null = check_null(null)
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
@@ -182,6 +206,8 @@ def get_map_pvalue(
         cache_dir=cache_dir,
         progress_bar=progress_bar,
         max_workers=max_workers,
+        method=method,
+        backend=backend,
     )
 
     if null == "copied":
@@ -242,34 +268,66 @@ def _check_row_index(index: pd.Index) -> None:
 
 
 def _copied_pvalues(
-    scores, groups, ap_scores, null_size, seed, cache_dir, progress_bar, max_workers
+    scores,
+    groups,
+    ap_scores,
+    null_size,
+    seed,
+    cache_dir,
+    progress_bar,
+    max_workers,
+    method="fast",
+    backend="auto",
 ):
     """P-values against the mean of the members' AP nulls, as in copairs <= 0.5.5.
 
-    ``groups`` lists each group's rows of ``ap_scores``. Each configuration's
-    AP null comes from :func:`compute.get_null_dists`, so members with equal
-    pair counts share samples. Null mAPs count when ``>=`` the score, within
-    float32 rounding: the AP samples are float32, so a null mAP equal to the
-    score can lie up to that rounding below it.
+    ``groups`` lists each group's rows of ``ap_scores``; members with equal pair
+    counts share null samples. ``method="fast"`` streams the exact nulls of
+    :func:`nulls.map_pvalues` and counts ties; ``"legacy"`` averages the nulls
+    of :func:`compute.get_null_dists` and counts null mAPs ``>`` the score.
     """
-    if not groups:
-        return np.zeros(0, dtype=np.float64)
-    rows = np.unique(np.concatenate(groups))
+    members = np.concatenate(groups) if groups else np.zeros(0)
+    members = members.astype(np.int64)
+    rows = np.unique(members)
     null_confs = ap_scores.loc[rows, ["n_pos_pairs", "n_total_pairs"]].values
     null_confs, conf_ix = np.unique(null_confs, axis=0, return_inverse=True)
     rev_ix = np.full(len(ap_scores), -1, dtype=np.int64)
     rev_ix[rows] = conf_ix.ravel()
 
+    if method == "fast":
+        logger.info("Computing p-values...")
+        gid = np.repeat(np.arange(len(groups)), [len(ix) for ix in groups])
+        keys, conf_cnt = np.unique(
+            gid * len(null_confs) + rev_ix[members], return_counts=True
+        )
+        ptr = np.searchsorted(keys // len(null_confs), np.arange(len(groups) + 1))
+        return nulls.map_pvalues(
+            scores,
+            ptr,
+            keys % len(null_confs),
+            conf_cnt,
+            null_confs,
+            null_size,
+            seed,
+            backend=backend,
+            progress_bar=progress_bar,
+            max_workers=max_workers,
+        )
+
     logger.info("Computing null_dist...")
     null_dists = compute.get_null_dists(
-        null_confs, null_size, seed=seed, cache_dir=cache_dir, progress_bar=progress_bar
+        null_confs,
+        null_size,
+        seed=seed,
+        cache_dir=cache_dir,
+        progress_bar=progress_bar,
+        method="legacy",
     )
 
-    thresholds = tie_thresholds(np.asarray(scores, dtype=np.float32))
-
     def get_p_value(k):
-        null_dist = null_dists[rev_ix[groups[k]]].mean(axis=0, dtype=np.float64)
-        num = (null_dist >= thresholds[k]).sum()
+        null_dist = null_dists[rev_ix[groups[k]]].mean(axis=0)
+        # A Python float, as copairs 0.5.5 compared: float32 nulls stay float32.
+        num = (null_dist > float(scores[k])).sum()
         return (num + 1) / (null_size + 1)  # Add 1 for stability
 
     logger.info("Computing p-values...")
@@ -294,6 +352,8 @@ def mean_average_precision(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    method: str = "fast",
+    backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
     pairs: RankPairs | None = None,
@@ -321,11 +381,15 @@ def mean_average_precision(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Threads that compute the copied null's p-values or run the
-        permutation null's groups. Default defined by
-        `concurrent.futures.ThreadPoolExecutor`.
+        Number of threads, see `get_map_pvalue`.
     cache_dir : str or Path
-        Location to save the cache of the copied null's AP samples.
+        Location to save the cache of the copied null's AP samples
+        (``method="legacy"`` only).
+    method : str
+        ``"fast"`` (default) or ``"legacy"`` copied null, see
+        `get_map_pvalue`.
+    backend : str
+        Backend of the fast copied null, see `get_map_pvalue`.
     pos_pairs : np.ndarray, optional
         Positive pairs used to compute the AP scores, for ``null="joint"``;
         see `get_map_pvalue`. Needed there when a group's positives are not
@@ -362,6 +426,8 @@ def mean_average_precision(
         progress_bar=progress_bar,
         max_workers=max_workers,
         cache_dir=cache_dir,
+        method=method,
+        backend=backend,
         pos_pairs=pos_pairs,
         null=null,
         pairs=pairs,
@@ -387,6 +453,8 @@ def mean_average_precision_hierarchical(
     progress_bar: bool = True,
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
+    method: str = "fast",
+    backend: str = "auto",
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
     pairs: RankPairs | None = None,
@@ -427,11 +495,15 @@ def mean_average_precision_hierarchical(
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
     max_workers : int
-        Threads that compute the copied null's p-values or run the
-        permutation null's groups. Default defined by
-        `concurrent.futures.ThreadPoolExecutor`.
+        Number of threads, see `get_map_pvalue`.
     cache_dir : str or Path
-        Location to save the cache of the copied null's AP samples.
+        Location to save the cache of the copied null's AP samples
+        (``method="legacy"`` only).
+    method : str
+        ``"fast"`` (default) or ``"legacy"`` copied null, see
+        `get_map_pvalue`.
+    backend : str
+        Backend of the fast copied null, see `get_map_pvalue`.
     pos_pairs : np.ndarray, optional
         Positive pairs used to compute the AP scores, for ``null="joint"``;
         see `get_map_pvalue`. Needed there when a group's positives are not
@@ -472,6 +544,8 @@ def mean_average_precision_hierarchical(
         progress_bar=progress_bar,
         max_workers=max_workers,
         cache_dir=cache_dir,
+        method=method,
+        backend=backend,
         pos_pairs=pos_pairs,
         null=null,
         pairs=pairs,

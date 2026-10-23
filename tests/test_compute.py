@@ -299,6 +299,7 @@ def test_get_null_dists_unseeded_skips_cache(tmp_path):
     """Unseeded nulls are fresh draws and are never written to the cache."""
     confs = np.array([[3, 20], [5, 30]])
     kwargs = dict(null_size=200, seed=None, cache_dir=tmp_path, progress_bar=False)
+    kwargs["method"] = "legacy"  # the method that caches
     first = compute.get_null_dists(confs, **kwargs)
     second = compute.get_null_dists(confs, **kwargs)
     assert list(tmp_path.rglob("*.npy")) == []
