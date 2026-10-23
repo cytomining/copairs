@@ -74,7 +74,7 @@ def normalize_ap(
     M: Union[int, np.ndarray],
     N: Union[int, np.ndarray],
     eps: float = 1e-10,
-    backend: Literal["numpy", "numba", "cuda"] = "numpy",
+    backend: Literal["numpy", "numba"] = "numpy",
 ) -> Union[float, np.ndarray]:
     """Normalize Average Precision scores to be scale-independent.
 
@@ -91,13 +91,11 @@ def normalize_ap(
         Number of negative items for each AP score.
     eps : float
         Small epsilon to avoid division by zero when μ₀ ≈ 1.
-    backend : {"numpy", "numba", "cuda"}
+    backend : {"numpy", "numba"}
         ``"numpy"`` (default) evaluates :func:`expected_ap` for each score.
         ``"numba"`` (install ``copairs[numba]``) evaluates each distinct
         ``(M, N)`` once, with harmonic numbers from one table; results are
-        equal bit for bit. ``"cuda"``, for the GPU backend of
-        :func:`copairs.map.average_precision`, runs as ``"numba"`` (it needs
-        ``copairs[gpu]`` and a CUDA GPU).
+        equal bit for bit.
 
     Returns
     -------
@@ -110,7 +108,7 @@ def normalize_ap(
     - Normalized AP = 1 when performance is perfect
     - Negative values indicate worse-than-random performance
     """
-    fastap = backend_module(backend)
+    fastap = backend_module(backend, gpu=False)
 
     # Handle scalar or array inputs
     is_scalar = np.isscalar(ap)

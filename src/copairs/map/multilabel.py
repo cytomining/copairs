@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs._backend import backend_module
+from copairs._backend import cpu_backend, backend_module
 from copairs.matching import UnpairedException, _unique_pairs, _multilabel_matcher
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
@@ -151,7 +151,7 @@ def average_precision(
             {
                 "average_precision": ap,
                 "normalized_average_precision": normalize_ap(
-                    ap, num_pos, total - num_pos, backend=backend
+                    ap, num_pos, total - num_pos, backend=cpu_backend(backend)
                 ),
                 "n_pos_pairs": num_pos,
                 "n_total_pairs": total,

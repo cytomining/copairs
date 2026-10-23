@@ -547,7 +547,7 @@ def find_pairs_multilabel(
     sameby: Union[str, ColumnList],
     diffby: Union[str, ColumnList],
     multilabel_col: str,
-    backend: Literal["numpy", "numba", "cuda"] = "numpy",
+    backend: Literal["numpy", "numba"] = "numpy",
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     Find pairs of rows in a DataFrame that have the same or different values in certain columns.
@@ -564,15 +564,12 @@ def find_pairs_multilabel(
         List of column names to consider for finding different values.
     multilabel_col : str
         Name of the column containing multiple labels.
-    backend : {"numpy", "numba", "cuda"}
+    backend : {"numpy", "numba"}
         ``"numpy"`` (default) matches in DuckDB SQL. ``"numba"`` (install
         ``copairs[numba]``) enumerates pairs through an inverted label index
         when the input allows it (a DataFrame with a default index, list cells
         without missing or repeated labels, one label type), and uses SQL
         otherwise. Both find the same pairs, possibly in a different order.
-        ``"cuda"``, for the GPU backend of
-        :func:`copairs.map.multilabel.average_precision`, runs as ``"numba"``
-        (it needs ``copairs[gpu]`` and a CUDA GPU).
 
     Returns
     -------
@@ -585,7 +582,9 @@ def find_pairs_multilabel(
     -----
     The function asserts that `multilabel_col` is present in either `sameby` or `diffby`.
     """
-    find = _multilabel_matcher(dframe, multilabel_col, backend_module(backend))
+    find = _multilabel_matcher(
+        dframe, multilabel_col, backend_module(backend, gpu=False)
+    )
     return find(sameby, diffby)
 
 

@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from copairs import nulls, compute
+from copairs import nulls, compute, matching
 from copairs.map import mean_average_precision
 from copairs.nulls import backend, pvalues, sampler
 from tests.helpers import (
@@ -24,6 +24,7 @@ from tests.helpers import (
     brute_map_pvalues,
 )
 from tests.markers import GPU, HAS_NUMBA, needs_gpu, needs_cupy
+from copairs.map.normalization import normalize_ap
 
 CONFS = np.array(
     [[1, 1], [1, 7], [2, 2], [3, 10], [5, 20], [9, 49], [40, 45], [99, 1099], [3, 1000]]
@@ -42,9 +43,8 @@ import sys
 import importlib.util
 import numpy as np
 import pandas as pd
-from copairs import nulls, compute, matching
+from copairs import nulls, compute
 from copairs.map import average_precision, mean_average_precision, multilabel
-from copairs.map.normalization import normalize_ap
 
 FRAME = pd.DataFrame({"g": ["a", "a"], "average_precision": [0.5, 0.6],
                       "normalized_average_precision": 0.0, "n_pos_pairs": 1,
@@ -68,8 +68,6 @@ AP_CALLS = [
     "average_precision(META, np.eye(4), ['l'], ['p'], [], ['l'], backend='cuda')",
     "multilabel.average_precision(LABELS, np.eye(4), ['l'], ['p'], [], ['l'], 'l',"
     " backend='cuda')",
-    "matching.find_pairs_multilabel(LABELS, ['l'], ['p'], 'l', backend='cuda')",
-    "normalize_ap(np.array([0.5]), 3, 10, backend='cuda')",
 ]
 if importlib.util.find_spec("numba"):
     from copairs import fastap
@@ -149,6 +147,19 @@ def test_auto_skips_a_cupy_that_fails_to_import(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_cpu_steps_take_no_cuda_backend():
+    """normalize_ap and find_pairs_multilabel run on the CPU: "cuda" is no backend.
+
+    The AP functions give them "numba" for their own "cuda", so neither asks
+    for a GPU or CuPy.
+    """
+    frame = pd.DataFrame({"l": [["a"], ["a", "b"], ["b"]], "p": [0, 1, 2]})
+    with pytest.raises(ValueError, match="either 'numpy' or 'numba'"):
+        normalize_ap(0.5, 2, 3, backend="cuda")
+    with pytest.raises(ValueError, match="either 'numpy' or 'numba'"):
+        matching.find_pairs_multilabel(frame, ["l"], [], "l", backend="cuda")
+
+
 @needs_cupy
 def test_cuda_ap_stage_without_numba_names_the_extra():
     """The CUDA AP stage runs some steps on Numba, so without it "cuda" names the extra.
@@ -158,7 +169,7 @@ def test_cuda_ap_stage_without_numba_names_the_extra():
     check = (
         "from copairs import _cuda\n"
         "_cuda.require = lambda: None\n"
-        "assert len(AP_CALLS) == 4\n"
+        "assert len(AP_CALLS) == 2\n"
         "raises(ImportError, 'Numba', \"pip install 'copairs[gpu]'\", calls=AP_CALLS)\n"
     )
     result = run_isolated(without_modules("numba", "llvmlite") + _SETUP + check)

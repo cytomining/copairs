@@ -118,10 +118,10 @@ We provide examples demonstrating how to use copairs for:
 
 `map.average_precision`, `map.multilabel.average_precision`,
 `matching.find_pairs_multilabel` and `map.normalization.normalize_ap` take
-`backend="numpy"` (default), `"numba"` or `"cuda"` (see
-[GPU acceleration](#gpu-acceleration-optional)). `"numpy"` has no optional
-dependencies and gives the results of copairs <= 0.5.5. `"numba"` needs the
-`numba` extra, which is imported only when requested:
+`backend="numpy"` (default) or `"numba"`, and the two AP functions also
+`"cuda"` (see [GPU acceleration](#gpu-acceleration-optional)). `"numpy"`
+has no optional dependencies and gives the results of copairs <= 0.5.5.
+`"numba"` needs the `numba` extra, which is imported only when requested:
 
 ```python
 ap = copairs.map.average_precision(meta, feats, ..., backend="numba")
