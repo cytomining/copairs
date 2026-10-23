@@ -653,12 +653,13 @@ def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
     """Groups sharing pools give the same p-values on 1 or 4 threads, or alone.
 
     Under the Numba backend, given 2 Numba threads, one thread runs each
-    group's draws on Numba's threads and 4 threads run them on their own
-    (see test_concurrent_calls_on_the_workqueue_layer for user threads).
+    group's draws on Numba's threads (the parallel kernel) and 4 threads
+    run them on their own (see test_concurrent_calls_on_the_workqueue_layer
+    for user threads).
     """
     ap = shared_pool_aps()
     args = (["g"], 300, 0.05, 0)
-    built, workers, parallel = [], [], []
+    built, workers, parallel, launched = [], [], [], []
 
     class CountedPool(permutation._Pool):
         def __init__(self, blocks, *args):
@@ -675,27 +676,33 @@ def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
     if backend == "numba":
         from copairs.nulls import _numba
 
-        maps = _numba.permutation_maps
+        maps, launch = _numba.permutation_maps, _numba._launch
 
         def recorded(*args):
             parallel.append(args[-1])
             return maps(*args)
 
+        def recorded_launch(kernel, *args):
+            launched.append(kernel is _numba._permutation_maps_parallel)
+            return launch(kernel, *args)
+
         monkeypatch.setattr(_numba, "threads", lambda: 2)
         monkeypatch.setattr(_numba, "permutation_maps", recorded)
+        monkeypatch.setattr(_numba, "_launch", recorded_launch)
     p, kernels = [], []
     for w in (1, 4):
         parallel.clear()
+        launched.clear()
         p.append(
             mean_average_precision(
                 ap, *args, progress_bar=False, max_workers=w, backend=backend
             )["p_value"].tolist()
         )
-        kernels.append(set(parallel))
+        kernels.append((set(parallel), set(launched)))
     assert built == [2] * 6  # each run builds each of the 3 pools once
     assert workers == [1, 4]
-    if backend == "numba":
-        assert kernels == [{True}, {False}]
+    if backend == "numba":  # (draws in parallel, parallel kernels launched)
+        assert kernels == [({True}, {True}), ({False}, set())]
     alone = [
         mean_average_precision(
             ap[ap["g"] == g], *args, progress_bar=False, backend=backend
