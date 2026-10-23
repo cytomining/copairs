@@ -70,16 +70,28 @@ BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
 
 
 class _FeatureSimilarity:
-    """``pairs -> similarities`` of an AP call's features, as its AP stage computed them."""
+    """``pairs -> similarities`` of an AP call's features, as its AP stage computed them.
+
+    Batches of ``batch_size`` pairs go through the same pairwise function as
+    in :func:`copairs.compute.get_similarity_fn`, one after another in the
+    calling thread: the nulls call it from their own worker threads.
+    """
 
     def __init__(self, feats, distance, batch_size):
         self.feats = feats
         self.distance = distance
         self.batch_size = batch_size
-        self._fn = compute.get_similarity_fn(distance, progress_bar=False)
+        self._fn = compute.pairwise_similarity_fn(distance)
 
     def __call__(self, pairs):
-        return self._fn(self.feats, np.asarray(pairs), self.batch_size)
+        pairs = np.asarray(pairs)
+        out = np.empty(len(pairs), dtype=np.float32)
+        for lo in range(0, len(pairs), self.batch_size):
+            batch = pairs[lo : lo + self.batch_size]
+            out[lo : lo + len(batch)] = self._fn(
+                self.feats[batch[:, 0]], self.feats[batch[:, 1]]
+            )
+        return out
 
 
 def check_recomputable(similarity) -> None:

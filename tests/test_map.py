@@ -562,6 +562,31 @@ def test_rank_pairs_compare_by_identity():
     assert len({pairs, again, pairs}) == 2
 
 
+@pytest.mark.parametrize("distance", ["cosine", "correlation", "cityblock"])
+def test_pair_similarity_runs_in_the_calling_thread(distance, monkeypatch):
+    """The pairs' similarity starts no thread pool and matches the AP stage's."""
+    meta = query_meta(others=5)
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 6))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], batch_size=7, distance=distance,
+        progress_bar=False, return_pairs=True,
+    )  # fmt: skip
+    similarity = compute.get_similarity_fn(distance, progress_bar=False)
+    expected = similarity(feats, pairs.neg, 7)
+    ap = ap[ap["g"] != "other"]
+    before = mean_average_precision(ap, ["g"], 200, 0.05, SEED, progress_bar=False)
+
+    def no_pool(*args, **kwargs):
+        raise AssertionError("parallel_map called")
+
+    monkeypatch.setattr(compute, "parallel_map", no_pool)
+    got = pairs.similarity(pairs.neg)
+    assert got.dtype == expected.dtype
+    np.testing.assert_array_equal(got, expected)
+    after = mean_average_precision(ap, ["g"], 200, 0.05, SEED, progress_bar=False)
+    assert after["p_value"].tolist() == before["p_value"].tolist()
+
+
 def test_map_pvalue_rejects_misaligned_pos_pairs():
     """pos_pairs from a meta whose index has gaps no longer index ap_scores."""
     rng = np.random.default_rng(SEED)

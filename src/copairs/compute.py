@@ -314,6 +314,16 @@ def get_similarity_fn(
     >>> distance_fn = get_distance_fn("cosine")
     >>> similarity_scores = distance_fn(x_sample, y_sample)
     """
+    # Wrap the distance function for efficient batch processing
+    return batch_processing(pairwise_similarity_fn(distance), progress_bar=progress_bar)
+
+
+def pairwise_similarity_fn(distance: Union[str, Callable]) -> Callable:
+    """Return the ``(x_sample, y_sample) -> similarities`` function of ``distance``.
+
+    The unbatched function :func:`get_similarity_fn` wraps; ``distance`` is
+    as there.
+    """
     # Dictionary of supported similarity functions
     similarity_functions = {
         "abs_cosine": pairwise_abs_cosine,
@@ -342,9 +352,7 @@ def get_similarity_fn(
     else:
         # Raise an error if neither a string nor a callable is provided
         raise ValueError("Distance must be either a string or a callable object.")
-
-    # Wrap the distance function for efficient batch processing
-    return batch_processing(similarity_fn, progress_bar=progress_bar)
+    return similarity_fn
 
 
 def random_binary_matrix(n, m, k, rng):
