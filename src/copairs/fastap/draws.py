@@ -116,10 +116,10 @@ def draw_average_precisions(
         GPU memory on the CUDA backend).
     backend : {"numba", "cuda"}
         ``"cuda"`` (``pip install 'copairs[gpu]'``) computes similarities and
-        APs on the GPU, except for draws of more than
-        :data:`copairs.fastap.cuda.MAX_DRAW_QUERIES` queries, which run on
-        Numba. Its batched similarities sum in another order, so they match
-        Numba's to float32 rounding and near-ties can rank differently.
+        APs on the GPU, except for draws of more than 6144 queries, whose keys
+        do not fit its kernel's shared memory: those run on Numba. Its batched
+        similarities sum in another order, so they match Numba's to float32
+        rounding and near-ties can rank differently.
 
     Returns
     -------
@@ -128,12 +128,12 @@ def draw_average_precisions(
     """
     if backend not in ("numba", "cuda"):
         raise ValueError("backend must be either 'numba' or 'cuda'.")
+    kernels = backend_module(backend)
     queries = np.asarray(queries, dtype=np.int64)
     references = np.asarray(references, dtype=np.int64)
     if queries.ndim != 2 or references.ndim != 2 or len(queries) != len(references):
         raise ValueError("queries and references must be (n_draws, k) and (n_draws, m)")
-    n_draws, k = queries.shape
-    m = references.shape[1]
+    k = queries.shape[1]
     if k < 2:
         raise ValueError(f"need at least 2 queries per draw, got {k}")
     for idx in (queries, references):
@@ -141,11 +141,17 @@ def draw_average_precisions(
             raise ValueError(f"indices must address the {len(feats)} rows of feats")
     idx = np.concatenate([queries, references], axis=1)
     feats, idx = _drawn_rows(np.asarray(feats), idx)
-    x = unit_rows(feats, normalized)
-    if backend == "cuda":
-        cuda = backend_module("cuda")
-        if k <= cuda.MAX_DRAW_QUERIES:
-            return cuda.draw_aps(x, idx, k, budget_bytes)
+    return kernels.draw_aps(unit_rows(feats, normalized), idx, k, budget_bytes)
+
+
+def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.ndarray:
+    """``backend="numba"`` of :func:`draw_average_precisions`.
+
+    Takes its checked float32 unit rows ``x`` and ``(n_draws, k + m)`` row
+    indices ``idx`` (queries first). Each chunk of draws' similarities comes
+    from one batched matrix product.
+    """
+    n_draws, m = len(idx), idx.shape[1] - k
     out = np.empty((n_draws, k), dtype=np.float64)
     step = _chunk(n_draws, k, m, x.shape[1], budget_bytes)
     for start in range(0, n_draws, step):

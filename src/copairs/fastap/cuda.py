@@ -28,7 +28,6 @@ from copairs.fastap.similarity import kernel_rows
 from copairs.fastap.normalization import expected_ap_array
 
 __all__ = [
-    "MAX_DRAW_QUERIES",
     "PAIR_CHUNK",
     "DeviceSims",
     "ap_from_pairs",
@@ -296,7 +295,7 @@ def ap_from_pairs(
 
 # draw_ap holds k float32 keys and k uint32 bins in shared memory, of which a
 # kernel gets 48 KiB without opting in. Larger draws run on Numba.
-MAX_DRAW_QUERIES = 48 * 1024 // 8
+_MAX_DRAW_QUERIES = 48 * 1024 // 8
 
 _DRAW_KERNEL = r"""
 // NumPy order of float32 keys: NaN after every number, and ties with NaN.
@@ -367,14 +366,16 @@ _SOURCE = _cuda.PRELUDE + _PAIR_KERNELS + _DRAW_KERNEL
 def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.ndarray:
     """``backend="cuda"`` of :func:`copairs.fastap.draw_average_precisions`.
 
-    Takes its checked float32 unit rows ``x`` and ``(n_draws, k + m)`` row
-    indices ``idx`` (queries first), for ``k <= MAX_DRAW_QUERIES``. Each
+    Takes the arguments of :func:`copairs.fastap.draws.draw_aps`, which
+    scores draws of more than ``_MAX_DRAW_QUERIES`` queries on Numba. Each
     chunk of draws' similarities comes from one batched matrix product on
     the GPU, and its APs are copied to the host before the next. The rows
     stay on the GPU when they take at most half of ``budget_bytes``, and the
     chunks get the rest; otherwise each chunk's rows are gathered on the
     host and copied.
     """
+    if k > _MAX_DRAW_QUERIES:
+        return draws.draw_aps(x, idx, k, budget_bytes)
     n_draws, width = idx.shape
     m = width - k
     resident = 2 * x.nbytes <= budget_bytes

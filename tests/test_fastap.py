@@ -600,7 +600,7 @@ def test_draw_average_precisions_shared_memory_limit(extra):
     Either way their APs equal the Numba backend's up to float32 near-ties.
     """
     cuda = backend_module("cuda")
-    k, m = cuda.MAX_DRAW_QUERIES + extra, 16
+    k, m = cuda._MAX_DRAW_QUERIES + extra, 16
     rng = np.random.default_rng(5)
     feats = rng.normal(size=(k + m, 8)).astype(np.float32)
     queries, refs = np.arange(k)[None], np.arange(k, k + m)[None]

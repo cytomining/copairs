@@ -14,7 +14,7 @@ from typing import Callable
 import numpy as np
 
 from copairs.fastap import multilabel
-from copairs.fastap.draws import draw_average_precisions
+from copairs.fastap.draws import draw_aps, draw_average_precisions
 from copairs.fastap.ranking import ap_from_pairs
 from copairs.fastap.similarity import FAST_METRICS, PairSimilarity, pair_similarity
 from copairs.fastap.normalization import expected_ap_array
