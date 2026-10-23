@@ -68,11 +68,13 @@ def get_map_pvalue(
         indexing the rows of the frame `average_precision` returned (its
         `return_pairs=True` gives them, as `pairs.pos`); `ap_scores` must keep
         that frame's index. Pairs whose counts disagree with `n_pos_pairs`
-        raise. When omitted, each group's positives are
-        assumed to be its other members, which is the replicate-retrieval case
+        raise. When omitted, they are taken from ``pairs`` or, failing that,
+        from the pairs `average_precision` attached to ``ap_scores``. Frames
+        without either assume each group's positives are its other members,
+        which is the replicate-retrieval case
         (`n_pos_pairs == len(group) - 1`), and a group of one profile gets
         that profile's AP null. Other groups fall back to the copied null with
-        a warning. Joint null only; taken from ``pairs`` when given.
+        a warning. Joint null only.
     null : str
         Null of the group mAP. ``"permutation"`` (default) relabels profiles
         (`copairs.nulls.permutation`): in each block of members ranked against
@@ -102,7 +104,7 @@ def get_map_pvalue(
         `average_precision` attaches them; frames that lost them (built,
         reloaded, pickled, or concatenated from several AP calls) need
         ``pairs=`` or another null. The joint null takes its positive pairs
-        from ``pairs`` when given, and ignores attached pairs.
+        from ``pairs`` too, or from the attached pairs (see ``pos_pairs``).
 
     Returns
     -------
@@ -118,22 +120,20 @@ def get_map_pvalue(
     null = check_null(null)
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
+    if null != "copied" and pos_pairs is None and pairs is None:
+        pairs = attached_pairs(ap_scores)
     if null == "joint" and pos_pairs is None and pairs is not None:
         pos_pairs = pairs.pos
     if null == "permutation" and pairs is None:
-        # Only the permutation null reads attached pairs: the joint null
-        # infers its edges without them.
-        pairs = attached_pairs(ap_scores)
-        if pairs is None:
-            raise ValueError(
-                "null='permutation' (the default) needs the pairs the APs were "
-                "computed from. average_precision attaches them to the frame it "
-                "returns, and these AP scores have none: they were built, loaded "
-                "from disk, pickled or concatenated from several AP calls, or come "
-                "from multilabel.average_precision, which this null does not "
-                "support. Recompute the APs, pass pairs=, or choose null='joint' "
-                "or null='copied'."
-            )
+        raise ValueError(
+            "null='permutation' (the default) needs the pairs the APs were "
+            "computed from. average_precision attaches them to the frame it "
+            "returns, and these AP scores have none: they were built, loaded "
+            "from disk, pickled or concatenated from several AP calls, or come "
+            "from multilabel.average_precision, which this null does not "
+            "support. Recompute the APs, pass pairs=, or choose null='joint' "
+            "or null='copied'."
+        )
 
     # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")

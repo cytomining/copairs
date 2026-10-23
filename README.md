@@ -91,7 +91,11 @@ perfect retrieval) counts the atom.
   narrows as replicates are added. Other similarities are treated as
   independent, which real profiles are not (members share references, and
   some profiles are close to many others), so on real data it can give too
-  small p-values for groups of many replicates. It needs no pairs.
+  small p-values for groups of many replicates. It takes each group's
+  positive pairs from the attached pairs (or `pairs=`, `pos_pairs=`), so
+  positives in other groups stay private to each member; frames without
+  pairs are treated as replicate groups when every member has
+  `len(group) - 1` positives.
 - `"copied"` is the null model of copairs <= 0.5.5: each member's AP null is
   sampled per `(n_pos_pairs, n_total_pairs)` configuration and the group's
   null averages them, so members with equal pair counts share one draw and

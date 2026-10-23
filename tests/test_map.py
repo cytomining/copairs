@@ -462,22 +462,44 @@ def test_map_pvalue_one_profile_groups_use_their_ap_null():
     np.testing.assert_allclose(inferred["p_value"], exact, atol=0.01)
 
 
-def test_joint_null_ignores_attached_pairs():
-    """The joint null infers edges from AP frames, even after reset_index."""
+def test_joint_null_reads_attached_pairs():
+    """The joint null takes edges from attached pairs, so a reset index raises."""
     rng = np.random.default_rng(SEED)
     meta = query_meta(others=3)
     meta = meta.sample(frac=1, random_state=1).reset_index(drop=True)
     feats = rng.standard_normal((len(meta), 10))
     ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
-    reset = ap[ap["g"] != "other"].reset_index(drop=True)  # pairs now misaligned
-    bare = reset.copy()
-    bare.attrs.clear()
+    kept = ap[ap["g"] != "other"]
+    bare = kept.reset_index(drop=True)
+    bare.attrs.clear()  # no pairs: edges are inferred from the pair counts
     kwargs = dict(progress_bar=False, null="joint")
-    got = get_map_pvalue(reset, ["g"], 2000, SEED, **kwargs)
+    got = get_map_pvalue(kept, ["g"], 2000, SEED, **kwargs)
     expected = get_map_pvalue(bare, ["g"], 2000, SEED, **kwargs)
     assert got["p_value"].tolist() == expected["p_value"].tolist()
-    with pytest.raises(ValueError, match="no reset_index"):
-        get_map_pvalue(reset, ["g"], 2000, SEED, progress_bar=False)
+    reset = kept.reset_index(drop=True)  # pairs now misaligned
+    for null in ("joint", "permutation"):
+        with pytest.raises(ValueError, match="no reset_index"):
+            get_map_pvalue(reset, ["g"], 2000, SEED, progress_bar=False, null=null)
+
+
+def test_joint_null_uses_attached_pairs_for_outside_positives():
+    """Groups whose positives lie in other groups get edges from the attached pairs."""
+    rows = [("T", "A")] * 3 + [("T", "B")] * 2 + [("ctrl", "ctrl")] * 10
+    meta = pd.DataFrame(rows, columns=["t", "comp"])
+    meta["ctrl"] = meta["t"] == "ctrl"
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 8))
+    ap, pairs = average_precision(
+        meta, feats, ["t"], ["comp"], [], ["ctrl"], progress_bar=False,
+        return_pairs=True,
+    )  # fmt: skip
+    ap = ap[~ap["ctrl"]]  # A's positives are B's two members, and B's are A's
+    assert ap["n_pos_pairs"].tolist() == [2, 2, 2, 3, 3]
+    kwargs = dict(progress_bar=False, null="joint")
+    explicit = get_map_pvalue(ap, ["comp"], 5000, SEED, pos_pairs=pairs.pos, **kwargs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no fallback to the copied null
+        attached = get_map_pvalue(ap, ["comp"], 5000, SEED, **kwargs)
+    assert attached["p_value"].tolist() == explicit["p_value"].tolist()
 
 
 def test_ap_frames_carry_their_pairs():
