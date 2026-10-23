@@ -101,35 +101,42 @@ def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
         ValueError for other shapes or dtypes and IndexError for indices
         outside ``feats``, checked once per call before the kernel runs.
     """
+    rows = kernel_rows(feats, metric)
+    if rows is None:
+        return None
+    x, kind = rows
+
+    def similarity(pairs):
+        pairs = index_pairs(pairs, len(x))
+        out = np.empty(len(pairs), dtype=np.float32)
+        if kind < 0:
+            _dot_pairs(x, pairs, out)
+        else:
+            _minkowski_pairs(x, pairs, kind, out)
+        if metric == "abs_cosine":
+            np.abs(out, out=out)
+        return out
+
+    return similarity
+
+
+def kernel_rows(feats: np.ndarray, metric) -> tuple[np.ndarray, int] | None:
+    """Return the rows and kind that the similarity kernels take for ``metric``.
+
+    Returns None for metrics without a kernel. Rows are contiguous float32
+    or float64 (other dtypes become float64): unit rows for the cosine
+    metrics (centered for correlation), kind -1 for their dot products;
+    else the features as given, kind their index in
+    :data:`MINKOWSKI_METRICS`.
+    """
     if not isinstance(metric, str) or metric not in FAST_METRICS:
         return None
     feats = np.asarray(feats)
     if feats.dtype not in (np.float32, np.float64):
         feats = feats.astype(np.float64)
-
     if metric in MINKOWSKI_METRICS:
-        x = np.ascontiguousarray(feats)
-        kind = MINKOWSKI_METRICS.index(metric)
-
-        def minkowski(pairs):
-            pairs = index_pairs(pairs, len(x))
-            out = np.empty(len(pairs), dtype=np.float32)
-            _minkowski_pairs(x, pairs, kind, out)
-            return out
-
-        return minkowski
-
-    x = np.ascontiguousarray(_unit_rows(feats, metric == "correlation"))
-
-    def dot(pairs):
-        pairs = index_pairs(pairs, len(x))
-        out = np.empty(len(pairs), dtype=np.float32)
-        _dot_pairs(x, pairs, out)
-        if metric == "abs_cosine":
-            np.abs(out, out=out)
-        return out
-
-    return dot
+        return np.ascontiguousarray(feats), MINKOWSKI_METRICS.index(metric)
+    return np.ascontiguousarray(_unit_rows(feats, metric == "correlation")), -1
 
 
 def PairSimilarity(feats: np.ndarray, metric: str) -> Callable:

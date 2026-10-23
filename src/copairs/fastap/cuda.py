@@ -23,7 +23,7 @@ import numpy as np
 from copairs import _cuda
 from copairs.fastap import draws, ranking, multilabel, _bind_similarity
 from copairs.fastap.ranking import rank_keys, index_pairs, sortable_keys
-from copairs.fastap.similarity import FAST_METRICS, MINKOWSKI_METRICS, _unit_rows
+from copairs.fastap.similarity import kernel_rows
 from copairs.fastap.normalization import expected_ap_array
 
 __all__ = [
@@ -170,17 +170,11 @@ def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
     ``on_device`` a :class:`DeviceSims`. Pairs are checked on the host and
     copied to the GPU in chunks.
     """
-    feats = np.asarray(feats)
     # The kernels index rows with uint32 pairs.
-    if not isinstance(metric, str) or metric not in FAST_METRICS or len(feats) >= 2**32:
+    rows = None if len(feats) >= 2**32 else kernel_rows(feats, metric)
+    if rows is None:
         return None
-    if feats.dtype not in (np.float32, np.float64):
-        feats = feats.astype(np.float64)
-    if metric in MINKOWSKI_METRICS:
-        x, kind = feats, np.int32(MINKOWSKI_METRICS.index(metric))
-    else:
-        x, kind = _unit_rows(feats, metric == "correlation"), np.int32(-1)
-    x = cp.asarray(np.ascontiguousarray(x))
+    x, kind = cp.asarray(rows[0]), np.int32(rows[1])
     name = "pair_sims_f64" if x.dtype == cp.float64 else "pair_sims_f32"
     d = np.int64(x.shape[1])
 
