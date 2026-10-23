@@ -113,12 +113,21 @@ def ap_pvalues(
     return pvals
 
 
+# Rows of the chunk's size that _group_ge_host holds next to the null chunk:
+# the group sum, one member's term and the comparison's booleans.
+_GROUP_WORK_ROWS = 3
+
+
 def _group_ge_host(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
+    acc = np.empty(null.shape[1])
+    term = np.empty(null.shape[1])
     for g in range(len(ptr) - 1):
-        acc = np.zeros(null.shape[1])
+        acc.fill(0.0)
         for e in range(ptr[g], ptr[g + 1]):
-            acc += conf_cnt[e] * null[conf_ix[e]]
-        counts[g] += np.count_nonzero(acc / n_group[g] >= thr[g])
+            np.multiply(conf_cnt[e], null[conf_ix[e]], out=term)
+            acc += term
+        np.divide(acc, n_group[g], out=acc)
+        counts[g] += np.count_nonzero(acc >= thr[g])
 
 
 def map_pvalues(
@@ -171,7 +180,8 @@ def map_pvalues(
     else:
         kernel = _group_ge_host
     counts = np.zeros(len(thr), dtype=np.int64)
-    chunk = chunk_size(null_size, len(confs), budget_bytes)
+    # The chunk and the counts' workspace rows share the budget.
+    chunk = chunk_size(null_size, len(confs) + _GROUP_WORK_ROWS, budget_bytes)
     n_work = len(range(0, null_size, chunk))
     for start, size in progress(
         chunks(null_size, chunk), n_work, progress_bar, "mAP null"

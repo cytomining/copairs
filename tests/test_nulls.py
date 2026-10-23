@@ -443,18 +443,24 @@ def test_pvalues_reject_invalid_null_size(null_size):
         nulls.map_pvalues([0.1], [0, 1], [0], [1], CONFS[:1], null_size, seed=0)
 
 
+MEMORY_CONFS = np.array([[5, 505], [3, 50003], [1, 10**6], [8, 20000]])
+
+
+@pytest.mark.parametrize("n_conf", [1, 4])
 @pytest.mark.parametrize("budget", [2**18, 2**24])
 @pytest.mark.parametrize("which", ["ap", "map"])
-def test_numpy_pvalues_memory_within_budget(which, budget, monkeypatch):
+def test_numpy_pvalues_memory_within_budget(which, budget, n_conf, monkeypatch):
     """Peak memory of the NumPy p-values stays within 2.5x budget_bytes.
 
     The chunk of null samples, the sampler's temporaries (summed over its
     threads: 4 of the 16 offered fit the larger budget) and the counts' each
     fit the budget, and a chunk is freed before the next is sampled. Sampling a whole chunk at
-    once peaked at 31x (AP) and 9.7x (mAP).
+    once peaked at 31x (AP) and 9.7x (mAP). With one configuration, the mAP
+    counts' per-group rows are as large as the null chunk itself (3.1x before
+    they shared its budget).
     """
     monkeypatch.setattr(sampler, "_numpy_workers", lambda: 16)
-    confs = np.array([[5, 505], [3, 50003], [1, 10**6], [8, 20000]])
+    confs = MEMORY_CONFS[2:3] if n_conf == 1 else MEMORY_CONFS
     ix = np.arange(len(confs))
     kwargs = dict(null_size=2**16, seed=0, backend="numpy", budget_bytes=budget)
     tracemalloc.start()
@@ -462,7 +468,9 @@ def test_numpy_pvalues_memory_within_budget(which, budget, monkeypatch):
         if which == "ap":
             nulls.ap_pvalues(np.full(len(confs), 0.5), ix, confs, **kwargs)
         else:
-            nulls.map_pvalues([0.5], [0, len(confs)], ix, [1] * 4, confs, **kwargs)
+            nulls.map_pvalues(
+                [0.5], [0, len(confs)], ix, [1] * len(confs), confs, **kwargs
+            )
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
