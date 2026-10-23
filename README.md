@@ -45,6 +45,10 @@ The AP and mAP p-value functions (`compute.p_values`,
   count null values `>=` the observed mAP, as in the paper; legacy counts `>`,
   which gives too small p-values when the mAP equals an atom of the null
   (e.g. perfect retrieval).
+- With the NumPy backend, `"fast"` can be slower than `"legacy"` for
+  configurations with many positives at small null sizes (for 1000 positives
+  among 100,000 pairs at `null_size=1000`, 3.6 s against 1.6 s; 0.02 s with
+  Numba), so install the `numba` extra for such data.
 
 `backend="numpy"` needs nothing extra. `backend="numba"` compiles the same
 code with [Numba](https://numba.pydata.org), an optional dependency:
