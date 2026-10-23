@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from copairs.map import average_precision
+from copairs.map import multilabel, average_precision
+from copairs.matching import find_pairs_multilabel
 from copairs.map.normalization import normalize_ap
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -41,7 +42,7 @@ def _run_isolated(code: str) -> subprocess.CompletedProcess:
 
 
 def test_default_path_does_not_import_numba():
-    """Importing copairs and a default AP + mAP run never import numba."""
+    """Importing copairs and default AP, multilabel AP and mAP runs skip numba."""
     result = _run_isolated(
         "import sys\n"
         "import numpy as np\n"
@@ -55,6 +56,9 @@ def test_default_path_does_not_import_numba():
         "                           progress_bar=False)\n"
         "map.mean_average_precision(ap, ['l'], null_size=10, threshold=0.05,\n"
         "                           seed=None, progress_bar=False)\n"
+        "meta['m'] = meta['l'].map(lambda v: [v])\n"
+        "map.multilabel.average_precision(meta, feats, ['m'], [], [], ['m'],\n"
+        "                                 'm', progress_bar=False)\n"
         "assert not any(n == 'numba' or n.startswith('numba.') for n in sys.modules)\n"
         "assert 'copairs.fastap' not in sys.modules\n"
     )
@@ -65,6 +69,9 @@ def test_default_path_does_not_import_numba():
     "call",
     [
         "average_precision(None, None, [], [], [], [], backend='numba')",
+        "multilabel.average_precision(None, None, [], [], [], [], 'l', "
+        "backend='numba')",
+        "find_pairs_multilabel(None, ['l'], [], 'l', backend='numba')",
         "normalize_ap(0.5, 3, 10, backend='numba')",
     ],
 )
@@ -75,6 +82,7 @@ def test_missing_numba_extra_has_actionable_error(call):
             error="ModuleNotFoundError(\"No module named 'numba'\", name='numba')"
         )
         + "from copairs.map import average_precision, multilabel\n"
+        "from copairs.matching import find_pairs_multilabel\n"
         "from copairs.map.normalization import normalize_ap\n"
         "try:\n"
         f"    {call}\n"
@@ -124,5 +132,9 @@ def test_unknown_backend_raises(backend):
     """Backends other than numpy and numba raise before any work."""
     with pytest.raises(ValueError, match="'numpy' or 'numba'"):
         average_precision(None, None, [], [], [], [], backend=backend)
+    with pytest.raises(ValueError, match="'numpy' or 'numba'"):
+        multilabel.average_precision(None, None, [], [], [], [], "l", backend=backend)
+    with pytest.raises(ValueError, match="'numpy' or 'numba'"):
+        find_pairs_multilabel(None, ["l"], [], "l", backend=backend)
     with pytest.raises(ValueError, match="'numpy' or 'numba'"):
         normalize_ap(np.array([0.5]), 3, 10, backend=backend)

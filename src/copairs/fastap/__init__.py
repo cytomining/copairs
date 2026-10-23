@@ -11,6 +11,7 @@ from typing import Callable
 
 import numpy as np
 
+from copairs.fastap import multilabel
 from copairs.fastap.ranking import ap_from_pairs
 from copairs.fastap.similarity import FAST_METRICS, PairSimilarity
 from copairs.fastap.normalization import expected_ap_array
@@ -20,6 +21,7 @@ __all__ = [
     "PairSimilarity",
     "ap_from_pairs",
     "expected_ap_array",
+    "multilabel",
     "pair_similarity",
     "similarity_fn",
 ]
