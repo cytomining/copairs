@@ -21,7 +21,13 @@ BLOCK_NUMBA = (
 
 
 def test_default_path_does_not_import_numba():
-    """Importing copairs and default AP, multilabel AP and mAP runs skip numba."""
+    """Importing copairs and default AP and multilabel AP runs skip numba.
+
+    The mAP p-values' default backend, ``"auto"``, uses Numba when it is
+    installed (its results are bitwise identical to NumPy's) and NumPy
+    without it (test_nulls.py::test_default_path_runs_without_numba), so
+    the mAP run here asks for NumPy.
+    """
     result = run_isolated(
         "import sys\n"
         "import numpy as np\n"
@@ -34,7 +40,8 @@ def test_default_path_does_not_import_numba():
         "ap = map.average_precision(meta, feats, ['l'], ['p'], [], ['l'],\n"
         "                           progress_bar=False)\n"
         "map.mean_average_precision(ap, ['l'], null_size=10, threshold=0.05,\n"
-        "                           seed=None, progress_bar=False)\n"
+        "                           seed=None, progress_bar=False,\n"
+        "                           backend='numpy')\n"
         "meta['m'] = meta['l'].map(lambda v: [v])\n"
         "map.multilabel.average_precision(meta, feats, ['m'], [], [], ['m'],\n"
         "                                 'm', progress_bar=False)\n"
