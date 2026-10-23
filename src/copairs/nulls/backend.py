@@ -8,7 +8,7 @@ Numba (:func:`copairs._backend.available_backends` lists both).
 """
 
 from copairs.methods import check_backend
-from copairs._backend import cpu_backends, import_backend
+from copairs._backend import cpu_backends, import_kernels
 
 
 def resolve_backend(backend: str, gpu: bool = False) -> str:
@@ -48,7 +48,7 @@ def resolve_backend(backend: str, gpu: bool = False) -> str:
 
 def _import_numba_backend():
     """Return :mod:`copairs.nulls._numba`, or raise an ImportError naming the extra."""
-    return import_backend("copairs.nulls._numba", "numba")
+    return import_kernels("copairs.nulls._numba", "numba")
 
 
 def _import_cuda_backend():
@@ -56,5 +56,4 @@ def _import_cuda_backend():
 
     ImportError without CuPy, RuntimeError when no GPU is usable.
     """
-    import_backend("copairs._cuda", "cuda").require()
-    return import_backend("copairs.nulls.cuda", "cuda")
+    return import_kernels("copairs.nulls.cuda", "cuda")

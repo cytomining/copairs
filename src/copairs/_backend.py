@@ -41,24 +41,35 @@ def import_backend(module: str, backend: str) -> ModuleType:
         ) from exc
 
 
+def import_kernels(module: str, backend: str) -> ModuleType:
+    """Import ``module``, kernels of ``backend``, as :func:`import_backend` does.
+
+    For ``"cuda"``, first checks for a usable GPU: a RuntimeError naming the
+    extra without one (:func:`copairs._cuda.require`).
+    """
+    if backend == "cuda":
+        import_backend("copairs._cuda", backend).require()
+    return import_backend(module, backend)
+
+
+# The AP stage's kernels of each optional backend.
+_AP_KERNELS = {"numba": "copairs.fastap", "cuda": "copairs.fastap.cuda"}
+
+
 def backend_module(backend: str, gpu: bool = True):
     """Return the kernels for ``backend``: None for ``"numpy"``.
 
     For ``"numba"``, imports the optional Numba kernels, :mod:`copairs.fastap`,
-    on first use (see :func:`import_backend`). For ``"cuda"``,
-    :mod:`copairs.fastap.cuda`, after checking for a usable GPU: a
-    RuntimeError naming the extra without one. With ``gpu=False``, for
+    on first use; for ``"cuda"``, :mod:`copairs.fastap.cuda`, after checking
+    for a usable GPU (see :func:`import_kernels`). With ``gpu=False``, for
     functions that run only on the CPU, ``"cuda"`` is not a backend.
     """
     if backend == "numpy":
         return None
-    if backend == "numba":
-        return import_backend("copairs.fastap", backend)
-    if backend != "cuda" or not gpu:
+    if backend not in _AP_KERNELS or (backend == "cuda" and not gpu):
         names = "'numpy', 'numba' or 'cuda'" if gpu else "either 'numpy' or 'numba'"
         raise ValueError(f"backend must be {names}.")
-    import_backend("copairs._cuda", backend).require()
-    return import_backend("copairs.fastap.cuda", backend)
+    return import_kernels(_AP_KERNELS[backend], backend)
 
 
 def cpu_backend(backend: str) -> str:
@@ -88,7 +99,7 @@ def available_backends() -> list[str]:
 
 def cpu_backends() -> list[str]:
     """``["numba", "numpy"]`` when the Numba backend imports, else ``["numpy"]``."""
-    if _installed("numba") and _numba_imports():
+    if _installed("numba") and _imports("numba"):
         return ["numba", "numpy"]
     return ["numpy"]
 
@@ -99,33 +110,36 @@ def _installed(package: str) -> bool:
     return importlib.util.find_spec(package) is not None
 
 
-@cache
-def _numba_imports() -> bool:
-    """Whether the installed Numba backend imports; warn once if it does not."""
-    try:
-        import_backend("copairs.nulls._numba", "numba")
-    except ImportError as exc:
-        warnings.warn(
-            f"Numba is installed but the Numba backend failed to import ({exc!r}); "
-            "backend='auto' uses NumPy, which gives identical results.",
-            RuntimeWarning,
-            stacklevel=4,
-        )
-        return False
-    return True
+# Per optional backend: the module whose import shows that its installed
+# packages work, what failed to import, and what that leaves.
+_PROBES = {
+    "numba": (
+        "copairs.nulls._numba",
+        "Numba is installed but the Numba backend",
+        "backend='auto' uses NumPy, which gives identical results",
+    ),
+    "cuda": (
+        "copairs._cuda",
+        "CuPy is installed but",
+        "the CUDA backend is unavailable",
+    ),
+}
 
 
 @cache
-def _cupy_imports() -> bool:
-    """Whether the installed CuPy imports; warn once if it does not."""
+def _imports(backend: str) -> bool:
+    """Whether ``backend``'s installed packages import; warn once if they do not.
+
+    The warning points at the caller of :func:`available_backends`.
+    """
+    module, subject, outcome = _PROBES[backend]
     try:
-        import_backend("copairs._cuda", "cuda")
+        import_backend(module, backend)
     except ImportError as exc:
         warnings.warn(
-            f"CuPy is installed but failed to import ({exc!r}); backend='auto' "
-            "does not use the GPU.",
+            f"{subject} failed to import ({exc!r}); {outcome}.",
             RuntimeWarning,
-            stacklevel=3,
+            stacklevel=4,  # _imports < cpu_backends or _cuda_usable < available_backends
         )
         return False
     return True
@@ -133,4 +147,4 @@ def _cupy_imports() -> bool:
 
 def _cuda_usable() -> bool:
     """Whether the CUDA backend can run here (see :func:`copairs._cuda.usable`)."""
-    return _cupy_imports() and import_backend("copairs._cuda", "cuda").usable()
+    return _imports("cuda") and import_backend("copairs._cuda", "cuda").usable()

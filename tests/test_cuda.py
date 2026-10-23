@@ -129,6 +129,7 @@ def test_cuda_without_a_gpu():
 def test_auto_skips_a_cupy_that_fails_to_import(tmp_path):
     """An installed CuPy that fails to import is not listed, with one warning.
 
+    The warning points at the caller of available_backends, and
     ``backend="cuda"`` raises the import error itself.
     """
     fake = tmp_path / "cupy"
@@ -142,8 +143,10 @@ def test_auto_skips_a_cupy_that_fails_to_import(tmp_path):
         "    warnings.simplefilter('always')\n"
         "    assert 'cuda' not in nulls.available_backends()\n"
         "    assert nulls.resolve_backend('auto') != 'cuda'\n"
-        "shown = [str(w.message) for w in caught if 'CuPy' in str(w.message)]\n"
-        "assert len(shown) == 1 and 'simulated broken cupy' in shown[0], shown\n"
+        "shown = [w for w in caught if 'CuPy' in str(w.message)]\n"
+        "assert len(shown) == 1, [str(w.message) for w in shown]\n"
+        "assert 'simulated broken cupy' in str(shown[0].message), shown[0]\n"
+        "assert shown[0].filename == '<string>', shown[0].filename\n"
         "raises(ImportError, 'simulated broken cupy')\n"
     )
     assert result.returncode == 0, result.stderr
