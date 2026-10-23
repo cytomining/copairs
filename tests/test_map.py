@@ -502,6 +502,24 @@ def test_joint_null_uses_attached_pairs_for_outside_positives():
     assert attached["p_value"].tolist() == explicit["p_value"].tolist()
 
 
+@pytest.mark.parametrize("null", ["permutation", "joint"])
+def test_pairs_need_the_ap_frames_row_index(null):
+    """A relabelled AP index raises a clear error wherever pairs index it."""
+    meta = query_meta()
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    for index in (meta["g"] + meta.index.astype(str), -1 - meta.index):
+        relabelled = ap.set_axis(index)
+        with pytest.raises(ValueError, match="index must hold the row numbers"):
+            get_map_pvalue(relabelled, ["g"], 100, SEED, progress_bar=False, null=null)
+    bare = ap.set_axis(meta["g"] + meta.index.astype(str))
+    bare.attrs.clear()  # without pairs the joint and copied nulls ignore the index
+    for other in ("joint", "copied"):
+        assert len(
+            get_map_pvalue(bare, ["g"], 100, SEED, progress_bar=False, null=other)
+        )
+
+
 def test_ap_frames_carry_their_pairs():
     """AP frames carry their pairs through copies and filters, not saving or merging."""
     rng = np.random.default_rng(SEED)

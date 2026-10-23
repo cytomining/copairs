@@ -135,6 +135,9 @@ def get_map_pvalue(
             "or null='copied'."
         )
 
+    if null == "permutation" or pos_pairs is not None:
+        _check_row_index(ap_scores.index)
+
     # Filter out invalid or incomplete AP scores, remembering the original rows
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
     profile = ap_scores.index.to_numpy()
@@ -215,6 +218,18 @@ def get_map_pvalue(
         )
     map_scores["p_value"] = p_values
     return map_scores
+
+
+def _check_row_index(index: pd.Index) -> None:
+    """Raise unless ``index`` holds row numbers, which AP pairs can index."""
+    if index.dtype.kind not in "iu" or (len(index) and index.min() < 0):
+        raise ValueError(
+            "the AP scores' index must hold the row numbers of the frame "
+            "average_precision returned, which the pairs index; got an index "
+            f"of dtype {index.dtype}"
+            + ("" if index.dtype.kind not in "iu" else " with negative labels")
+            + ". Keep that frame's index (no set_index or reset_index)."
+        )
 
 
 def _copied_pvalues(
