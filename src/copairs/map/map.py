@@ -98,8 +98,9 @@ def get_map_pvalue(
         same draws vectorized. The two give bitwise-identical draws and
         p-values, so ``"auto"`` picks Numba when it imports
         (:func:`copairs.nulls.resolve_backend`). ``"cuda"`` (``pip install
-        'copairs[gpu]'``) runs only when asked for (see
-        :func:`copairs.nulls.ap_nulls`). Ignored by ``method="legacy"``.
+        'copairs[gpu]'``) runs the copied null only, when asked for (see
+        :func:`copairs.nulls.ap_nulls`); the joint and permutation nulls
+        raise ValueError under it. Ignored by ``method="legacy"``.
     pos_pairs : np.ndarray, optional
         The `(n_pairs, 2)` positive pairs used to compute the AP scores,
         indexing the rows of the frame `average_precision` returned (its

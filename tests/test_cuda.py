@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 from copairs import nulls, compute, matching
-from copairs.map import mean_average_precision
+from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import backend, pvalues, sampler
 from tests.helpers import (
     fake_gpu,
@@ -541,6 +541,30 @@ def test_auto_never_runs_cuda(host_cuda):
     mean_average_precision(
         frame, ["g"], 200, 0.05, 1, progress_bar=False, null="copied"
     )
+    assert not host_cuda.calls
+
+
+@pytest.mark.parametrize("null", ["joint", "permutation"])
+def test_cpu_only_nulls_reject_cuda(host_cuda, null):
+    """The joint and permutation nulls have no GPU kernels: "cuda" raises.
+
+    Where a GPU is usable too, instead of running them on the CPU.
+    """
+    meta = pd.DataFrame({"g": np.repeat(list("abcdef"), 4), "p": np.tile(range(4), 6)})
+    feats = np.random.default_rng(1).standard_normal((len(meta), 5))
+    labels = meta.assign(g=[[g] for g in meta["g"]])
+    frames = (
+        average_precision(meta, feats, ["g"], [], ["p"], ["g"], progress_bar=False),
+        multilabel.average_precision(
+            labels, feats, ["g"], [], ["p"], ["g"], "g", progress_bar=False
+        ),
+    )
+    for frame in frames:
+        with pytest.raises(ValueError, match="backend='cuda' runs only the AP"):
+            mean_average_precision(
+                frame, ["g"], 50, 0.05, 0, progress_bar=False, null=null,
+                backend="cuda",
+            )  # fmt: skip
     assert not host_cuda.calls
 
 

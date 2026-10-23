@@ -81,7 +81,7 @@ def _cuda_usable() -> bool:
     return _cupy_imports() and import_backend("copairs._cuda", "cuda").usable()
 
 
-def resolve_backend(backend: str) -> str:
+def resolve_backend(backend: str, gpu: bool = False) -> str:
     """Return a concrete backend name for ``backend``.
 
     ``"auto"`` picks ``"numba"`` when the Numba backend imports and
@@ -93,11 +93,20 @@ def resolve_backend(backend: str) -> str:
     ``"auto"`` too. ``"auto"`` never picks ``"cuda"``, which runs only when
     asked for: its samples equal NumPy's by error bounds rather than by
     identical arithmetic (see :mod:`copairs.nulls.cuda`), and it has not been
-    tested bit for bit on a GPU. ``"numba"`` and ``"cuda"`` raise an
-    ImportError naming the extra when their package is missing, and
-    ``"cuda"`` a RuntimeError when no GPU is usable.
+    tested bit for bit on a GPU. Only the AP nulls and their p-values have
+    GPU kernels; their functions pass ``gpu=True``, and elsewhere (the
+    joint and permutation nulls) ``"cuda"`` raises ValueError instead of
+    running on the CPU. ``"numba"`` and ``"cuda"`` raise an ImportError
+    naming the extra when their package is missing, and ``"cuda"`` a
+    RuntimeError when no GPU is usable.
     """
     check_backend(backend)
+    if backend == "cuda" and not gpu:
+        raise ValueError(
+            "backend='cuda' runs only the AP nulls and their p-values "
+            "(null='copied' in the mAP functions); this null runs on "
+            "'numba' or 'numpy'"
+        )
     if backend == "auto":
         return _cpu_backends()[0]
     if backend == "numba":

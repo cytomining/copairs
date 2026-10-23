@@ -100,12 +100,14 @@ copairs' kernels at run time, so it also needs the CUDA libraries (NVRTC, and
 cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
 `pip install 'cupy-cuda12x[ctk]'`.
 
-- Nulls and p-values: `backend="cuda"`, only when asked for, samples and
-  counts on the GPU. It steps long gaps of Algorithm A in float32, which is
-  faster on GPUs with few float64 units, and its guided gap search uses CUDA's
-  `log1p`, not glibc's. Error bounds keep the gaps equal to the CPU's, so
-  samples are NumPy's, but not by identical arithmetic, and no GPU run has
-  tested them bit for bit yet; `"auto"` stays on the CPU.
+- AP nulls and p-values (the copied mAP null): `backend="cuda"`, only when
+  asked for, samples and counts on the GPU; the joint and permutation nulls
+  have no GPU kernels and raise a ValueError under it. It steps long gaps of
+  Algorithm A in float32, which is faster on GPUs with few float64 units, and
+  its guided gap search uses CUDA's `log1p`, not glibc's. Error bounds keep
+  the gaps equal to the CPU's, so samples are NumPy's, but not by identical
+  arithmetic, and no GPU run has tested them bit for bit yet; `"auto"` stays
+  on the CPU.
 - AP stage: `backend="cuda"`, only when asked for, computes pair similarities
   and AP on the GPU, streaming negative pairs, their similarities and keys
   through it in chunks of bounded memory, and runs multilabel matching,

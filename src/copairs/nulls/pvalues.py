@@ -58,7 +58,7 @@ def _prepare(scores, conf_ix, confs, null_size, seed, backend, max_workers):
         raise ValueError(f"conf_ix must index the {len(confs)} rows of confs")
     null_size = check_null_size(null_size)
     _check_max_workers(max_workers)
-    backend = resolve_backend(backend)
+    backend = resolve_backend(backend, gpu=True)
     plan = null_plan(confs, resolve_seed(seed))
     if backend == "cuda":
         plan = _import_cuda_backend().plan_on_device(plan)
