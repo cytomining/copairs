@@ -35,6 +35,22 @@ __device__ __forceinline__ I upper_bound(const T* vals, I lo, I hi, T key) {
     }
     return lo;
 }
+
+// AP given hist[t] negatives ranked between positives t - 1 and t, in the order of
+// copairs.fastap.ranking.ap_from_counts; *before gets the negatives ranked ahead of
+// the last positive.
+template <typename C>
+__device__ __forceinline__ double ap_from_counts(const C* hist, long long num_pos,
+                                                 unsigned long long* before) {
+    unsigned long long n = 0;
+    double acc = 0.0;
+    for (long long t = 0; t < num_pos; ++t) {
+        n += hist[t];
+        acc += (double)(t + 1) / (double)(t + 1 + n);
+    }
+    *before = n;
+    return acc / (double)num_pos;
+}
 """
 _INSTALL = "pip install 'copairs[gpu]'"
 

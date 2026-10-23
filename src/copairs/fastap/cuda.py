@@ -130,13 +130,9 @@ extern "C" __global__ void ap_from_hist(const long long* ptr, const unsigned lon
     for (long long i = blockIdx.x * (long long)blockDim.x + threadIdx.x; i < n;
          i += (long long)gridDim.x * blockDim.x) {
         long long num_pos = ptr[i + 1] - ptr[i], base = ptr[i] + i;
-        unsigned long long before = 0;
-        double acc = 0.0;
-        for (long long t = 0; t < num_pos; ++t) {
-            before += hist[base + t];
-            acc += (double)(t + 1) / (double)(t + 1 + before);
-        }
-        ap[i] = num_pos == 0 ? nan("") : acc / (double)num_pos;
+        unsigned long long before;
+        double value = ap_from_counts(hist + base, num_pos, &before);
+        ap[i] = num_pos == 0 ? nan("") : value;
         n_neg[i] = before + hist[base + num_pos];
     }
 }
@@ -387,13 +383,8 @@ extern "C" __global__ void draw_ap(const float* sims, int k, int m, long long n_
         }
         __syncthreads();
         if (threadIdx.x == 0) {
-            unsigned long long before = 0;
-            double acc = 0.0;
-            for (int t = 0; t < k - 1; ++t) {
-                before += hist[t];
-                acc += (double)(t + 1) / (double)(t + 1 + before);
-            }
-            ap[row] = acc / (double)(k - 1);
+            unsigned long long before;
+            ap[row] = ap_from_counts(hist, k - 1, &before);
         }
         __syncthreads();
     }
