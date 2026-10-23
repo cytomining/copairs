@@ -213,11 +213,18 @@ def _product_numpy(remaining, k, g):
 
 def _stops_numpy(remaining, k, g, u, log_u):
     """Vectorized ``stops`` of :func:`_make_gap_guided` (product at ``g`` <= ``u``)."""
-    sure = (g + 1) / (remaining - k + 1) <= _FACTOR_LIMIT
+    # Exact in float64 (counts are < 2**53), so each term rounds as before.
+    g1 = (g + 1).astype(np.float64)
+    rem = remaining.astype(np.float64)
+    sure = g1 / (rem - (k - 1)) <= _FACTOR_LIMIT
     acc = np.zeros(len(g))
+    term = np.empty(len(g))
     with np.errstate(divide="ignore"):  # log1p(-1) at g = remaining - k, replayed
         for t in range(k):
-            acc += np.log1p(-((g + 1) / (remaining - t)))
+            np.subtract(rem, t, out=term)
+            np.divide(g1, term, out=term)
+            np.negative(term, out=term)
+            acc += np.log1p(term, out=term)
     margin = _LOG_MARGIN + (2 * g + 2) * _EPS
     below = acc < log_u - margin
     stop = sure & below
