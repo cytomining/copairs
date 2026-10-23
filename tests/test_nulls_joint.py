@@ -87,8 +87,9 @@ def test_vectorized_matches_scalar_draws():
     np.testing.assert_array_equal(got, scalar_nulls(plan, 300, 2**33 - 100))
 
 
-def test_pvalue_hits_match_scalar_draws():
+def test_pvalue_hits_match_scalar_draws(monkeypatch):
     """Joint p-values count exactly the scalar samples at or above each score."""
+    monkeypatch.setattr(joint, "_CHUNK", 64)  # several chunks per signature
     sigs = [joint.canonical_signature(*sig) for sig in SIGNATURES[:4]]
     scores = np.array([0.1, 0.07, 0.3, 0.5, 0.02, 0.2])
     sig_ix = np.array([0, 0, 1, 2, 3, 1])

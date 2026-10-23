@@ -28,6 +28,7 @@ import numpy as np
 
 from copairs.nulls.common import (
     TIE_TOL,
+    chunks,
     progress,
     group_edges,
     resolve_seed,
@@ -270,8 +271,8 @@ def _row_ranks(row_ptr, rows, keys):
     seg = np.repeat(np.arange(n_rows, dtype=np.uint64), np.diff(row_ptr))
     flat = (seg << np.uint64(32)) | rows.astype(np.uint64)  # sorted: row, then code
     step = max(1, _CHUNK_ELEMENTS // max(keys.shape[1], 1))
-    for lo in range(0, n_rows, step):
-        hi = min(n_rows, lo + step)
+    for lo, size in chunks(n_rows, step):
+        hi = lo + size
         rows_ix = np.arange(lo, hi, dtype=np.uint64)[:, None] << np.uint64(32)
         q = rows_ix | keys[lo:hi].astype(np.uint64)
         out[lo:hi] = np.searchsorted(flat, q, side="left") - row_ptr[lo:hi, None]
@@ -303,8 +304,8 @@ class _Pool:
         self.srr = np.empty(self.srr_ptr[-1], dtype=np.uint32)
         for lo, hi in zip(self.cr_lo, self.cr_hi):
             step = max(1, _PAIR_CHUNK // max(hi - lo, 1))
-            for a in range(lo, hi, step):
-                b = min(hi, a + step)
+            for off, size in chunks(hi - lo, step):
+                a, b = lo + off, lo + off + size
                 rows = krr[a:b, lo:hi].copy()
                 rows[np.arange(b - a), np.arange(a - lo, b - lo)] = _NAN
                 rows.sort(axis=1)
@@ -701,8 +702,7 @@ def permutation_null(
     identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
     count = 0
     chunk = layout.chunk()
-    for start in range(0, int(null_size), chunk):
-        size = min(chunk, int(null_size) - start)
+    for start, size in chunks(int(null_size), chunk):
         maps = _group_maps_np(layout, _draws_np(layout, start, size, k0, k1))
         if out is not None:
             out[start : start + size] = maps

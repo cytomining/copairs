@@ -164,12 +164,14 @@ def test_hits_match_scalar_draws():
 
 
 def test_draws_do_not_depend_on_chunks(monkeypatch):
-    """Draw j is the same whatever the chunk size."""
+    """Draw j is the same whatever the chunk sizes of draws and pool tables."""
     meta = layout_meta(2, 2, 6)
     feats = np.random.default_rng(22).standard_normal((len(meta), 5))
     spec = dict(SPEC, neg_sameby=["plate"])
     full = draws_of(meta, feats, spec, 1000)
     monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 77)
+    monkeypatch.setattr(permutation, "_PAIR_CHUNK", 7)
+    monkeypatch.setattr(permutation, "_CHUNK_ELEMENTS", 5)
     chunked = draws_of(meta, feats, spec, 1000)
     assert full[1:3] == chunked[1:3]
     np.testing.assert_array_equal(full[3], chunked[3])

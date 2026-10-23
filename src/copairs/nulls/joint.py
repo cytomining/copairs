@@ -30,6 +30,7 @@ import hashlib
 import numpy as np
 
 from copairs.nulls.common import (
+    chunks,
     progress,
     group_edges,
     resolve_seed,
@@ -491,8 +492,7 @@ def joint_nulls(plan, null_size: int, start: int = 0, rows=None) -> np.ndarray:
     lo, hi, _ = (rows or slice(0, n_sig)).indices(n_sig)
     out = np.empty((max(0, hi - lo), null_size), dtype=np.float64)
     for r, s in enumerate(range(lo, hi)):
-        for c in range(0, null_size, _CHUNK):
-            size = min(_CHUNK, null_size - c)
+        for c, size in chunks(null_size, _CHUNK):
             out[r, c : c + size] = _joint_null_np(plan, s, start + c, size)
     return out
 
@@ -530,9 +530,8 @@ def joint_pvalues(
         groups = order[ptr[s] : ptr[s + 1]]
         if not len(groups):
             continue
-        for c in range(0, null_size, _CHUNK):
-            size = min(_CHUNK, null_size - c)
-            null = np.sort(_joint_null_np(plan, s, c, size))
+        for c, size in chunks(null_size, _CHUNK):
+            null = np.sort(joint_nulls(plan, size, c, slice(s, s + 1))[0])
             counts[groups] += size - np.searchsorted(null, thr[groups], side="left")
     return (counts + 1) / (null_size + 1)
 
