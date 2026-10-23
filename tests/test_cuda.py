@@ -262,7 +262,7 @@ class _HostCuda:
     """
 
     def __init__(self):
-        self.fast_gaps = []
+        self.calls = 0
         self.cp = np
 
     def plan_on_device(self, plan):
@@ -271,8 +271,8 @@ class _HostCuda:
     def host(self, x):
         return np.asarray(x)
 
-    def ap_nulls(self, plan, start, size, dtype, fast_gaps=False):
-        self.fast_gaps.append(fast_gaps)
+    def ap_nulls(self, plan, start, size, dtype):
+        self.calls += 1
         return sampler._ap_nulls(plan, size, start, "numpy", dtype)
 
     class ScoreCounter:
@@ -329,7 +329,7 @@ def test_auto_never_runs_cuda(host_cuda):
         "map": nulls.map_pvalues(scores[:3], *group_args, 300, 7, backend="numpy"),
     }
     for name, on_gpu in (("auto", False), ("cuda", True)):
-        host_cuda.fast_gaps.clear()
+        host_cuda.calls = 0
         got = {
             "nulls": nulls.ap_nulls(confs, 300, 7, backend=name),
             "ap": nulls.ap_pvalues(
@@ -340,12 +340,12 @@ def test_auto_never_runs_cuda(host_cuda):
             ),
         }
         if on_gpu:
-            assert len(host_cuda.fast_gaps) > 3, "the small budget samples in chunks"
+            assert host_cuda.calls > 3, "the small budget samples in chunks"
         else:
-            assert not host_cuda.fast_gaps, name
+            assert not host_cuda.calls, name
         for key, expected in numpy.items():
             np.testing.assert_array_equal(got[key], expected, err_msg=(name, key))
-    host_cuda.fast_gaps.clear()
+    host_cuda.calls = 0
     frame = pd.DataFrame(
         {
             "g": list("aabbb"),
@@ -358,16 +358,54 @@ def test_auto_never_runs_cuda(host_cuda):
     compute.get_null_dists(confs, 50, 1, progress_bar=False)
     compute.p_values(scores[:5], confs[conf_ix[:5]], 200, 1, progress_bar=False)
     mean_average_precision(frame, ["g"], 200, 0.05, 1, progress_bar=False)
-    assert not host_cuda.fast_gaps
+    assert not host_cuda.calls
+
+
+@needs_cupy
+def test_float32_gap_band_covers_rounding():
+    """The float32 gap loop's band covers its worst-case rounding at every step.
+
+    After ``g`` steps the float32 product is within ``(1 +- 2^-24)^(2g + 1)``
+    of the exact product, the float64 one within ``(1 +- 2^-53)^(2g + 1)``,
+    and ``uf`` and each threshold round once more. A float32 step (or stop)
+    then implies the float64 step (or stop) for every ``g < F32_MAX_GAP``,
+    with ``band``, ``1 + band`` and ``1 - band`` rounded as the kernel does.
+    Products stay normal floats, since ``u >= 1e-30`` and factors ``> 2^-24``.
+    """
+    from copairs.nulls.cuda import _AP_NULLS, F32_MAX_GAP
+
+    assert "(float)(2 * gap + 4) * 1.2e-7f" in _AP_NULLS  # the band checked here
+    assert "u < 1e-30" in _AP_NULLS and "remaining >= (1LL << 24)" in _AP_NULLS
+    assert 1e-30 * 2.0**-24 * (1 - 2.0**-24) ** 3 > np.finfo(np.float32).tiny
+    e32, e64 = 2.0**-24, 2.0**-53
+    for start in range(0, F32_MAX_GAP, 1 << 20):
+        g = np.arange(start, min(F32_MAX_GAP, start + (1 << 20)))
+        band = (2 * g + 4).astype(np.float32) * np.float32(1.2e-7)
+        hi = (np.float32(1) + band).astype(np.float64)
+        lo = (np.float32(1) - band).astype(np.float64)
+        n = 2.0 * g + 1
+        # log A_g >= 0: a float32 step implies the float64 product exceeds u.
+        log_a = np.log(hi) + 2 * np.log1p(-e32) + n * (np.log1p(-e64) - np.log1p(e32))
+        assert log_a.min() > 1e-12, g[np.argmin(log_a)]
+        # log B_g <= 0: a float32 stop implies the float64 product is <= u
+        # (with lo <= 0 the loop never stops in float32).
+        ok = lo > 0
+        log_b = np.log(lo[ok]) + 2 * np.log1p(e32)
+        log_b += n[ok] * (np.log1p(e64) - np.log1p(-e32))
+        assert not ok.any() or log_b.max() < -1e-12, g[ok][np.argmax(log_b)]
 
 
 @needs_gpu
 def test_cuda_samples_and_pvalues_bitwise_numpy():
-    """CUDA samples and p-values are NumPy's bit for bit."""
+    """CUDA samples and p-values are NumPy's bit for bit.
+
+    The wide configurations step long gaps below 2**24 ranks, where the
+    float32 loop runs.
+    """
     confs = np.concatenate([CONFS, WIDE])
-    for dtype in (np.float64, np.float32):
-        expected = nulls.ap_nulls(confs, 2000, 3, backend="numpy", dtype=dtype)
-        got = nulls.ap_nulls(confs, 2000, 3, backend="cuda", dtype=dtype)
+    for dtype, size in ((np.float64, 4000), (np.float32, 2000)):
+        expected = nulls.ap_nulls(confs, size, 3, backend="numpy", dtype=dtype)
+        got = nulls.ap_nulls(confs, size, 3, backend="cuda", dtype=dtype)
         assert got.tobytes() == expected.tobytes(), dtype
     rng = np.random.default_rng(1)
     conf_ix = rng.integers(len(confs), size=200)
@@ -376,19 +414,6 @@ def test_cuda_samples_and_pvalues_bitwise_numpy():
     a = nulls.ap_pvalues(scores, conf_ix, confs, backend="numpy", **kwargs)
     b = nulls.ap_pvalues(scores, conf_ix, confs, backend="cuda", **kwargs)
     assert a.tobytes() == b.tobytes()
-
-
-@needs_gpu
-def test_cuda_float32_gaps_match_numpy():
-    """Explicit "cuda" steps gaps in float32; its error bound keeps NumPy's samples.
-
-    The wide configurations step long gaps below 2**24 ranks, where the
-    float32 loop runs.
-    """
-    confs = np.concatenate([CONFS, WIDE])
-    expected = nulls.ap_nulls(confs, 4000, 5, backend="numpy", dtype=np.float64)
-    got = nulls.ap_nulls(confs, 4000, 5, backend="cuda", dtype=np.float64)
-    assert got.tobytes() == expected.tobytes()
 
 
 @needs_gpu

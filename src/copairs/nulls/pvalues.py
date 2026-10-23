@@ -50,7 +50,6 @@ def _check_max_workers(max_workers: int | None) -> None:
 def _prepare(scores, conf_ix, confs, null_size, seed, backend, max_workers):
     """Thresholds, checked inputs and the null plan shared by the p-value functions.
 
-    Also returns whether to step gaps in float32 (an explicit ``"cuda"``).
     For the CUDA backend the plan is copied to the GPU once.
     """
     thr = tie_thresholds(scores)
@@ -59,12 +58,11 @@ def _prepare(scores, conf_ix, confs, null_size, seed, backend, max_workers):
         raise ValueError(f"conf_ix must index the {len(confs)} rows of confs")
     null_size = check_null_size(null_size)
     _check_max_workers(max_workers)
-    fast_gaps = backend == "cuda"
     backend = resolve_backend(backend)
     plan = null_plan(confs, resolve_seed(seed))
     if backend == "cuda":
         plan = _import_cuda_backend().plan_on_device(plan)
-    return thr, conf_ix, null_size, backend, plan, fast_gaps
+    return thr, conf_ix, null_size, backend, plan
 
 
 def ap_pvalues(
@@ -107,7 +105,7 @@ def ap_pvalues(
     """
     if len(conf_ix) != len(scores):
         raise ValueError(f"{len(scores)} scores but {len(conf_ix)} conf_ix")
-    thr, conf_ix, null_size, backend, plan, fast_gaps = _prepare(
+    thr, conf_ix, null_size, backend, plan = _prepare(
         scores, conf_ix, confs, null_size, seed, backend, max_workers
     )
     order = np.lexsort((thr, conf_ix))
@@ -136,7 +134,7 @@ def ap_pvalues(
         sl = slice(b, min(b + batch, len(confs)))
         part = tuple(a[sl] for a in plan)
         null = _ap_nulls(
-            part, size, start, backend, np.float64, budget_bytes, max_workers, fast_gaps
+            part, size, start, backend, np.float64, budget_bytes, max_workers
         )
         count(null, ptr[sl.start : sl.stop + 1])
         del null  # free this chunk before sampling the next
@@ -209,7 +207,7 @@ def map_pvalues(
         raise ValueError(
             f"{len(map_scores)} mAP scores but {len(ptr) - 1} groups in ptr"
         )
-    thr, conf_ix, null_size, backend, plan, fast_gaps = _prepare(
+    thr, conf_ix, null_size, backend, plan = _prepare(
         map_scores, conf_ix, confs, null_size, seed, backend, max_workers
     )
     if len(thr) == 0:
@@ -234,7 +232,7 @@ def map_pvalues(
         chunks(null_size, chunk), n_work, progress_bar, "mAP null"
     ):
         null = _ap_nulls(
-            plan, size, start, backend, np.float64, budget_bytes, max_workers, fast_gaps
+            plan, size, start, backend, np.float64, budget_bytes, max_workers
         )
         group(null)
         del null  # free this chunk before sampling the next

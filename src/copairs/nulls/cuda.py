@@ -6,14 +6,14 @@ Imported only through :func:`copairs.nulls.backend._import_cuda_backend`
 The sampler kernel is a line-by-line port of
 :func:`copairs.nulls.sampler._ap_sample`: the same Philox blocks and the same
 double-precision operations in the same order, compiled without FMA
-contraction. With ``fast_gaps=False`` its samples are therefore those of the
-NumPy backend bit for bit. ``fast_gaps=True`` (``backend="cuda"``) steps long
-gaps in float32, which GPUs with few float64 units run up to 64 times faster:
-each step is taken in float32 only when the float32 product clears ``u`` by
-twice its error bound relative to Algorithm A's float64 product, and otherwise
-the float64 product is replayed. That bound makes its gaps equal Algorithm A's
-(and the samples NumPy's), but it rests on an error analysis rather than on
-identical arithmetic.
+contraction, except that the plain gap loop steps in float32, which GPUs with
+few float64 units run up to 64 times faster. A step is taken in float32 only
+when the float32 product clears ``u`` by its band, and otherwise the float64
+product is replayed. The band covers the float32 product's worst-case
+rounding relative to Algorithm A's float64 product for every gap below
+:data:`F32_MAX_GAP` (checked exhaustively by tests/test_cuda.py), and longer
+gaps replay in float64, so the gaps are Algorithm A's and the samples NumPy's.
+That rests on an error analysis rather than on identical arithmetic.
 
 The counts compare float64 nulls against the same thresholds, and sum a
 group's members in the same order, as the NumPy backend; they are exact.
@@ -27,6 +27,11 @@ from copairs.nulls import sampler
 cp = _cuda.cp
 host = _cuda.host
 
+# Gaps the float32 loop steps before it replays the float64 product. Its band
+# covers the worst-case rounding below this many steps; unlike the bound itself
+# (about 1.06e7 steps), that holds without reference to the callers' arguments.
+F32_MAX_GAP = 2**22
+
 # Constants shared with the CPU sampler, so both pick the same gap search.
 _DEFINES = (
     f"#define GUIDED_RATIO {sampler.GUIDED_RATIO}LL\n"
@@ -34,6 +39,7 @@ _DEFINES = (
     f"#define LOG_MARGIN {sampler._LOG_MARGIN!r}\n"
     f"#define EPS {sampler._EPS!r}\n"
     f"#define FACTOR_LIMIT {sampler._FACTOR_LIMIT!r}\n"
+    f"#define F32_MAX_GAP {F32_MAX_GAP}LL\n"
 )
 
 _SAMPLER = r"""
@@ -66,17 +72,19 @@ __device__ long long gap_loop(long long remaining, long long k, double u) {
 }
 
 // gap_loop run mostly in float32 (full rate on GPUs with few float64 units). A step
-// is decided in float32 only when the float32 product clears u by more than its
-// error bound relative to the float64 product; otherwise the float64 product is
-// replayed and the loop finishes in float64, so the gap equals gap_loop's.
+// is decided in float32 only when the float32 product clears u by its band;
+// otherwise the float64 product is replayed and the loop finishes in float64, so
+// the gap equals gap_loop's. Below 2^24 ranks the counts are exact in float32, and
+// u >= 1e-30 keeps every product a normal float, so after g steps the float32
+// product is within (1 +- 2^-24)^(2g + 1) of the exact one and the float64 product
+// within (1 +- 2^-53)^(2g + 1). The band, with uf's and the thresholds' roundings,
+// covers both for g < F32_MAX_GAP (tests/test_cuda.py checks every g).
 __device__ long long gap_loop_f32(long long remaining, long long k, double u) {
     if (remaining >= (1LL << 24) || u < 1e-30) return gap_loop(remaining, k, u);
     float uf = (float)u;
     long long top = remaining - k, gap = 0;
     float quot = (float)top / (float)remaining;
-    while (true) {
-        // |float32 product / float64 product - 1| <= (2 gap + 1) 2^-24 (1 + 2^-23), plus
-        // the roundings of uf and of the thresholds: covered twice over.
+    while (gap < F32_MAX_GAP) {
         float band = (float)(2 * gap + 4) * 1.2e-7f;
         if (quot > uf * (1.0f + band)) {
             gap += 1;
@@ -171,7 +179,7 @@ __device__ double ap_sample(long long num_pos, long long total, unsigned long lo
         } else if (remaining < GUIDED_MAX_TOTAL && remaining - k > GUIDED_RATIO * k * (k + 1)) {
             gap = gap_guided(remaining, k, u);
         } else {
-            gap = FAST_GAPS ? gap_loop_f32(remaining, k, u) : gap_loop(remaining, k, u);
+            gap = gap_loop_f32(remaining, k, u);
         }
         rank += gap + 1;
         i += 1;
@@ -211,12 +219,7 @@ extern "C" __global__ void ap_nulls_f64(const long long* num_pos, const long lon
 }
 """
 
-# The kernel behind backend="auto" (float64 gaps, bitwise NumPy's) and the one
-# behind an explicit backend="cuda" (float32 gap stepping).
-_AP_NULLS = {
-    fast: f"#define FAST_GAPS {int(fast)}\n" + _DEFINES + _SAMPLER
-    for fast in (False, True)
-}
+_AP_NULLS = _DEFINES + _SAMPLER
 
 
 def plan_on_device(plan):
@@ -230,12 +233,11 @@ def plan_on_device(plan):
     )
 
 
-def ap_nulls(plan, start: int, size: int, dtype, fast_gaps: bool = False):
+def ap_nulls(plan, start: int, size: int, dtype):
     """``(n_conf, size)`` CuPy array of samples ``start..start + size - 1``.
 
     ``plan`` is a :func:`copairs.nulls.sampler.null_plan`, on the host or from
-    :func:`plan_on_device`. ``fast_gaps`` selects float32 gap stepping (see
-    the module docstring).
+    :func:`plan_on_device`.
     """
     num_pos, total, k0, k1 = plan_on_device(plan)
     n_conf = len(num_pos)
@@ -253,7 +255,7 @@ def ap_nulls(plan, start: int, size: int, dtype, fast_gaps: bool = False):
         out,
     )
     name = "ap_nulls_f64" if out.dtype == np.float64 else "ap_nulls_f32"
-    kernel = _cuda.kernel(_AP_NULLS[bool(fast_gaps)], name)
+    kernel = _cuda.kernel(_AP_NULLS, name)
     kernel((_cuda.grid(out.size),), (_cuda.BLOCK,), args)
     return out
 

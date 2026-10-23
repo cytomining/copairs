@@ -372,9 +372,8 @@ def ap_nulls(
         ``(n, null_size)`` AP samples.
     """
     plan = null_plan(confs, seed)
-    fast_gaps = backend == "cuda"
     backend = resolve_backend(backend)
-    out = _ap_nulls(plan, null_size, start, backend, dtype, fast_gaps=fast_gaps)
+    out = _ap_nulls(plan, null_size, start, backend, dtype)
     return _import_cuda_backend().host(out) if backend == "cuda" else out
 
 
@@ -386,7 +385,6 @@ def _ap_nulls(
     dtype,
     budget_bytes=DEFAULT_BUDGET,
     max_workers=None,
-    fast_gaps=False,
 ):
     """:func:`ap_nulls` from a :func:`null_plan` and a resolved backend.
 
@@ -395,14 +393,13 @@ def _ap_nulls(
     sized so the blocks in flight keep their temporaries within
     ``budget_bytes``; the output is allocated on top of that. The Numba
     backend runs on Numba's threads. Samples do not depend on the threads.
-    The CUDA backend returns a CuPy array, with float32 gap stepping when
-    ``fast_gaps``.
+    The CUDA backend returns a CuPy array.
     """
     dtype = np.dtype(dtype)
     if dtype not in (np.float32, np.float64):
         raise ValueError(f"dtype must be float32 or float64, got {dtype}")
     if backend == "cuda":
-        return _import_cuda_backend().ap_nulls(plan, start, null_size, dtype, fast_gaps)
+        return _import_cuda_backend().ap_nulls(plan, start, null_size, dtype)
     num_pos, total, k0, k1 = plan
     out = np.empty((len(num_pos), null_size), dtype=dtype)
     if backend == "numba":
