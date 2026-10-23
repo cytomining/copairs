@@ -8,6 +8,8 @@ positive keys and, for every negative, a binary search into them: no global
 sort of all pairs.
 """
 
+import operator
+
 import numba
 import numpy as np
 
@@ -68,6 +70,30 @@ def index_pairs(pairs, n: int | None = None) -> np.ndarray:
         raise IndexError(f"pair index {hi} is out of bounds for {n} profiles")
     pairs = np.ascontiguousarray(pairs)
     return pairs if pairs.dtype == np.uint32 else pairs.astype(np.int64, copy=False)
+
+
+def pair_sims(sims, pairs: np.ndarray) -> np.ndarray:
+    """``sims`` as an array, one per pair; ValueError otherwise."""
+    sims = np.asarray(sims)
+    if sims.shape != (len(pairs),):
+        raise ValueError(
+            f"need one similarity per pair: {len(pairs)} pairs, sims of shape "
+            f"{sims.shape}"
+        )
+    return sims
+
+
+def profile_count(n, *pairs: np.ndarray) -> int:
+    """``n`` checked against the :func:`index_pairs` ``pairs``, or found from them."""
+    if n is None:
+        return 1 + max(int(p.max()) if len(p) else -1 for p in pairs)
+    n = operator.index(n)
+    if n < 0:
+        raise ValueError(f"n must be a nonnegative number of profiles, got {n}")
+    for p in pairs:
+        if len(p) and p.max() >= n:
+            raise IndexError(f"pair index {p.max()} is out of bounds for {n} profiles")
+    return n
 
 
 @numba.njit(cache=True)
@@ -156,14 +182,22 @@ def ap_from_pairs(
     Parameters
     ----------
     pos_pairs, neg_pairs : np.ndarray
-        ``(n, 2)`` profile indices of positive and negative pairs.
+        ``(k, 2)`` integer profile indices of positive and negative pairs.
     pos_sims, neg_sims : np.ndarray
-        Similarities of the pairs, ranked by their float32 ``1 - similarity``.
+        One similarity per pair, ranked by its float32 ``1 - similarity``.
     budget_bytes : int
         Upper bound on the per-thread negative histograms.
     n : int, optional
         Number of profiles, more than any index in the pairs; found from the
         pairs when not given.
+
+    Raises
+    ------
+    ValueError
+        For pairs that are not ``(k, 2)`` integers, similarities that are not
+        one per pair, or a negative ``n``.
+    IndexError
+        For a negative pair index, or one of at least ``n``.
 
     Returns
     -------
@@ -174,12 +208,10 @@ def ap_from_pairs(
     null_confs : np.ndarray
         ``(n, 2)`` uint32 ``(num_pos, total)`` of each profile in ``paired_ix``.
     """
-    if n is None:
-        n = 1 + max(
-            int(pairs.max()) if pairs.size else -1 for pairs in (pos_pairs, neg_pairs)
-        )
     pos_pairs, neg_pairs = index_pairs(pos_pairs), index_pairs(neg_pairs)
-    ptr, vals = pair_csr(pos_pairs, np.asarray(pos_sims), n)
+    n = profile_count(n, pos_pairs, neg_pairs)
+    pos_sims, neg_sims = pair_sims(pos_sims, pos_pairs), pair_sims(neg_sims, neg_pairs)
+    ptr, vals = pair_csr(pos_pairs, pos_sims, n)
     _sort_segments(ptr, vals)
     bins = int(ptr[n]) + n
     # A bin or count of one chunk is at most 2 per negative pair (a self-pair).
@@ -188,7 +220,7 @@ def ap_from_pairs(
     n_chunks = max(1, min(numba.get_num_threads(), n_chunks))
     hist = np.zeros((n_chunks, bins), dtype=dtype)
     n_neg = np.zeros((n_chunks, n), dtype=dtype)
-    _negative_hist(neg_pairs, np.asarray(neg_sims), ptr, vals, hist, n_neg)
+    _negative_hist(neg_pairs, neg_sims, ptr, vals, hist, n_neg)
     # Summed in int64
     hist, n_neg = hist.sum(axis=0, dtype=np.int64), n_neg.sum(axis=0, dtype=np.int64)
     ap = _ap_from_hist(ptr, hist, n)

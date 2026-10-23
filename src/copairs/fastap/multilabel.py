@@ -16,9 +16,11 @@ import pandas as pd
 from copairs.matching import _key_pairs, _pair_keys, find_pairs
 from copairs.fastap.ranking import (
     pair_csr,
+    pair_sims,
     rank_keys,
     index_pairs,
     upper_bound,
+    profile_count,
     sortable_keys,
     ap_from_counts,
 )
@@ -230,15 +232,30 @@ def multilabel_ap(pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, n):
     neg_pairs, neg_sims : np.ndarray
         Unique negative pairs; a profile's negatives are shared by its labels.
     n : int
-        Number of profiles.
+        Number of profiles, more than any index in the pairs.
 
     Returns
     -------
     tuple of np.ndarray
         ``label``, ``profile``, ``ap``, ``num_pos`` and ``total`` per row,
         ordered by label and then profile, like copairs' per-label loop.
+
+    Raises
+    ------
+    ValueError, IndexError
+        For malformed pairs, similarities or ``n``, as in
+        :func:`copairs.fastap.ap_from_pairs`, or ``pos_counts`` that do not
+        sum to the number of positive pairs.
     """
-    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
+    pos_pairs, neg_pairs = index_pairs(pos_pairs), index_pairs(neg_pairs)
+    n = profile_count(n, pos_pairs, neg_pairs)
+    pos_sims, neg_sims = pair_sims(pos_sims, pos_pairs), pair_sims(neg_sims, neg_pairs)
+    pos_counts = np.asarray(pos_counts)
+    if pos_counts.ndim != 1 or pos_counts.sum() != len(pos_pairs):
+        raise ValueError(
+            f"pos_counts must split the {len(pos_pairs)} positive pairs by label"
+        )
+    pos_pairs = pos_pairs.astype(np.int64, copy=False)
     label = np.repeat(np.arange(len(pos_counts)), pos_counts)
     ends = pos_pairs.ravel()
     end_label = np.repeat(label, 2)
@@ -253,7 +270,7 @@ def multilabel_ap(pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, n):
     row_key, end_keys = row_key[order], end_keys[order]
     rows, pos_start = np.unique(row_key, return_index=True)
     pos_ptr = np.append(pos_start, len(row_key)).astype(np.int64)
-    neg_ptr, neg_vals = pair_csr(index_pairs(neg_pairs), np.asarray(neg_sims), n)
+    neg_ptr, neg_vals = pair_csr(neg_pairs, neg_sims, n)
     profile = rows % n
     ap = _rows_ap(pos_ptr, end_keys, profile, neg_ptr, neg_vals)
     num_pos = np.diff(pos_ptr)

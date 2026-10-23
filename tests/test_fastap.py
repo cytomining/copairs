@@ -84,6 +84,48 @@ def test_ap_from_pairs_accepts_series_similarities():
     np.testing.assert_array_equal(got[1], expected[1])
 
 
+MALFORMED_AP_INPUTS = """
+import numpy as np
+from copairs import fastap
+from copairs.fastap.multilabel import multilabel_ap
+
+pos, neg = [[0, 1], [2, 3]], [[0, 2], [1, 3], [0, 3]]
+pos_sims, neg_sims = [0.9, 0.8], [0.5, 0.95, 0.1]
+cases = [
+    # n below an index: the histograms would be written out of bounds
+    (IndexError, fastap.ap_from_pairs, (pos, neg, pos_sims, neg_sims), {"n": 2}),
+    (IndexError, fastap.ap_from_pairs, ([[0, -1]], neg, [0.9], neg_sims), {}),
+    (ValueError, fastap.ap_from_pairs, ([[0, 1]], neg, [], neg_sims), {}),
+    (ValueError, fastap.ap_from_pairs, (pos, neg, pos_sims, neg_sims[:2]), {}),
+    (ValueError, fastap.ap_from_pairs, (pos, neg, [pos_sims], neg_sims), {}),
+    (ValueError, fastap.ap_from_pairs, (pos, neg, pos_sims, neg_sims), {"n": -1}),
+    (ValueError, fastap.ap_from_pairs, (np.ravel(pos), neg, [0.9] * 2, neg_sims), {}),
+    (IndexError, multilabel_ap, (pos, pos_sims, [1, 1], neg, neg_sims, 2), {}),
+    (IndexError, multilabel_ap, (pos, pos_sims, [2], [[0, 9]], [0.1], 4), {}),
+    (ValueError, multilabel_ap, (pos, [], [2], neg, neg_sims, 4), {}),
+    (ValueError, multilabel_ap, (pos, pos_sims, [2], neg, neg_sims[:1], 4), {}),
+    (ValueError, multilabel_ap, (pos, pos_sims, [1], neg, neg_sims, 4), {}),
+]
+for i, (error, fn, args, kwargs) in enumerate(cases):
+    try:
+        fn(*args, **kwargs)
+    except error:
+        pass
+    else:
+        raise AssertionError(f"case {i}: no {error.__name__}")
+"""
+
+
+def test_ap_kernels_reject_malformed_inputs():
+    """Pairs, similarities and n that the kernels would misread raise.
+
+    Runs in a subprocess: the kernels index without bounds checks, so an
+    unchecked input can crash the interpreter.
+    """
+    result = run_isolated(MALFORMED_AP_INPUTS)
+    assert result.returncode == 0, (result.returncode, result.stderr)
+
+
 METRICS = list(fastap.FAST_METRICS)
 
 
