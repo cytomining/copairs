@@ -466,10 +466,7 @@ class _Layout:
         n_block = len(pool.blocks)
         bm_ptr = np.searchsorted(block_of[self.bm_slot], np.arange(n_block + 1))
         self.bm_ptr = bm_ptr.astype(np.int64)
-        self.adjm = adjm = np.zeros((n, n), dtype=np.bool_)
-        edges = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
-        adjm[edges[:, 0], edges[:, 1]] = True
-        adjm[edges[:, 1], edges[:, 0]] = True
+        self.adjm = adjm = _adjacency_matrix(n, edges)
         self.deg = adjm.sum(axis=1).astype(np.int64)
         targets = np.concatenate([members, pool.refs])
         self.kmu = kmu = _keys(
