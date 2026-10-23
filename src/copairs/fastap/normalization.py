@@ -58,17 +58,19 @@ def expected_ap_array(M: np.ndarray, N: np.ndarray) -> np.ndarray:
         M.astype(np.uint64) * width + L.astype(np.uint64), return_inverse=True
     )
     Mu, Lu = (keys // width).astype(np.int64), (keys % width).astype(np.int64)
-    if Lu.max() <= _MAX_TABLE:
-        table = _harmonic_table(int(Lu.max()), sys.version_info >= (3, 12))
-        H = table[Lu - 1]
-    else:
-        # Imported here: the copairs.map package loads statsmodels and DuckDB.
-        from copairs.map.normalization import harmonic_number
+    # Without positives the expectation is 0, with only positives 1 (L == 1
+    # included); only configurations holding both need harmonic numbers.
+    mu0 = (Mu == Lu).astype(np.float64)
+    mixed = (Mu > 0) & (Mu < Lu)
+    if mixed.any():
+        Mm, Lm = Mu[mixed], Lu[mixed]
+        if Lm.max() <= _MAX_TABLE:
+            table = _harmonic_table(int(Lm.max()), sys.version_info >= (3, 12))
+            H = table[Lm - 1]
+        else:
+            # Imported here: the copairs.map package loads statsmodels and DuckDB.
+            from copairs.map.normalization import harmonic_number
 
-        H = np.array([harmonic_number(int(n)) for n in Lu])
-    with np.errstate(divide="ignore", invalid="ignore"):
-        mu0 = (1.0 / Lu) * (((Mu - 1.0) / (Lu - 1.0)) * (Lu - H) + H)
-    mu0 = np.where(Lu == 1, (Mu == 1).astype(float), mu0)
-    mu0 = np.where(Mu == 0, 0.0, mu0)
-    mu0 = np.where(Mu == Lu, 1.0, mu0)
+            H = np.array([harmonic_number(int(n)) for n in Lm])
+        mu0[mixed] = (1.0 / Lm) * (((Mm - 1.0) / (Lm - 1.0)) * (Lm - H) + H)
     return mu0[inv.ravel()]

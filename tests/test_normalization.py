@@ -168,6 +168,26 @@ def test_expected_ap_array_bitwise():
         fastap.expected_ap_array(np.array([1]), np.array([2**32]))
 
 
+def test_expected_ap_array_exact_cases_skip_harmonics(monkeypatch):
+    """Configurations without positives or without negatives need no H_L.
+
+    Their expectations are exactly 0 and 1, so no harmonic table or sum runs,
+    however long the rank list.
+    """
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    from copairs import fastap
+    from copairs.map import normalization as map_normalization
+
+    def no_harmonics(*args):
+        raise AssertionError("harmonic numbers computed")
+
+    monkeypatch.setattr(fastap.normalization, "_harmonic_table", no_harmonics)
+    monkeypatch.setattr(map_normalization, "harmonic_number", no_harmonics)
+    M = np.array([10**9, 0, 1, 0, 2**24])
+    N = np.array([0, 10**9, 0, 1, 0])
+    np.testing.assert_array_equal(fastap.expected_ap_array(M, N), [1, 0, 1, 0, 1])
+
+
 @pytest.mark.parametrize(
     "ap,M,N",
     [
