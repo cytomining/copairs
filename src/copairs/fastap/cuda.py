@@ -48,31 +48,16 @@ _PAIR_KERNELS = r"""
 // Compiled with --fmad=false (copairs._cuda.OPTIONS): the counting kernels round as
 // the CPU does. The similarity sums, which match the CPU's only to rounding anyway,
 // ask for fused multiply-adds with fma().
-template <typename T>
-__device__ void dot_pairs(const T* x, long long d, const unsigned int* pairs, long long n,
-                          float* out) {
-    int lane = threadIdx.x & 31;
-    long long warp = (blockIdx.x * (long long)blockDim.x + threadIdx.x) >> 5;
-    long long n_warps = ((long long)gridDim.x * blockDim.x) >> 5;
-    for (long long p = warp; p < n; p += n_warps) {
-        const T* a = x + (long long)pairs[2 * p] * d;
-        const T* b = x + (long long)pairs[2 * p + 1] * d;
-        double acc = 0.0;
-        for (long long t = lane; t < d; t += 32) acc = fma((double)a[t], (double)b[t], acc);
-        for (int off = 16; off > 0; off >>= 1) acc += __shfl_down_sync(0xffffffffu, acc, off);
-        if (lane == 0) out[p] = (float)acc;
-    }
-}
-
 // max that propagates NaN, like np.max (fmax drops it).
 __device__ __forceinline__ double nan_max(double a, double b) {
     return (isnan(a) || isnan(b)) ? (a + b) : fmax(a, b);
 }
 
-// 1 / (1 + distance); kind 0 = euclidean, 1 = manhattan, 2 = chebyshev.
+// Similarity of each pair, one warp per pair: kind -1 = dot product (of unit rows),
+// else 1 / (1 + distance) with kind 0 = euclidean, 1 = manhattan, 2 = chebyshev.
 template <typename T>
-__device__ void minkowski_pairs(const T* x, long long d, const unsigned int* pairs, long long n,
-                                int kind, float* out) {
+__device__ void pair_sims(const T* x, long long d, const unsigned int* pairs, long long n,
+                          int kind, float* out) {
     int lane = threadIdx.x & 31;
     long long warp = (blockIdx.x * (long long)blockDim.x + threadIdx.x) >> 5;
     long long n_warps = ((long long)gridDim.x * blockDim.x) >> 5;
@@ -81,6 +66,10 @@ __device__ void minkowski_pairs(const T* x, long long d, const unsigned int* pai
         const T* b = x + (long long)pairs[2 * p + 1] * d;
         double acc = 0.0;
         for (long long t = lane; t < d; t += 32) {
+            if (kind < 0) {
+                acc = fma((double)a[t], (double)b[t], acc);
+                continue;
+            }
             double diff = fabs((double)a[t] - (double)b[t]);
             acc = kind == 0 ? fma(diff, diff, acc) : kind == 1 ? acc + diff : nan_max(acc, diff);
         }
@@ -88,27 +77,18 @@ __device__ void minkowski_pairs(const T* x, long long d, const unsigned int* pai
             double other = __shfl_down_sync(0xffffffffu, acc, off);
             acc = kind == 2 ? nan_max(acc, other) : acc + other;
         }
-        if (lane == 0) out[p] = (float)(1.0 / (1.0 + (kind == 0 ? sqrt(acc) : acc)));
+        if (lane == 0)
+            out[p] = (float)(kind < 0 ? acc : 1.0 / (1.0 + (kind == 0 ? sqrt(acc) : acc)));
     }
 }
 
-extern "C" __global__ void dot_pairs_f32(const float* x, long long d, const unsigned int* pairs,
-                                         long long n, float* out) {
-    dot_pairs<float>(x, d, pairs, n, out);
+extern "C" __global__ void pair_sims_f32(const float* x, long long d, const unsigned int* pairs,
+                                         long long n, int kind, float* out) {
+    pair_sims<float>(x, d, pairs, n, kind, out);
 }
-extern "C" __global__ void dot_pairs_f64(const double* x, long long d, const unsigned int* pairs,
-                                         long long n, float* out) {
-    dot_pairs<double>(x, d, pairs, n, out);
-}
-extern "C" __global__ void minkowski_pairs_f32(const float* x, long long d,
-                                               const unsigned int* pairs, long long n, int kind,
-                                               float* out) {
-    minkowski_pairs<float>(x, d, pairs, n, kind, out);
-}
-extern "C" __global__ void minkowski_pairs_f64(const double* x, long long d,
-                                               const unsigned int* pairs, long long n, int kind,
-                                               float* out) {
-    minkowski_pairs<double>(x, d, pairs, n, kind, out);
+extern "C" __global__ void pair_sims_f64(const double* x, long long d, const unsigned int* pairs,
+                                         long long n, int kind, float* out) {
+    pair_sims<double>(x, d, pairs, n, kind, out);
 }
 
 // For both endpoints i of each negative pair, count it in bin ptr[i] + i + q, where
@@ -197,19 +177,18 @@ def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
     if feats.dtype not in (np.float32, np.float64):
         feats = feats.astype(np.float64)
     if metric in MINKOWSKI_METRICS:
-        x, name = feats, "minkowski_pairs"
-        extra = (np.int32(MINKOWSKI_METRICS.index(metric)),)
+        x, kind = feats, np.int32(MINKOWSKI_METRICS.index(metric))
     else:
-        x, name, extra = _unit_rows(feats, metric == "correlation"), "dot_pairs", ()
+        x, kind = _unit_rows(feats, metric == "correlation"), np.int32(-1)
     x = cp.asarray(np.ascontiguousarray(x))
-    name += "_f64" if x.dtype == cp.float64 else "_f32"
+    name = "pair_sims_f64" if x.dtype == cp.float64 else "pair_sims_f32"
     d = np.int64(x.shape[1])
 
     def sims_of(device_pairs):
         n = len(device_pairs)
         out = cp.empty(n, dtype=cp.float32)
         if n:
-            args = (x, d, device_pairs, np.int64(n), *extra, out)
+            args = (x, d, device_pairs, np.int64(n), kind, out)
             _kernel(name)((_cuda.grid(32 * n),), (_cuda.BLOCK,), args)
         if metric == "abs_cosine":
             cp.abs(out, out=out)
