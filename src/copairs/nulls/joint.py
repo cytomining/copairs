@@ -60,8 +60,11 @@ _SQRT_HALF = math.sqrt(0.5)
 _LN2 = math.log(2.0)
 # A member sorts up to this many positives by insertion, more by quicksort.
 _INSERTION = 32
-# Samples per vectorized call.
+# Samples per vectorized call, at most.
 _CHUNK = 2**16
+# Elements of the per-sample arrays of one vectorized call: the group's edge
+# uniforms and one member's positives (2**22 float64 = 32 MiB each).
+_CHUNK_ELEMENTS = 2**22
 
 
 def _make_sampler(philox, uniform, jit=lambda f: f):
@@ -477,9 +480,19 @@ def joint_nulls(plan, null_size: int, start: int = 0, rows=None) -> np.ndarray:
     sigs = range(*(rows or slice(None)).indices(n_sig))
     out = np.empty((len(sigs), null_size), dtype=np.float64)
     for r, s in enumerate(sigs):
-        for c, size in chunks(null_size, _CHUNK):
+        for c, size in chunks(null_size, _chunk(plan, s)):
             out[r, c : c + size] = _joint_null_np(plan, s, start + c, size)
     return out
+
+
+def _chunk(plan, s):
+    """Return the samples per vectorized call of signature ``s`` (bounds its arrays)."""
+    mem_ptr, num_pos, _, edge_ptr = plan[:4]
+    width = max(
+        int(edge_ptr[s + 1] - edge_ptr[s]),
+        int(num_pos[mem_ptr[s] : mem_ptr[s + 1]].max(initial=1)),
+    )
+    return int(min(_CHUNK, max(1, _CHUNK_ELEMENTS // width)))
 
 
 def joint_pvalues(

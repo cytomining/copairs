@@ -97,6 +97,33 @@ def test_rows_take_any_slice(rows):
     np.testing.assert_array_equal(joint.joint_nulls(plan, 50, 3, rows), every[rows])
 
 
+def test_chunks_bound_the_per_sample_arrays(monkeypatch):
+    """Samples per vectorized call shrink with edges and positives; draws do not change."""
+    complete = [(i, j) for i in range(10) for j in range(i + 1, 10)]
+    sigs = [
+        joint.canonical_signature([(9, 40)] * 10, complete),  # 45 edges
+        joint.canonical_signature([(90, 30), (3, 30)], [(0, 1)]),  # 90 positives
+        joint.canonical_signature(*SIGNATURES[3]),
+    ]
+    plan = joint.joint_plan(sigs, 5)
+    expected = joint.joint_nulls(plan, 500, start=11)
+    sizes = []
+    full = joint._joint_null_np
+
+    def spy(plan, s, start, size):
+        n_edge = plan[3][s + 1] - plan[3][s]
+        width = max(n_edge, int(plan[1][plan[0][s] : plan[0][s + 1]].max()))
+        sizes.append(size * width)
+        return full(plan, s, start, size)
+
+    monkeypatch.setattr(joint, "_joint_null_np", spy)
+    monkeypatch.setattr(joint, "_CHUNK_ELEMENTS", 2**9, raising=False)
+    np.testing.assert_array_equal(joint.joint_nulls(plan, 500, start=11), expected)
+    assert max(sizes) <= 2**9
+    p = joint.joint_pvalues(np.full(3, 0.3), np.arange(3), sigs, 500, 5)
+    assert max(sizes) <= 2**9 and 0 < p.min() and p.max() <= 1
+
+
 def test_pvalue_hits_match_scalar_draws(monkeypatch):
     """Joint p-values count exactly the scalar samples at or above each score."""
     monkeypatch.setattr(joint, "_CHUNK", 64)  # several chunks per signature
