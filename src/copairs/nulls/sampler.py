@@ -275,6 +275,7 @@ def _ap_null_numpy(num_pos, total, start, size, k0, k1):
     remaining = np.full(size, total, dtype=np.int64)
     rank = np.zeros(size, dtype=np.int64)
     acc = np.zeros(size, dtype=np.float64)
+    u_next = np.empty(size)  # second uniform of each Philox block, for odd i
     live = np.arange(size)
     for i in range(num_pos):
         k = num_pos - i
@@ -287,8 +288,12 @@ def _ap_null_numpy(num_pos, total, start, size, k0, k1):
             live = live[~full]
         if live.size == 0:
             break
-        w = philox4x32(c0[live], c1[live], np.uint64(i // 2), np.uint64(0), k0, k1)
-        u = uniform53(w[0], w[1]) if i % 2 == 0 else uniform53(w[2], w[3])
+        if i % 2 == 0:
+            w = philox4x32(c0[live], c1[live], np.uint64(i // 2), np.uint64(0), k0, k1)
+            u = uniform53(w[0], w[1])
+            u_next[live] = uniform53(w[2], w[3])
+        else:
+            u = u_next[live]
         rem = remaining[live]
         if k == 1:
             gap = np.minimum(np.floor(rem * u).astype(np.int64), rem - 1)
