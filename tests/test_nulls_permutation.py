@@ -1092,19 +1092,24 @@ def test_count_hits_at_round_edges(hits_at):
                 assert got == (len(hits), null_size)
 
 
-def test_stop_after_on_multilabel_groups():
-    """Multilabel groups stop the same way."""
+def test_stop_after_on_multilabel_groups(monkeypatch):
+    """Multilabel groups stop the same way, whatever the rounds."""
     meta = label_meta()
     feats = np.random.default_rng(14).standard_normal((len(meta), 5))
     ap = multilabel_ap(meta, feats)
-    res = mean_average_precision(
-        ap, ["target"], 3000, 0.05, 0, progress_bar=False, stop_after=10
-    ).set_index("target")
+    args = (["target"], 3000, 0.05, 0)
+    res = mean_average_precision(ap, *args, progress_bar=False, stop_after=10)
     for label in ("A", "B"):
         _, identity, count, full = label_draws(meta, feats, label, 3000)
         assert count >= 10  # the run stopped
         expected = sequential_expected(full, identity, 3000, 10)
-        assert res.loc[label, "p_value"] == expected
+        assert res.set_index("target").loc[label, "p_value"] == expected
+    # Rounds of 7, 14, ... draws (at most 77): every stopped label stops
+    # past its first round.
+    monkeypatch.setattr(permutation, "_FIRST_ROUND", 7)
+    monkeypatch.setattr(permutation._LabelLayout, "chunk", lambda self: 77)
+    rounds = mean_average_precision(ap, *args, progress_bar=False, stop_after=10)
+    assert rounds["p_value"].tolist() == res["p_value"].tolist()
 
 
 def test_stop_after_arguments():
