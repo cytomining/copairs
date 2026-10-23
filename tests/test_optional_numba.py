@@ -44,6 +44,28 @@ def test_default_path_does_not_import_numba():
     assert result.returncode == 0, result.stderr
 
 
+def test_multilabel_matching_skips_scipy():
+    """find_pairs_multilabel on NumPy loads neither SciPy nor Numba, as on 0.5.5.
+
+    ``import copairs`` imports only copairs.matching; resolving the backend
+    must not load copairs.compute, which imports SciPy.
+    """
+    result = run_isolated(
+        "import sys\n"
+        "import pandas as pd\n"
+        "import copairs\n"
+        "from copairs.matching import find_pairs_multilabel\n"
+        "df = pd.DataFrame({'l': [['a'], ['a', 'b'], ['b'], ['c']],\n"
+        "                   'p': ['p', 'q', 'p', 'q']})\n"
+        "find_pairs_multilabel(df, ['l'], ['p'], 'l')\n"
+        "find_pairs_multilabel(df, [], ['l'], 'l', backend='numpy')\n"
+        "for name in ('scipy', 'numba', 'copairs.compute', 'copairs.fastap'):\n"
+        "    assert not any(m == name or m.startswith(name + '.')\n"
+        "                   for m in sys.modules), name\n"
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "call",
     [

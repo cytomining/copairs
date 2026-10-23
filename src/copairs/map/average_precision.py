@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs._backend import backend_module
 from copairs.matching import UnpairedException, find_pairs
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
@@ -185,7 +186,7 @@ def average_precision(
         * Negative pairs are defined by `neg_diffby` (profiles differ in these metadata values)
           and optionally constrained by `neg_sameby` (profiles share these metadata values if specified).
     """
-    fastap = compute._backend_module(backend)
+    fastap = backend_module(backend)
 
     # Combine all metadata columns needed for pair definitions
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)

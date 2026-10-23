@@ -13,6 +13,8 @@ import numpy as np
 import duckdb
 import pandas as pd
 
+from copairs._backend import backend_module
+
 logger = logging.getLogger("copairs")
 ColumnList = Union[Sequence[str], pd.Index]
 ColumnDict = Dict[str, ColumnList]
@@ -580,10 +582,7 @@ def find_pairs_multilabel(
     -----
     The function asserts that `multilabel_col` is present in either `sameby` or `diffby`.
     """
-    # Imported here: copairs.compute loads SciPy, which `import copairs` skips.
-    from copairs.compute import _backend_module
-
-    find = _multilabel_matcher(dframe, multilabel_col, _backend_module(backend))
+    find = _multilabel_matcher(dframe, multilabel_col, backend_module(backend))
     return find(sameby, diffby)
 
 

@@ -4,7 +4,7 @@ from typing import Tuple, Union, Literal
 
 import numpy as np
 
-from copairs import compute
+from copairs._backend import backend_module
 
 
 def harmonic_number(n: int) -> float:
@@ -108,7 +108,7 @@ def normalize_ap(
     - Normalized AP = 1 when performance is perfect
     - Negative values indicate worse-than-random performance
     """
-    fastap = compute._backend_module(backend)
+    fastap = backend_module(backend)
 
     # Handle scalar or array inputs
     is_scalar = np.isscalar(ap)

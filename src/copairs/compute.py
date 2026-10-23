@@ -347,29 +347,6 @@ def get_similarity_fn(
     return batch_processing(similarity_fn, progress_bar=progress_bar)
 
 
-def _backend_module(backend: str):
-    """Return the kernels for ``backend``: None for ``"numpy"``.
-
-    For ``"numba"``, imports the optional Numba kernels, :mod:`copairs.fastap`,
-    on first use. Keeps transitive import failures: only a missing ``numba``
-    itself becomes the ImportError that names the extra.
-    """
-    if backend == "numpy":
-        return None
-    if backend != "numba":
-        raise ValueError("backend must be either 'numpy' or 'numba'.")
-    try:
-        from copairs import fastap
-    except ModuleNotFoundError as exc:
-        if exc.name != "numba":
-            raise
-        raise ImportError(
-            "backend='numba' requires the optional Numba dependency. "
-            "Install it with `pip install 'copairs[numba]'`."
-        ) from exc
-    return fastap
-
-
 def random_binary_matrix(n, m, k, rng):
     """Generate a indices of k values in 1 per row in a random binary n*m matrix.
 

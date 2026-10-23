@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs._backend import backend_module
 from copairs.matching import UnpairedException, _unique_pairs, _multilabel_matcher
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
@@ -100,7 +101,7 @@ def average_precision(
     --------
     copairs.map.average_precision : Average precision without multilabel support.
     """
-    fastap = compute._backend_module(backend)
+    fastap = backend_module(backend)
 
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)

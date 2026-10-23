@@ -2,7 +2,7 @@
 
 This package needs the optional ``numba`` extra (``pip install
 'copairs[numba]'``). copairs imports it only when ``backend="numba"`` is
-requested, through ``copairs.compute._backend_module``. AP values match
+requested, through ``copairs._backend.backend_module``. AP values match
 copairs' rank-list implementation to float64 rounding given the same
 similarities. :func:`draw_average_precisions` scores many query-vs-reference
 draws at once.
