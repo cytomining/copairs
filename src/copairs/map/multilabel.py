@@ -254,11 +254,8 @@ def _lone_pairs(meta, multilabel_col, neg_sameby, other, keys):
             multilabel_col=multilabel_col,
         )
         pairs = held[np.asarray(found, dtype=np.int64).reshape(-1, 2)]
-    if len(pairs):
-        index = {k: i for i, k in enumerate(np.asarray(keys).tolist())}
-        key = np.repeat(
-            [index.get(k, -1) for k in np.asarray(found_keys).tolist()], counts
-        ).astype(np.int64)
+    if len(pairs):  # -1 for labels without positive pairs
+        key = np.repeat(pd.Index(keys).get_indexer(found_keys), counts).astype(np.int64)
     return _shared_once(pairs, key, len(meta))
 
 
