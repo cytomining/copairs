@@ -150,7 +150,8 @@ def map_pvalues(
     so the group null at sample ``j`` is
     ``sum_e conf_cnt[e] * AP_{conf_ix[e]}(j) / sum_e conf_cnt[e]`` and
     ``p_g = (1 + #{null_g >= thr_g}) / (null_size + 1)``, with ``thr_g`` from
-    :func:`tie_thresholds`.
+    :func:`tie_thresholds`. Counts must be non-negative, and every group needs
+    at least one member.
     """
     ptr = np.asarray(ptr, dtype=np.int64)
     conf_cnt = np.asarray(conf_cnt, dtype=np.int64)
@@ -165,6 +166,10 @@ def map_pvalues(
         raise ValueError(
             "ptr must start at 0, end at len(conf_ix) and give every group a member"
         )
+    # A group without members would divide 0 by 0 and get the smallest p-value.
+    n_group = np.add.reduceat(conf_cnt, ptr[:-1])
+    if (conf_cnt < 0).any() or (n_group < 1).any():
+        raise ValueError("conf_cnt must be non-negative and give every group a member")
     if len(map_scores) != len(ptr) - 1:
         raise ValueError(
             f"{len(map_scores)} mAP scores but {len(ptr) - 1} groups in ptr"
@@ -174,7 +179,6 @@ def map_pvalues(
     )
     if len(thr) == 0:
         return np.zeros(0, dtype=np.float64)
-    n_group = np.add.reduceat(conf_cnt, ptr[:-1])
     if backend == "numba":
         kernel = _import_numba_backend().group_ge
     else:

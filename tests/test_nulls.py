@@ -416,6 +416,29 @@ def test_map_pvalues_validates_members(conf_ix, conf_cnt):
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize(
+    "ptr,conf_cnt",
+    [([0, 1, 2], [0, 1]), ([0, 2], [0, 0]), ([0, 2], [2, -1]), ([0, 1, 2], [-1, 1])],
+)
+def test_map_pvalues_validates_member_counts(backend, ptr, conf_cnt):
+    """Negative member counts and groups without members raise ValueError.
+
+    A group of no members would divide 0 by 0 and get the smallest p-value.
+    """
+    scores = [0.1] * (len(ptr) - 1)
+    with pytest.raises(ValueError, match="conf_cnt"):
+        nulls.map_pvalues(scores, ptr, [0, 1], conf_cnt, CONFS[:2], 10, 1, backend)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_map_pvalues_zero_count_member(backend):
+    """A member counted zero times does not enter its group's null."""
+    args = ([0.3], [0, 2], [0, 1], [0, 3], CONFS[:2], 500, 1)
+    got = nulls.map_pvalues(*args, backend=backend)
+    np.testing.assert_array_equal(got, brute_map_pvalues(*args))
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("n_scores", [1, 3])
 def test_map_pvalues_validates_score_count(backend, n_scores):
     """One mAP score per group; the kernels would read past a shorter array."""
