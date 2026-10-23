@@ -18,9 +18,10 @@ permutation nulls raise ValueError under it.
 """
 
 from copairs.nulls import joint, permutation
+from copairs._backend import available_backends
 from copairs.nulls.joint import joint_pvalues
 from copairs.nulls.common import TIE_TOL, tie_thresholds
-from copairs.nulls.backend import resolve_backend, available_backends
+from copairs.nulls.backend import resolve_backend
 from copairs.nulls.pvalues import ap_pvalues, map_pvalues
 from copairs.nulls.sampler import ap_nulls
 

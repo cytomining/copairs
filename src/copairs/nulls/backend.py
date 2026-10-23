@@ -3,82 +3,12 @@
 Numba (``pip install 'copairs[numba]'``) and CuPy (``pip install
 'copairs[gpu]'``) are optional. Nothing here imports them at module level:
 :func:`_import_numba_backend` and :func:`_import_cuda_backend` load the
-kernels the first time their backend is used, ``"auto"`` checks for Numba,
-and :func:`available_backends` for both.
+kernels the first time their backend is used, and ``"auto"`` checks for
+Numba (:func:`copairs._backend.available_backends` lists both).
 """
 
-import warnings
-import importlib.util
-from functools import cache
-
 from copairs.methods import check_backend
-from copairs._backend import import_backend
-
-
-def available_backends() -> list[str]:
-    """Backends usable in this environment, fastest first.
-
-    CUDA is listed when CuPy imports and compiles kernels for a visible GPU,
-    Numba when the Numba backend imports. An installed Numba or CuPy that
-    fails to import is left out with a warning naming the error, once, as is
-    a GPU whose kernels fail to compile; a machine without a GPU or driver
-    just has no CUDA backend. The check runs once per process. ``"auto"``
-    picks among the CPU backends only (see :func:`resolve_backend`).
-    """
-    backends = _cpu_backends()
-    if _installed("cupy") and _cuda_usable():
-        backends.insert(0, "cuda")
-    return backends
-
-
-def _cpu_backends() -> list[str]:
-    """``["numba", "numpy"]`` when the Numba backend imports, else ``["numpy"]``."""
-    if _installed("numba") and _numba_imports():
-        return ["numba", "numpy"]
-    return ["numpy"]
-
-
-@cache
-def _installed(package: str) -> bool:
-    """Whether ``package`` is installed, looked up once per process."""
-    return importlib.util.find_spec(package) is not None
-
-
-@cache
-def _numba_imports() -> bool:
-    """Whether the installed Numba backend imports; warn once if it does not."""
-    try:
-        _import_numba_backend()
-    except ImportError as exc:
-        warnings.warn(
-            f"Numba is installed but the Numba backend failed to import ({exc!r}); "
-            "backend='auto' uses NumPy, which gives identical results.",
-            RuntimeWarning,
-            stacklevel=4,
-        )
-        return False
-    return True
-
-
-@cache
-def _cupy_imports() -> bool:
-    """Whether the installed CuPy imports; warn once if it does not."""
-    try:
-        import_backend("copairs._cuda", "cuda")
-    except ImportError as exc:
-        warnings.warn(
-            f"CuPy is installed but failed to import ({exc!r}); backend='auto' "
-            "does not use the GPU.",
-            RuntimeWarning,
-            stacklevel=3,
-        )
-        return False
-    return True
-
-
-def _cuda_usable() -> bool:
-    """Whether the CUDA backend can run here (see :func:`copairs._cuda.usable`)."""
-    return _cupy_imports() and import_backend("copairs._cuda", "cuda").usable()
+from copairs._backend import cpu_backends, import_backend
 
 
 def resolve_backend(backend: str, gpu: bool = False) -> str:
@@ -108,7 +38,7 @@ def resolve_backend(backend: str, gpu: bool = False) -> str:
             "'numba' or 'numpy'"
         )
     if backend == "auto":
-        return _cpu_backends()[0]
+        return cpu_backends()[0]
     if backend == "numba":
         _import_numba_backend()
     elif backend == "cuda":

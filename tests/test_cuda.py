@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from copairs import nulls, compute, matching
+from copairs import nulls, compute, _backend, matching
 from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import backend, pvalues, sampler
 from tests.helpers import (
@@ -161,17 +161,13 @@ def test_installed_backends_looked_up_once(monkeypatch):
         looked_up.append(name)
         return find_spec(name, *args)
 
-    caches = [f for f in vars(backend).values() if hasattr(f, "cache_clear")]
-    for cache in caches:
-        cache.cache_clear()
+    for f in vars(_backend).values():
+        if hasattr(f, "cache_clear"):
+            f.cache_clear()  # refilled below, with the same answers
     monkeypatch.setattr(importlib.util, "find_spec", counting)
-    try:
-        for _ in range(3):
-            nulls.available_backends()
-            nulls.resolve_backend("auto")
-    finally:
-        for cache in caches:
-            cache.cache_clear()
+    for _ in range(3):
+        nulls.available_backends()
+        nulls.resolve_backend("auto")
     assert sorted(looked_up) == ["cupy", "numba"]
 
 
@@ -483,11 +479,9 @@ class _HostCuda:
 def host_cuda(monkeypatch):
     """Make a GPU look usable and run :class:`_HostCuda` in place of its kernels."""
     fake = _HostCuda()
-    cpu = [name for name in nulls.available_backends() if name != "cuda"]
     for module in (backend, sampler, pvalues):
         monkeypatch.setattr(module, "_import_cuda_backend", lambda: fake)
-    monkeypatch.setattr(backend, "_cuda_usable", lambda: True)
-    monkeypatch.setattr(backend, "available_backends", lambda: ["cuda", *cpu])
+    monkeypatch.setattr(_backend, "_cuda_usable", lambda: True)
     return fake
 
 
