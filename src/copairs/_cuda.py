@@ -15,7 +15,7 @@ import cupy as cp
 import numpy as np
 
 # Without FMA contraction, kernels round every operation as the CPU code they
-# mirror does.
+# mirror does; a kernel that may fuse a multiply-add asks for it with fma().
 OPTIONS = ("--fmad=false", "-std=c++14")
 BLOCK = 256
 

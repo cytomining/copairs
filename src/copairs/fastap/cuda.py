@@ -45,6 +45,9 @@ PAIR_CHUNK = 1 << 24
 _NEGATIVE_BYTES = 16
 
 _SOURCE = r"""
+// Compiled with --fmad=false (copairs._cuda.OPTIONS): the counting kernels round as
+// the CPU does. The similarity sums, which match the CPU's only to rounding anyway,
+// ask for fused multiply-adds with fma().
 // NumPy ordering: NaN sorts after every number and ties with NaN.
 __device__ __forceinline__ bool le(float v, float key) {
     return isnan(key) || (!isnan(v) && v <= key);
@@ -60,7 +63,7 @@ __device__ void dot_pairs(const T* x, long long d, const unsigned int* pairs, lo
         const T* a = x + (long long)pairs[2 * p] * d;
         const T* b = x + (long long)pairs[2 * p + 1] * d;
         double acc = 0.0;
-        for (long long t = lane; t < d; t += 32) acc += (double)a[t] * (double)b[t];
+        for (long long t = lane; t < d; t += 32) acc = fma((double)a[t], (double)b[t], acc);
         for (int off = 16; off > 0; off >>= 1) acc += __shfl_down_sync(0xffffffffu, acc, off);
         if (lane == 0) out[p] = (float)acc;
     }
@@ -84,7 +87,7 @@ __device__ void minkowski_pairs(const T* x, long long d, const unsigned int* pai
         double acc = 0.0;
         for (long long t = lane; t < d; t += 32) {
             double diff = fabs((double)a[t] - (double)b[t]);
-            acc = kind == 0 ? acc + diff * diff : kind == 1 ? acc + diff : nan_max(acc, diff);
+            acc = kind == 0 ? fma(diff, diff, acc) : kind == 1 ? acc + diff : nan_max(acc, diff);
         }
         for (int off = 16; off > 0; off >>= 1) {
             double other = __shfl_down_sync(0xffffffffu, acc, off);
