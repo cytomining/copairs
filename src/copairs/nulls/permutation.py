@@ -463,10 +463,7 @@ class _Layout:
         self.identity = np.arange(n)  # the observed labels' codes
         self.pool = pool
         self.slot_block = block_of
-        self.bm_slot = np.argsort(block_of, kind="stable").astype(np.int64)
-        n_block = len(pool.blocks)
-        bm_ptr = np.searchsorted(block_of[self.bm_slot], np.arange(n_block + 1))
-        self.bm_ptr = bm_ptr.astype(np.int64)
+        self.bm_slot, self.bm_ptr = _segments(block_of, len(pool.blocks))
         self.adjm = adjm = _adjacency_matrix(n, edges)
         self.deg = adjm.sum(axis=1).astype(np.int64)
         targets = np.concatenate([members, pool.refs])
@@ -1555,9 +1552,7 @@ class _LabelLayout:
         self.member_code = pool.code[np.asarray(members, dtype=np.int64)]
         self.identity = self.member_code  # the observed labels' codes
         block_of = np.asarray(block_of, dtype=np.int64)
-        self.bm_slot = np.argsort(block_of, kind="stable").astype(np.int64)
-        bm_ptr = np.searchsorted(block_of[self.bm_slot], np.arange(len(pool.comps) + 1))
-        self.bm_ptr = bm_ptr.astype(np.int64)
+        self.bm_slot, self.bm_ptr = _segments(block_of, len(pool.comps))
         self.adjm = _adjacency_matrix(n, edges)
         self.deg = self.adjm.sum(axis=1).astype(np.int64)
         self.lone = _adjacency_matrix(n, lone)
@@ -1666,9 +1661,12 @@ def _label_maps_np(layout, pm):
 
 
 def _segments(key, n_keys):
-    """``(order, ptr)``: pair indices sorted by key, and each key's slice."""
-    order = np.argsort(key, kind="stable")
-    return order, np.searchsorted(key[order], np.arange(n_keys + 1))
+    """``(order, ptr)``: indices sorted by key (stable), and each key's slice.
+
+    Key ``k`` (``0 <= k < n_keys``) holds ``order[ptr[k] : ptr[k + 1]]``.
+    """
+    order = np.argsort(key, kind="stable").astype(np.int64)
+    return order, np.searchsorted(key[order], np.arange(n_keys + 1)).astype(np.int64)
 
 
 def _label_layouts(groups, rows, num_pos, num_neg, pairs):
@@ -1724,12 +1722,8 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     )
     nbr_ptr, nbr = _adjacency(n_prof, neg)
     comp = _components(nbr_ptr, nbr)
-    order = np.argsort(comp, kind="stable")
-    roots, starts = np.unique(comp[order], return_index=True)
-    ends = np.append(starts[1:], len(order))
-    comp_profiles = {
-        int(c): order[a:b] for c, a, b in zip(roots, starts, ends, strict=True)
-    }
+    order, ptr = _segments(comp, n_prof)
+    comp_profiles = {int(c): order[ptr[c] : ptr[c + 1]] for c in np.unique(comp)}
     labels = np.asarray(pairs.keys).tolist()
     n_keys = len(labels)
     pos_segments = _segments(pos_key, n_keys)
