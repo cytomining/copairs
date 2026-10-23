@@ -171,7 +171,6 @@ def get_map_pvalue(
         )
     if null == "permutation":
         check_recomputable(pairs.similarity)
-    labelled = null == "permutation" and isinstance(pairs, LabelPairs)
 
     if null == "permutation" or pos_pairs is not None:
         _check_row_index(ap_scores.index)
@@ -218,41 +217,27 @@ def get_map_pvalue(
         map_scores["p_value"] = _copied_pvalues(scores, groups, ap_scores, **copied)
         return map_scores
 
-    if labelled:
-        logger.info("Computing p-values...")
-        map_scores["p_value"] = permutation.label_permutation_pvalues(
-            groups,
-            profile,
-            ap_scores["n_pos_pairs"].to_numpy(),
-            ap_scores["n_total_pairs"].to_numpy(),
-            pairs,
-            null_size,
-            seed,
-            observed=scores,
-            progress_bar=progress_bar,
-            max_workers=max_workers,
-            stop_after=stop_after,
-        )
-        return map_scores
-
     if null == "permutation":
         logger.info("Computing p-values...")
-        map_scores["p_value"] = permutation.permutation_pvalues(
-            groups,
-            profile,
+        counts = (
             ap_scores["n_pos_pairs"].to_numpy(),
             ap_scores["n_total_pairs"].to_numpy(),
-            pairs.pos,
-            pairs.neg,
-            pairs.similarity,
-            null_size,
-            seed,
+        )
+        options = dict(
             observed=scores,
             progress_bar=progress_bar,
             max_workers=max_workers,
-            pos_diffby=pairs.pos_diffby,
             stop_after=stop_after,
         )
+        if isinstance(pairs, LabelPairs):
+            map_scores["p_value"] = permutation.label_permutation_pvalues(
+                groups, profile, *counts, pairs, null_size, seed, **options
+            )
+        else:
+            map_scores["p_value"] = permutation.permutation_pvalues(
+                groups, profile, *counts, pairs.pos, pairs.neg, pairs.similarity,
+                null_size, seed, pos_diffby=pairs.pos_diffby, **options,
+            )  # fmt: skip
         return map_scores
 
     num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
