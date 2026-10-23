@@ -1,5 +1,8 @@
 """Tests for the Numba similarity kernels and counting-based average precision."""
 
+import sys
+import subprocess
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -240,3 +243,16 @@ def test_draw_average_precisions_nonfinite_normalized():
     feats[1, 0] = np.nan
     with pytest.raises(ValueError, match="non-finite"):
         fastap.draw_average_precisions(feats, [[0, 1]], [[2, 3]], normalized=True)
+
+
+def test_fastap_does_not_import_nulls():
+    """The AP kernels stand alone: importing them leaves copairs.nulls unloaded."""
+    code = (
+        "import sys\n"
+        "import copairs.fastap\n"
+        "assert not any(m.startswith('copairs.nulls') for m in sys.modules)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
