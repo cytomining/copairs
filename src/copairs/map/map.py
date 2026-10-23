@@ -69,9 +69,12 @@ def get_map_pvalue(
         ``> mAP``, as copairs 0.5.5 did, which gives too small p-values when
         the mAP equals an atom of the null (e.g. perfect retrieval).
     backend : str
-        Backend of the fast method: ``"auto"`` (default), ``"numba"`` or
-        ``"numpy"``. All give identical p-values, so ``"auto"`` picks
-        ``"numba"`` whenever it is installed.
+        Backend of the fast method: ``"auto"`` (default), ``"cuda"``,
+        ``"numba"`` or ``"numpy"``. ``"auto"`` picks a usable GPU (``pip
+        install 'copairs[gpu]'``), else Numba when installed, else NumPy, and
+        all of them give identical p-values there. An explicit ``"cuda"``
+        adds float32 gap stepping, which matches NumPy by an error bound
+        rather than by identical arithmetic (see :func:`copairs.nulls.ap_nulls`).
 
     Returns
     -------

@@ -574,9 +574,12 @@ def get_null_dists(
         of 0.5.5 within Monte Carlo error, not bitwise, since each
         configuration is now seeded by its values rather than its position.
     backend : str
-        Backend of the fast method: ``"auto"`` (default), ``"numba"`` or
-        ``"numpy"``. All return identical values, so ``"auto"`` picks
-        ``"numba"`` whenever it is installed.
+        Backend of the fast method: ``"auto"`` (default), ``"cuda"``,
+        ``"numba"`` or ``"numpy"``. ``"auto"`` picks a usable GPU (``pip
+        install 'copairs[gpu]'``), else Numba when installed, else NumPy; all
+        of them return identical values there. An explicit ``"cuda"`` adds
+        float32 gap stepping, which matches NumPy by an error bound rather
+        than by identical arithmetic (see :func:`copairs.nulls.ap_nulls`).
 
     Returns
     -------
@@ -694,8 +697,8 @@ def p_values(
     max_workers : int, optional
         Threads of the fast method's NumPy backend (default: the CPUs this
         process may run on). The Numba backend uses Numba's threads, set by
-        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``. P-values do not
-        depend on the threads.
+        ``NUMBA_NUM_THREADS`` or ``numba.set_num_threads``, and the CUDA
+        backend the GPU. P-values do not depend on the threads.
 
     Returns
     -------

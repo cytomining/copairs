@@ -5,7 +5,8 @@ of four 32-bit words is a pure function of a 128-bit counter and a 64-bit key,
 so any sample of a null distribution can be generated independently, in any
 order. Words are carried in ``uint64`` so the same code runs elementwise on
 NumPy arrays and on scalars, which lets a compiled kernel reproduce the NumPy
-draws exactly.
+draws exactly; the CUDA kernels of :mod:`copairs.nulls.cuda` implement the
+identical function.
 """
 
 import numpy as np

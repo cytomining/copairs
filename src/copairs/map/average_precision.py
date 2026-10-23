@@ -296,8 +296,8 @@ def p_values(
         ``"fast"`` (default) or ``"legacy"`` null sampler, see
         :func:`copairs.compute.p_values`.
     backend : str
-        Backend of the fast method: ``"auto"`` (default), ``"numba"`` or
-        ``"numpy"``, all with identical results.
+        Backend of the fast method: ``"auto"`` (default), ``"cuda"``,
+        ``"numba"`` or ``"numpy"``, see :func:`copairs.compute.get_null_dists`.
 
     Returns
     -------

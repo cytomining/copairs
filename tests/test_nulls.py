@@ -12,7 +12,12 @@ from scipy.stats import chisquare
 
 from copairs import nulls
 from copairs.nulls import common, philox, backend, pvalues, sampler
-from tests.helpers import brute_ap_pvalues, brute_group_nulls, brute_map_pvalues
+from tests.helpers import (
+    without_modules,
+    brute_ap_pvalues,
+    brute_group_nulls,
+    brute_map_pvalues,
+)
 from copairs.map.normalization import expected_ap
 
 BACKENDS = nulls.available_backends()
@@ -159,8 +164,13 @@ def scalar_nulls(confs, null_size, seed):
 
 
 def test_available_backends():
-    """NumPy is always available; Numba exactly when it is installed, and first."""
-    assert BACKENDS == (["numba", "numpy"] if HAS_NUMBA else ["numpy"])
+    """NumPy is always available and last, Numba exactly when it is installed.
+
+    CUDA comes first when a GPU is usable (tests/test_cuda.py).
+    """
+    cpu = [b for b in BACKENDS if b != "cuda"]
+    assert cpu == (["numba", "numpy"] if HAS_NUMBA else ["numpy"])
+    assert BACKENDS in (cpu, ["cuda", *cpu])
     assert nulls.resolve_backend("auto") == BACKENDS[0]
 
 
@@ -385,8 +395,9 @@ def test_backend_validation():
     with pytest.raises(ValueError, match="unknown backend"):
         nulls.resolve_backend("tpu")
     with pytest.raises(ValueError, match="unknown backend"):
-        nulls.ap_nulls(CONFS, 4, seed=0, backend="cuda")
-    backend.check_method("legacy", "numba")  # valid names, whether installed or not
+        nulls.ap_nulls(CONFS, 4, seed=0, backend="gpu")
+    for name in ("numba", "cuda"):  # valid names, whether installed or not
+        backend.check_method("legacy", name)
 
 
 def test_ap_pvalues_validates_conf_ix():
@@ -507,27 +518,9 @@ def test_unseeded_pvalues_are_fresh():
     assert not np.array_equal(a, b)
 
 
-# Makes numba unimportable in a child interpreter, as if it were not installed.
-_WITHOUT_NUMBA = """
-import sys
-import importlib.util
-from importlib.abc import MetaPathFinder
-
-BLOCKED = ("numba", "llvmlite")
-
-
-class Block(MetaPathFinder):
-    def find_spec(self, name, path=None, target=None):
-        if name.split(".")[0] in BLOCKED:
-            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
-
-
-_find_spec = importlib.util.find_spec
-importlib.util.find_spec = lambda name, *args: (
-    None if name.split(".")[0] in BLOCKED else _find_spec(name, *args)
-)
-sys.meta_path.insert(0, Block())
-"""
+# Makes numba (and CuPy, so that "auto" has only NumPy left) unimportable in a
+# child interpreter, as if they were not installed.
+_WITHOUT_NUMBA = without_modules("numba", "llvmlite", "cupy")
 
 
 def run_python(code: str) -> str:
@@ -581,7 +574,8 @@ def test_auto_falls_back_when_numba_fails_to_import(tmp_path):
     fake.mkdir()
     (fake / "__init__.py").write_text('raise ImportError("simulated broken numba")\n')
     out = run_python(
-        f"""
+        without_modules("cupy")
+        + f"""
 import sys, warnings
 sys.path.insert(0, {str(tmp_path)!r})
 import numpy as np

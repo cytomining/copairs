@@ -6,9 +6,11 @@ which order. :mod:`copairs.nulls.common` holds the helpers the nulls share.
 
 :mod:`copairs.nulls.sampler` samples AP nulls exactly, and
 :mod:`copairs.nulls.pvalues` streams AP and mAP p-values against them in
-bounded memory. Backends: ``"numba"`` (optional, ``pip install
-'copairs[numba]'``) and ``"numpy"``, bitwise identical; ``"auto"`` picks Numba
-when it is installed.
+bounded memory. Backends: ``"cuda"`` (optional, ``pip install
+'copairs[gpu]'``), ``"numba"`` (optional, ``pip install 'copairs[numba]'``)
+and ``"numpy"``. ``"auto"`` picks the first usable one, and under it all three
+are bitwise identical; an explicit ``"cuda"`` also steps long gaps in float32
+(see :mod:`copairs.nulls.cuda`).
 """
 
 from copairs.nulls.common import TIE_TOL, tie_thresholds

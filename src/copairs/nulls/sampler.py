@@ -10,9 +10,12 @@ scalars.
 
 Sample ``j`` of configuration ``(num_pos, total)`` is a pure function of
 ``(seed, num_pos, total, j)`` through a Philox counter, and every backend
-performs the same IEEE double operations in the same order, so the NumPy and
-Numba implementations return bitwise-identical nulls. The scalar functions
-here are the reference; :mod:`copairs.nulls._numba` compiles the same source.
+performs the same IEEE double operations in the same order, so the NumPy,
+Numba and CUDA implementations return bitwise-identical nulls. The scalar
+functions here are the reference; :mod:`copairs.nulls._numba` compiles the
+same source and :mod:`copairs.nulls.cuda` ports it line by line. An explicit
+``backend="cuda"`` also steps long gaps in float32 (see
+:mod:`copairs.nulls.cuda`).
 """
 
 import os
@@ -22,7 +25,11 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 from copairs.nulls.philox import M32, S32, uniform53, philox4x32, config_key_arrays
-from copairs.nulls.backend import resolve_backend, _import_numba_backend
+from copairs.nulls.backend import (
+    resolve_backend,
+    _import_cuda_backend,
+    _import_numba_backend,
+)
 
 # Use the guided gap search when the expected gap exceeds this many times the
 # number of remaining positives (its cost per probe); results are identical.
@@ -350,8 +357,14 @@ def ap_nulls(
     start : int
         Index of the first sample, so a null can be generated in chunks.
     backend : str
-        ``"auto"``, ``"numba"`` or ``"numpy"``. All return identical values;
-        ``"auto"`` picks ``"numba"`` when it is installed.
+        ``"auto"``, ``"cuda"``, ``"numba"`` or ``"numpy"``. ``"auto"`` picks
+        the first of :func:`copairs.nulls.available_backends` (a usable GPU,
+        else Numba when installed, else NumPy), and all of these return
+        identical values. An explicit ``"cuda"`` also steps long gaps in
+        float32, which is faster on GPUs with few float64 units. An error
+        bound keeps its gaps equal to Algorithm A's, so its samples match
+        NumPy's in the tests, but not by identical arithmetic; ``"auto"``
+        never uses it.
     dtype : np.float32 or np.float64
         Output precision. Samples are computed in float64 and rounded once.
 
@@ -361,8 +374,10 @@ def ap_nulls(
         ``(n, null_size)`` AP samples.
     """
     plan = null_plan(confs, seed)
+    fast_gaps = backend == "cuda"
     backend = resolve_backend(backend)
-    return _ap_nulls(plan, null_size, start, backend, dtype)
+    out = _ap_nulls(plan, null_size, start, backend, dtype, fast_gaps=fast_gaps)
+    return _import_cuda_backend().host(out) if backend == "cuda" else out
 
 
 def _ap_nulls(
@@ -373,6 +388,7 @@ def _ap_nulls(
     dtype,
     budget_bytes=DEFAULT_BUDGET,
     max_workers=None,
+    fast_gaps=False,
 ):
     """:func:`ap_nulls` from a :func:`null_plan` and a resolved backend.
 
@@ -381,10 +397,14 @@ def _ap_nulls(
     sized so the blocks in flight keep their temporaries within
     ``budget_bytes``; the output is allocated on top of that. The Numba
     backend runs on Numba's threads. Samples do not depend on the threads.
+    The CUDA backend returns a CuPy array, with float32 gap stepping when
+    ``fast_gaps``.
     """
     dtype = np.dtype(dtype)
     if dtype not in (np.float32, np.float64):
         raise ValueError(f"dtype must be float32 or float64, got {dtype}")
+    if backend == "cuda":
+        return _import_cuda_backend().ap_nulls(plan, start, null_size, dtype, fast_gaps)
     num_pos, total, k0, k1 = plan
     out = np.empty((len(num_pos), null_size), dtype=dtype)
     if backend == "numba":

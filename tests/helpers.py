@@ -37,6 +37,37 @@ def run_isolated(code: str) -> subprocess.CompletedProcess:
     )
 
 
+_WITHOUT_MODULES = """
+import sys
+import importlib.util
+from importlib.abc import MetaPathFinder
+
+BLOCKED = {names!r}
+
+
+class Block(MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in BLOCKED:
+            raise ModuleNotFoundError(f"No module named {{name!r}}", name=name)
+
+
+_find_spec = importlib.util.find_spec
+importlib.util.find_spec = lambda name, *args: (
+    None if name.split(".")[0] in BLOCKED else _find_spec(name, *args)
+)
+sys.meta_path.insert(0, Block())
+"""
+
+
+def without_modules(*names: str) -> str:
+    """Code that makes ``names`` unimportable in a child, as if not installed.
+
+    Their imports raise ModuleNotFoundError and ``importlib.util.find_spec``
+    returns None for them.
+    """
+    return _WITHOUT_MODULES.format(names=names)
+
+
 def simulate_plates(n_compounds, n_replicates, plate_size):
     """Round robin creation of platemaps."""
     total = n_compounds * n_replicates

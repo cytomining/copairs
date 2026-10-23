@@ -1,14 +1,18 @@
 """Resolve the ``backend=`` argument of the AP functions; import optional backends.
 
-A module of its own, free of SciPy and Numba, so that copairs.matching can
-import it at the top while ``import copairs`` stays light.
+A module of its own, free of SciPy, Numba and CuPy, so that copairs.matching
+can import it at the top while ``import copairs`` stays light.
 """
 
 import importlib
 from types import ModuleType
 
 # Optional backends: the packages they import, by display name, and their extra.
-_OPTIONAL = {"numba": ({"numba": "Numba"}, "numba")}
+# The CUDA AP stage also runs Numba kernels, so the gpu extra includes Numba.
+_OPTIONAL = {
+    "numba": ({"numba": "Numba"}, "numba"),
+    "cuda": ({"cupy": "CuPy", "numba": "Numba"}, "gpu"),
+}
 
 
 def import_backend(module: str, backend: str) -> ModuleType:

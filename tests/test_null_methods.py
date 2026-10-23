@@ -287,7 +287,8 @@ def test_map_column_is_the_score(keys, monkeypatch):
 def test_max_workers_sets_numpy_threads(backend, monkeypatch):
     """max_workers sets the NumPy sampler's threads; p-values do not depend on it.
 
-    Numba runs on its own threads, so its calls open no NumPy thread pool.
+    Numba and CUDA run on their own threads, so their calls open no NumPy
+    thread pool.
     """
     monkeypatch.setattr(sampler, "_numpy_workers", lambda: 16)
     pools = []
@@ -312,7 +313,7 @@ def test_max_workers_sets_numpy_threads(backend, monkeypatch):
         for workers in (None, 1, 4):
             pools.clear()
             got[workers] = run(workers)
-            if backend == "numba":
+            if backend in ("numba", "cuda"):
                 assert pools == [], name
             else:  # one worker samples without a pool
                 assert max(pools, default=1) == (workers or 16), (name, pools)
