@@ -55,26 +55,49 @@ The AP and mAP p-value functions (`compute.p_values`,
   among 100,000 pairs at `null_size=1000`, 3.6 s against 1.6 s; 0.02 s with
   Numba), so install the `numba` extra for such data.
 
-`backend="numpy"` needs nothing extra. `backend="numba"` compiles the same
-code with [Numba](https://numba.pydata.org), an optional dependency:
-```bash
-pip install copairs[numba]
-```
-The two backends return bitwise-identical nulls and p-values, so
-`backend="auto"` (default) uses Numba whenever it is installed; if Numba fails
-to import, `"auto"` warns once and uses NumPy.
+`backend="numpy"` needs nothing extra; `backend="numba"` compiles the same
+code with [Numba](https://numba.pydata.org) (the `numba` extra above). The
+backends return bitwise-identical nulls and p-values, so `backend="auto"`
+(default) uses a usable GPU (see below), else Numba whenever it is installed;
+if Numba fails to import, `"auto"` warns once and uses NumPy.
 
-Numba starts one thread per host CPU. In a container or job with a CPU quota,
-set `NUMBA_NUM_THREADS` to the quota, or kernels oversubscribe the CPUs. The
-NumPy backend samples on one thread per CPU the process may run on (its CPU
-affinity, which follows `taskset` and Slurm allocations but not a CPU quota),
-or on `max_workers` threads where the function takes it. If
-Numba uses its GNU OpenMP threading layer (the default when it cannot load
-TBB), a process forked after copairs ran a Numba kernel stops when it runs one
-itself ("Terminating: fork() called from a process already using GNU
-OpenMP"). Use the `spawn` or `forkserver` start method, set
-`NUMBA_THREADING_LAYER=workqueue` before the first copairs call, or pass
-`backend="numpy"` in the children.
+The NumPy backend samples on one thread per CPU the process may run on (its
+CPU affinity, which follows `taskset` and Slurm allocations but not a CPU
+quota), or on `max_workers` threads where the function takes it. For Numba's
+threads and `fork`, see [Performance](#performance).
+
+#### GPU acceleration (optional)
+
+With an NVIDIA GPU and a CUDA 12 driver, the `gpu` extra adds
+`backend="cuda"`:
+```bash
+pip install 'copairs[gpu]'
+```
+It installs Numba and CuPy's CUDA 12 wheel (`cupy-cuda12x`). CuPy compiles
+copairs' kernels at run time, so it also needs the CUDA libraries (NVRTC, and
+cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
+`pip install 'cupy-cuda12x[ctk]'`.
+
+- Nulls and p-values: `backend="auto"` picks `"cuda"` when CuPy compiles
+  kernels for a visible GPU. Its samples and p-values are bitwise identical to
+  the NumPy and Numba backends'. An explicit `backend="cuda"` also steps long
+  gaps of Algorithm A in float32, which is faster on GPUs with few float64
+  units. An error bound keeps those gaps equal to the float64 ones, so samples
+  match NumPy's in the tests, but not by identical arithmetic, and `"auto"`
+  does not use it.
+- AP stage: `backend="cuda"`, only when asked for, computes pair similarities
+  and AP on the GPU, keeping similarities there, and runs multilabel matching,
+  per-label AP and normalized AP on Numba. Given the same similarities, its APs
+  equal `"numba"`'s bit for bit; its similarities sum in another order, so
+  they match to float32 rounding. `draw_average_precisions(...,
+  backend="cuda")` scores draws of up to 6144 queries on the GPU and larger
+  ones on Numba.
+- Without CuPy or a usable GPU, `"auto"` stays on the CPU (warning only when a
+  GPU is visible but kernels fail to compile) and `backend="cuda"` raises an
+  error that names the extra and the reason. With CuPy installed, the first
+  `"auto"` call imports it, which takes a few seconds. The check runs once per
+  process: a process forked after its parent used CUDA cannot use the GPU, so
+  `"auto"` picks a CPU backend there.
 
 ### Testing
 
@@ -96,7 +119,8 @@ We provide examples demonstrating how to use copairs for:
 
 `map.average_precision`, `map.multilabel.average_precision`,
 `matching.find_pairs_multilabel` and `map.normalization.normalize_ap` take
-`backend="numpy"` (default) or `"numba"`. `"numpy"` has no optional
+`backend="numpy"` (default), `"numba"` or `"cuda"` (see
+[GPU acceleration](#gpu-acceleration-optional)). `"numpy"` has no optional
 dependencies and gives the results of copairs <= 0.5.5. `"numba"` needs the
 `numba` extra, which is imported only when requested:
 
@@ -127,9 +151,10 @@ Numba uses its GNU OpenMP threading layer (the default when it cannot load
 TBB), a process forked after a Numba parallel kernel ran stops with
 "Terminating: fork() called from a process already using GNU OpenMP" when it
 runs one too. Use the `spawn` or `forkserver` start method (`forkserver` is the
-Linux default from Python 3.14), or set `NUMBA_THREADING_LAYER=workqueue`
-before the first copairs call; that layer is fork-safe but stops the process if
-Numba parallel kernels are called from several threads at once.
+Linux default from Python 3.14), set `NUMBA_THREADING_LAYER=workqueue`
+before the first copairs call (that layer is fork-safe but stops the process
+if Numba parallel kernels are called from several threads at once), or pass
+`backend="numpy"` in the children.
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):
