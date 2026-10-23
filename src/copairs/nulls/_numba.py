@@ -273,23 +273,15 @@ def _permutation_maps_parallel(
         )  # fmt: skip
 
 
-@numba.njit(cache=True)
-def _permutation_identity(
-    n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr, smr, srr_ptr, srr,
-    rmu, rcm, rrr, ranked,
-):  # fmt: skip
-    """Return the mAP of the observed labels: ``group_map`` of the identity draw."""
-    return _group_map_nb(
-        np.arange(n), n, slot_block, adjm, deg, kmu, krr, gptr, grow, smr_ptr,
-        smr, srr_ptr, srr, rmu, rcm, rrr, ranked, np.empty(n, np.int64),
-        np.empty(n, np.int64), np.empty(n, np.uint64), np.empty(n, np.int32),
-        np.empty(n, np.float64),
-    )  # fmt: skip
-
-
 def permutation_identity(layout):
     """Return the mAP of ``layout``'s group under its observed labels, as a float."""
-    return float(_permutation_identity(*layout.map_args()))
+    n = layout.n
+    scratch = (
+        np.empty(n, np.int64), np.empty(n, np.int64), np.empty(n, np.uint64),
+        np.empty(n, np.int32), np.empty(n, np.float64),
+    )  # fmt: skip
+    identity = np.arange(n, dtype=np.int64)
+    return float(_group_map_nb(identity, *layout.map_args(), *scratch))
 
 
 def permutation_maps(layout, start, size, k0, k1, parallel=True):
