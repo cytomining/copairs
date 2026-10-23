@@ -87,6 +87,16 @@ def test_vectorized_matches_scalar_draws():
     np.testing.assert_array_equal(got, scalar_nulls(plan, 300, 2**33 - 100))
 
 
+@pytest.mark.parametrize(
+    "rows", [slice(None, None, 2), slice(None, None, -1), slice(5, 1, -2), slice(1, 3)]
+)
+def test_rows_take_any_slice(rows):
+    """``rows`` selects signatures as indexing a list with that slice does."""
+    plan = joint.joint_plan([joint.canonical_signature(*sig) for sig in SIGNATURES], 7)
+    every = joint.joint_nulls(plan, 50, start=3)
+    np.testing.assert_array_equal(joint.joint_nulls(plan, 50, 3, rows), every[rows])
+
+
 def test_pvalue_hits_match_scalar_draws(monkeypatch):
     """Joint p-values count exactly the scalar samples at or above each score."""
     monkeypatch.setattr(joint, "_CHUNK", 64)  # several chunks per signature

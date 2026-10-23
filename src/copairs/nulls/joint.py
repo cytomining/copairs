@@ -471,12 +471,12 @@ def joint_nulls(plan, null_size: int, start: int = 0, rows=None) -> np.ndarray:
     """float64 mAP samples ``start, ..., start + null_size - 1`` of each signature.
 
     ``rows`` is a ``slice`` of the plan's signatures (default all); the result
-    has one row per signature in it.
+    has one row per signature it selects, in its order.
     """
     n_sig = len(plan[0]) - 1
-    lo, hi, _ = (rows or slice(0, n_sig)).indices(n_sig)
-    out = np.empty((max(0, hi - lo), null_size), dtype=np.float64)
-    for r, s in enumerate(range(lo, hi)):
+    sigs = range(*(rows or slice(None)).indices(n_sig))
+    out = np.empty((len(sigs), null_size), dtype=np.float64)
+    for r, s in enumerate(sigs):
         for c, size in chunks(null_size, _CHUNK):
             out[r, c : c + size] = _joint_null_np(plan, s, start + c, size)
     return out
