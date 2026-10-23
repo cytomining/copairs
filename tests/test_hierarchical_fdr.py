@@ -133,6 +133,7 @@ class TestHierarchicalFDR:
             threshold=0.05,
             seed=42,
             progress_bar=False,
+            null="copied",
         )
 
         # Hierarchical correction
@@ -144,6 +145,7 @@ class TestHierarchicalFDR:
             threshold=0.05,
             seed=42,
             progress_bar=False,
+            null="copied",
         )
 
         # For truly significant compounds, hierarchical should find at least
@@ -173,6 +175,7 @@ class TestHierarchicalFDR:
             threshold=0.05,
             seed=42,
             progress_bar=False,
+            null="copied",
         )
 
         # For non-significant groups, corrected p-value should be 1.0
@@ -196,6 +199,7 @@ class TestHierarchicalFDR:
             seed=42,
             progress_bar=False,
             cache_dir=tmp_path,
+            null="copied",  # a mock AP table has no pairs to permute
         )
         if hierarchical:
             result = mean_average_precision_hierarchical(

@@ -334,7 +334,12 @@ def test_mean_average_precision_independent_of_other_groups(tmp_path):
     )
     only_y = ap_scores[ap_scores["group"] == "Y"]
     kwargs = dict(
-        sameby=["group"], null_size=200, threshold=0.05, seed=0, progress_bar=False
+        sameby=["group"],
+        null_size=200,
+        threshold=0.05,
+        seed=0,
+        progress_bar=False,
+        null="copied",  # the cache belongs to the copied null
     )
     shared = tmp_path / "shared"
     both = mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
@@ -370,6 +375,7 @@ def test_mean_average_precision_unknown_cpu_count(tmp_path, monkeypatch):
         seed=0,
         progress_bar=False,
         cache_dir=tmp_path,
+        null="copied",  # a mock AP table has no pairs to permute
     )
     assert len(result) == 2
 
@@ -421,7 +427,9 @@ def test_map_pvalue_narrows_with_group_size():
     rows = []
     for n in (2, 4, 8):
         rows += [(f"n{n}", 0.18, n - 1, n - 1 + 100)] * n
-    result = get_map_pvalue(_ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False)
+    result = get_map_pvalue(
+        _ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False, null="joint"
+    )
     p = result.set_index("g")["p_value"]
     assert p["n2"] > p["n4"] > p["n8"]
 
@@ -433,7 +441,13 @@ def test_map_pvalue_falls_back_with_warning(tmp_path):
     rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
     with pytest.warns(UserWarning, match="pos_pairs"):
         result = get_map_pvalue(
-            _ap_frame(rows), ["g"], 1000, SEED, progress_bar=False, cache_dir=tmp_path
+            _ap_frame(rows),
+            ["g"],
+            1000,
+            SEED,
+            progress_bar=False,
+            cache_dir=tmp_path,
+            null="joint",
         )
     p = result.set_index("g")["p_value"]
     assert 0 < p["odd"] <= 1 and 0 < p["rep"] <= 1
@@ -465,6 +479,28 @@ def test_map_pvalue_one_profile_groups_use_their_ap_null():
     null = np.array([np.mean(np.arange(1, 4) / (np.array(r) + 1)) for r in ranks])
     exact = [(null >= m - 1e-9).mean() for m in inferred["mean_average_precision"]]
     np.testing.assert_allclose(inferred["p_value"], exact, atol=0.01)
+
+
+def test_joint_null_ignores_attached_pairs():
+    """The joint null infers edges from AP frames, even after reset_index."""
+    from copairs.map import get_map_pvalue
+
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame(
+        {"g": ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * 3}
+    )
+    meta = meta.sample(frac=1, random_state=1).reset_index(drop=True)
+    feats = rng.standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    reset = ap[ap["g"] != "other"].reset_index(drop=True)  # pairs now misaligned
+    bare = reset.copy()
+    bare.attrs.clear()
+    kwargs = dict(progress_bar=False, null="joint")
+    got = get_map_pvalue(reset, ["g"], 2000, SEED, **kwargs)
+    expected = get_map_pvalue(bare, ["g"], 2000, SEED, **kwargs)
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    with pytest.raises(ValueError, match="no reset_index"):
+        get_map_pvalue(reset, ["g"], 2000, SEED, progress_bar=False)
 
 
 def test_ap_frames_carry_their_pairs():

@@ -1,5 +1,7 @@
 """Tests for the label-permutation mAP null (copairs.nulls.permutation)."""
 
+import json
+import pickle
 import itertools
 
 import numpy as np
@@ -231,6 +233,47 @@ def test_seeded_and_reproducible():
     ]
     assert p[0] == p[1]
     assert p[0] != p[2]
+
+
+def test_default_null_uses_attached_pairs():
+    """AP frames carry their pairs, so the default permutation null needs no pairs=."""
+    meta = layout_meta(2, 3, 6)
+    feats = np.random.default_rng(10).standard_normal((len(meta), 5))
+    spec = dict(SPEC, neg_sameby=["plate"])
+    ap, pairs = average_precision(
+        meta, feats, progress_bar=False, return_pairs=True, **spec
+    )
+    explicit = mean_average_precision(
+        ap, ["g"], 500, 0.05, 0, progress_bar=False, null="permutation", pairs=pairs
+    )
+    filtered = ap[ap["g"] == "q"].copy()  # filtering and copies keep the pairs
+    default = mean_average_precision(filtered, ["g"], 500, 0.05, 0, progress_bar=False)
+    assert default["p_value"].tolist() == explicit["p_value"].tolist()
+    halves = pd.concat([ap.iloc[:10], ap.iloc[10:]])  # pieces of one frame
+    assert (
+        mean_average_precision(halves, ["g"], 500, 0.05, 0, progress_bar=False)[
+            "p_value"
+        ].tolist()
+        == explicit["p_value"].tolist()
+    )
+
+
+def test_frames_without_pairs_raise():
+    """Saved, pickled or merged AP frames lose their pairs and say so."""
+    meta = layout_meta(1, 3, 6)
+    feats = np.random.default_rng(11).standard_normal((len(meta), 5))
+    ap = average_precision(meta, feats, progress_bar=False, **SPEC)
+    other = average_precision(
+        meta.assign(g=meta["g"] + "x"), feats, progress_bar=False, **SPEC
+    )
+    assert json.loads(json.dumps(ap.attrs)) == {"copairs_pairs": {}}  # as to_parquet
+    for frame in (pickle.loads(pickle.dumps(ap)), pd.concat([ap, other])):
+        with pytest.raises(ValueError, match="needs the pairs"):
+            mean_average_precision(frame, ["g"], 100, 0.05, 0, progress_bar=False)
+        res = mean_average_precision(
+            frame, ["g"], 100, 0.05, 0, progress_bar=False, null="copied"
+        )
+        assert len(res)
 
 
 def test_rejects_unsupported_layouts():

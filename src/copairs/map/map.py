@@ -32,7 +32,7 @@ def get_map_pvalue(
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
-    null: str = "joint",
+    null: str = "permutation",
     pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Compute mAP scores and p-values from AP scores.
@@ -72,7 +72,7 @@ def get_map_pvalue(
         that profile's AP null. Other groups fall back to the copied null with
         a warning. Joint null only; taken from ``pairs`` when given.
     null : str
-        Null of the group mAP. ``"permutation"`` relabels profiles
+        Null of the group mAP. ``"permutation"`` (default) relabels profiles
         (`copairs.nulls.permutation`): in each block of members ranked against
         the same references (e.g. a plate's replicates and controls), any of
         the block's profiles could have carried the group's label, and each
@@ -80,7 +80,7 @@ def get_map_pvalue(
         group's positives must be its other members (for groups of one
         profile with positives in other groups, use ``"joint"``: there it is
         that profile's AP null), and its smallest p-value is about one over
-        its number of distinct relabellings. ``"joint"`` (default) samples
+        its number of distinct relabellings. ``"joint"`` samples
         the members' APs together (`copairs.nulls.joint`): a positive pair
         inside the group is one random number in both members' rank lists,
         and other similarities are independent, which real profiles are not
@@ -124,13 +124,13 @@ def get_map_pvalue(
         pairs = attached_pairs(ap_scores)
         if pairs is None:
             raise ValueError(
-                "null='permutation' needs the pairs the APs were computed from. "
-                "average_precision attaches them to the frame it returns, and "
-                "these AP scores have none: they were built, loaded from disk, "
-                "pickled or concatenated from several AP calls, or come from "
-                "multilabel.average_precision, which this null does not support. "
-                "Recompute the APs, pass pairs=, or choose null='joint' or "
-                "null='copied'."
+                "null='permutation' (the default) needs the pairs the APs were "
+                "computed from. average_precision attaches them to the frame it "
+                "returns, and these AP scores have none: they were built, loaded "
+                "from disk, pickled or concatenated from several AP calls, or come "
+                "from multilabel.average_precision, which this null does not "
+                "support. Recompute the APs, pass pairs=, or choose null='joint' "
+                "or null='copied'."
             )
 
     # Filter out invalid or incomplete AP scores, remembering the original rows
@@ -316,7 +316,7 @@ def mean_average_precision(
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
-    null: str = "joint",
+    null: str = "permutation",
     pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score and associated p-values.
@@ -346,10 +346,11 @@ def mean_average_precision(
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
-        Positive pairs used to compute the AP scores; see `get_map_pvalue`.
-        Needed when a group's positives are not its other members.
+        Positive pairs used to compute the AP scores, for ``null="joint"``;
+        see `get_map_pvalue`. Needed there when a group's positives are not
+        its other members.
     null : str
-        Null of the group mAP: ``"permutation"``, ``"joint"`` (default) or
+        Null of the group mAP: ``"permutation"`` (default), ``"joint"`` or
         ``"copied"``; see `get_map_pvalue`.
     pairs : RankPairs, optional
         Pairs of the AP scores, needed by ``null="permutation"`` and attached
@@ -406,7 +407,7 @@ def mean_average_precision_hierarchical(
     max_workers: Optional[int] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
-    null: str = "joint",
+    null: str = "permutation",
     pairs: RankPairs | None = None,
 ) -> pd.DataFrame:
     """Calculate the Mean Average Precision (mAP) score with hierarchical FDR correction.
@@ -449,10 +450,11 @@ def mean_average_precision_hierarchical(
     cache_dir : str or Path
         Location to save the cache of the copied null's AP samples.
     pos_pairs : np.ndarray, optional
-        Positive pairs used to compute the AP scores; see `get_map_pvalue`.
-        Needed when a group's positives are not its other members.
+        Positive pairs used to compute the AP scores, for ``null="joint"``;
+        see `get_map_pvalue`. Needed there when a group's positives are not
+        its other members.
     null : str
-        Null of the group mAP: ``"permutation"``, ``"joint"`` (default) or
+        Null of the group mAP: ``"permutation"`` (default), ``"joint"`` or
         ``"copied"``; see `get_map_pvalue`.
     pairs : RankPairs, optional
         Pairs of the AP scores, needed by ``null="permutation"`` and attached
