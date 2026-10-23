@@ -164,6 +164,7 @@ def test_numba_matches_numpy_draws(
     """Numba's draws, mAPs and hits equal NumPy's, bit for bit.
 
     Pools up to RANK_POOL read rank tables, larger ones search sorted rows.
+    The Numba kernels read a layout without the NumPy-only tables.
     """
     pytest.importorskip("numba")
     from copairs.nulls import _numba
@@ -178,6 +179,10 @@ def test_numba_matches_numpy_draws(
     members, edges, blocks, block_of = group
     pool = permutation._Pool(blocks, pairs.similarity)
     layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    lean = permutation._Layout(
+        members, edges, block_of, pairs.similarity, pool, vectorized=False
+    )
+    assert lean.full_keys is None and lean.counted is None
     assert pool.ranked == ranked
     k0, k1 = permutation.group_key(3, members)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
@@ -185,10 +190,12 @@ def test_numba_matches_numpy_draws(
     got = np.empty(layout.n, dtype=np.int64)
     chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
     for r in range(len(pm)):
-        _numba._draw_nb(start + r, *layout.draw_args(), k0, k1, got, chosen)
+        _numba._draw_nb(start + r, *lean.draw_args(), k0, k1, got, chosen)
         np.testing.assert_array_equal(got, pm[r])
-    maps = _numba.permutation_maps(layout, start, 300, k0, k1)
+    maps = _numba.permutation_maps(lean, start, 300, k0, k1)
     np.testing.assert_array_equal(maps, permutation._group_maps_np(layout, pm))
+    identity = permutation._group_maps_np(layout, np.arange(layout.n)[None])[0]
+    assert _numba.permutation_identity(lean) == identity
     out = {b: np.empty(2000) for b in ("numpy", "numba")}
     runs = {
         b: permutation.permutation_null(

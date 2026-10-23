@@ -399,10 +399,13 @@ class _Layout:
     """One group's slots, blocks and rank codes, as the draw functions take them.
 
     Pool codes number the group's members ``0 .. n - 1`` (a member's code is
-    its slot) and then the pool's references.
+    its slot) and then the pool's references. ``vectorized=False`` skips the
+    tables only :func:`_group_maps_np` reads, for the Numba kernels.
     """
 
-    def __init__(self, members, edges, block_of, similarity, pool, draws=0):
+    def __init__(
+        self, members, edges, block_of, similarity, pool, draws=0, vectorized=True
+    ):
         members = np.asarray(members, dtype=np.int64)
         block_of = np.asarray(block_of, dtype=np.int64)
         self.n = n = len(members)
@@ -447,11 +450,6 @@ class _Layout:
             rows[own, own] = _NAN
             rows.sort(axis=1)
             self.grow[self.gptr[codes][:, None] + np.arange(widths[b])] = rows
-        # The rows as one sorted array of (code, key) words, for one searchsorted.
-        code_of = np.repeat(
-            np.arange(len(widths[code_block]), dtype=np.uint64), widths[code_block]
-        )
-        self.gkeys = (code_of << np.uint64(32)) | self.grow.astype(np.uint64)
         if pool.ranked:
             self.rmu = _row_ranks(self.smr_ptr, _row_words(self.smr_ptr, self.smr), kmu)
             self.rcm = _row_ranks(
@@ -459,15 +457,25 @@ class _Layout:
             )
         else:
             self.rmu = self.rcm = np.zeros((0, 0), dtype=np.int32)
+        self.gkeys = self.counted = self.rows = None
+        self.full_keys = self.full_ranks = self.full_before = None
+        if vectorized:
+            self._vectorized_tables(adjm, block_of, widths[code_block], draws)
+
+    def _vectorized_tables(self, adjm, block_of, gwidths, draws):
+        """Build the tables :func:`_group_maps_np` reads besides the kernels'."""
+        n, pool = self.n, self.pool
+        # The rows as one sorted array of (code, key) words, for one searchsorted.
+        code_of = np.repeat(np.arange(len(gwidths), dtype=np.uint64), gwidths)
+        self.gkeys = (code_of << np.uint64(32)) | self.grow.astype(np.uint64)
         # Small layouts gather keys from one (code, code) table. A positive y
         # of x is ranked after full_before[x, y] pool profiles (x's rank of y
         # among references plus its block members before y); that table is
         # built when ``draws`` draws gather more positives than it has
         # entries, else ranks are gathered from a (code, code) rank table.
-        self.full_keys = self.full_ranks = self.full_before = None
         m = n + len(pool.refs)
         if m**2 <= _FULL_TABLE:
-            self.full_keys = _full_table(n, kmu, kmu.T[n:], pool.krr)
+            self.full_keys = _full_table(n, self.kmu, self.kmu.T[n:], pool.krr)
             if pool.ranked:
                 self.full_ranks = _full_table(n, self.rmu, self.rcm, pool.rrr)
             if pool.ranked and m**2 <= draws * int(self.deg.sum()):
@@ -883,17 +891,18 @@ def permutation_null(
     backend = resolve_backend(backend)
     if pool is None or not pool.matches(blocks):
         pool = _Pool(blocks, similarity)
-    # Only the NumPy path gathers from the table that ``draws`` sizes.
-    draws = int(null_size) if backend == "numpy" else 0
-    layout = _Layout(members, edges, block_of, similarity, pool, draws)
     k0, k1 = group_key(seed, members)
-    identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
+    if backend == "numba":
+        layout = _Layout(members, edges, block_of, similarity, pool, vectorized=False)
+        kernels = _import_numba_backend()
+        identity = kernels.permutation_identity(layout)
+        chunk, kernel = _NUMBA_CHUNK, kernels.permutation_maps
+    else:
+        layout = _Layout(members, edges, block_of, similarity, pool, int(null_size))
+        identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
+        chunk, kernel = layout.chunk(), _permutation_maps_np
     thr = float(tie_thresholds(identity))
     count = 0
-    if backend == "numba":
-        chunk, kernel = _NUMBA_CHUNK, _import_numba_backend().permutation_maps
-    else:
-        chunk, kernel = layout.chunk(), _permutation_maps_np
     for start, size in chunks(int(null_size), chunk):
         maps = kernel(layout, start, size, k0, k1)
         if out is not None:
