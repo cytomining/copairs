@@ -1,18 +1,12 @@
 """Tests that Numba stays optional: lazy import, errors, backend checks."""
 
-import os
-import sys
-import subprocess
-from pathlib import Path
-
 import numpy as np
 import pytest
 
 from copairs.map import multilabel, average_precision
+from tests.helpers import run_isolated
 from copairs.matching import find_pairs_multilabel
 from copairs.map.normalization import normalize_ap
-
-PROJECT_ROOT = Path(__file__).parents[1]
 
 # Imports numba lazily in a fresh interpreter whose import of numba fails.
 BLOCK_NUMBA = (
@@ -26,24 +20,9 @@ BLOCK_NUMBA = (
 )
 
 
-def _run_isolated(code: str) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(PROJECT_ROOT / "src"), env.get("PYTHONPATH", "")]
-    )
-    return subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=PROJECT_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-
 def test_default_path_does_not_import_numba():
     """Importing copairs and default AP, multilabel AP and mAP runs skip numba."""
-    result = _run_isolated(
+    result = run_isolated(
         "import sys\n"
         "import numpy as np\n"
         "import copairs\n"
@@ -77,7 +56,7 @@ def test_default_path_does_not_import_numba():
 )
 def test_missing_numba_extra_has_actionable_error(call):
     """Selecting Numba without the extra reports the installation command."""
-    result = _run_isolated(
+    result = run_isolated(
         BLOCK_NUMBA.format(
             error="ModuleNotFoundError(\"No module named 'numba'\", name='numba')"
         )
@@ -104,7 +83,7 @@ def test_missing_numba_extra_has_actionable_error(call):
 )
 def test_numba_import_failure_is_not_masked(error):
     """A broken or incompatible Numba installation keeps its original error."""
-    result = _run_isolated(
+    result = run_isolated(
         BLOCK_NUMBA.format(error=error) + "from copairs.map import average_precision\n"
         "try:\n"
         "    average_precision(None, None, [], [], [], [], backend='numba')\n"
@@ -124,7 +103,7 @@ def test_fastap_does_not_import_nulls():
     copairs.map loads statsmodels.
     """
     pytest.importorskip("numba", reason="Numba optional extra is unavailable")
-    result = _run_isolated(
+    result = run_isolated(
         "import sys\n"
         "import copairs.fastap\n"
         "for name in ('copairs.nulls', 'copairs.map', 'statsmodels'):\n"

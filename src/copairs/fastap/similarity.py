@@ -95,9 +95,11 @@ def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
     Returns
     -------
     callable or None
-        Takes ``(m, 2)`` row indices of ``feats`` and returns ``m`` float32
-        similarities, rounded from float64 into the output without a
-        full-size temporary. uint32 pairs are used without a copy.
+        Takes ``(m, 2)`` integer row indices of ``feats`` and returns ``m``
+        float32 similarities, rounded from float64 into the output without a
+        full-size temporary. uint32 pairs are used without a copy. Raises
+        ValueError for other shapes or dtypes and IndexError for indices
+        outside ``feats``, checked once per call before the kernel runs.
     """
     if not isinstance(metric, str) or metric not in FAST_METRICS:
         return None
@@ -110,7 +112,7 @@ def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
         kind = MINKOWSKI_METRICS.index(metric)
 
         def minkowski(pairs):
-            pairs = index_pairs(pairs)
+            pairs = index_pairs(pairs, len(x))
             out = np.empty(len(pairs), dtype=np.float32)
             _minkowski_pairs(x, pairs, kind, out)
             return out
@@ -120,7 +122,7 @@ def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
     x = np.ascontiguousarray(_unit_rows(feats, metric == "correlation"))
 
     def dot(pairs):
-        pairs = index_pairs(pairs)
+        pairs = index_pairs(pairs, len(x))
         out = np.empty(len(pairs), dtype=np.float32)
         _dot_pairs(x, pairs, out)
         if metric == "abs_cosine":

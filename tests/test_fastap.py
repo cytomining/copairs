@@ -8,7 +8,7 @@ pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
 from copairs import fastap, compute
 from copairs.map import average_precision
-from tests.helpers import simulate_random_dframe
+from tests.helpers import run_isolated, simulate_random_dframe
 from copairs.map.average_precision import build_rank_lists
 
 
@@ -124,6 +124,58 @@ def test_pair_similarity_nonfinite_features(metric):
     got = fastap.pair_similarity(feats, metric)(pairs)
     np.testing.assert_array_equal(np.isnan(got), np.isnan(generic))
     np.testing.assert_allclose(got, generic, rtol=1e-6)
+
+
+def test_pair_similarity_index_range():
+    """Indices outside feats raise IndexError instead of reading out of bounds.
+
+    Runs in a subprocess: an unchecked index can crash the interpreter.
+    """
+    result = run_isolated(
+        "import numpy as np\n"
+        "from copairs import fastap, compute\n"
+        "feats = np.random.default_rng(0).normal(size=(10, 4))\n"
+        "generic = compute.get_similarity_fn('cosine', progress_bar=False)\n"
+        "kernels = [fastap.PairSimilarity(feats, m) for m in fastap.FAST_METRICS]\n"
+        "kernels.append(lambda p: fastap.similarity_fn(feats, 'cosine', generic)(\n"
+        "    feats, p, 8))\n"
+        "for kernel in kernels:\n"
+        "    for bad in ([[0, 5000]], [[2**31, 0]], [[0, 10]], [[-1, 0]]):\n"
+        "        for dtype in (np.int64, np.uint32):\n"
+        "            if dtype is np.uint32 and bad[0][0] < 0:\n"
+        "                continue\n"
+        "            try:\n"
+        "                kernel(np.array(bad, dtype=dtype))\n"
+        "            except IndexError as exc:\n"
+        "                assert 'out of bounds' in str(exc), exc\n"
+        "            else:\n"
+        "                raise AssertionError(f'no IndexError for {bad} {dtype}')\n"
+    )
+    assert result.returncode == 0, (result.returncode, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "pairs,match",
+    [
+        (np.zeros((3, 3), dtype=np.int64), "shape"),
+        (np.zeros(4, dtype=np.int64), "shape"),
+        (np.zeros((3, 2)), "integer"),
+        (np.zeros((3, 2), dtype=bool), "integer"),
+    ],
+)
+def test_pair_similarity_rejects_malformed_pairs(pairs, match):
+    """Pairs must be an (n, 2) integer array, not reshaped or cast silently."""
+    kernel = fastap.PairSimilarity(np.eye(4), "cosine")
+    with pytest.raises(ValueError, match=match):
+        kernel(pairs)
+
+
+def test_pair_similarity_empty_pairs():
+    """No pairs give no similarities."""
+    kernel = fastap.PairSimilarity(np.eye(4), "euclidean")
+    for pairs in ([], np.empty((0, 2), dtype=np.uint32)):
+        got = kernel(pairs)
+        assert got.shape == (0,) and got.dtype == np.float32
 
 
 def test_pair_similarity_float32_overflow():

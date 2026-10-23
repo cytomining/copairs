@@ -45,9 +45,28 @@ def upper_bound(vals, lo, hi, key):
     return lo
 
 
-def index_pairs(pairs) -> np.ndarray:
-    """Contiguous ``(n, 2)`` pairs for the kernels; uint32 pairs are not copied."""
-    pairs = np.ascontiguousarray(pairs).reshape(-1, 2)
+def index_pairs(pairs, n: int | None = None) -> np.ndarray:
+    """Contiguous ``(k, 2)`` pairs for the kernels; uint32 pairs are not copied.
+
+    The kernels index without bounds checks, so this raises instead:
+    ValueError unless ``pairs`` is a ``(k, 2)`` integer array (or empty), and
+    IndexError for an index outside ``range(n)``, or a negative one when
+    ``n`` is None. One vectorized pass over the pairs.
+    """
+    pairs = np.asarray(pairs)
+    if pairs.shape in ((0,), (0, 2)):
+        dtype = np.uint32 if pairs.dtype == np.uint32 else np.int64
+        return np.empty((0, 2), dtype=dtype)
+    if pairs.ndim != 2 or pairs.shape[1] != 2:
+        raise ValueError(f"pairs must have shape (k, 2), got {pairs.shape}")
+    if not np.issubdtype(pairs.dtype, np.integer):
+        raise ValueError(f"pairs must hold integer row indices, got {pairs.dtype}")
+    lo, hi = pairs.min(), pairs.max()
+    if lo < 0:
+        raise IndexError(f"pair index {lo} is out of bounds: indices must be >= 0")
+    if n is not None and hi >= n:
+        raise IndexError(f"pair index {hi} is out of bounds for {n} profiles")
+    pairs = np.ascontiguousarray(pairs)
     return pairs if pairs.dtype == np.uint32 else pairs.astype(np.int64, copy=False)
 
 
