@@ -389,6 +389,18 @@ def test_draw_average_precisions_large_norms():
     np.testing.assert_array_equal(got, expected)
 
 
+@pytest.mark.parametrize("scale", [1e40, 1e-50])
+def test_draw_average_precisions_float64_beyond_float32(scale):
+    """float64 rows that float32 cannot hold keep their direction."""
+    rng = np.random.default_rng(12)
+    feats = rng.normal(size=(40, 16))
+    queries = np.stack([rng.choice(40, 5, replace=False) for _ in range(10)])
+    refs = np.stack([rng.choice(40, 20, replace=False) for _ in range(10)])
+    expected = fastap.draw_average_precisions(feats, queries, refs)
+    got = fastap.draw_average_precisions(feats * scale, queries, refs)
+    np.testing.assert_array_equal(got, expected)
+
+
 def test_draw_average_precisions_chunks_do_not_overlap():
     """Each chunk's gathered rows are freed before the next chunk's are built.
 
