@@ -5,6 +5,7 @@ ones (:mod:`copairs.fastap.cuda`) where CuPy compiles kernels for a GPU.
 """
 
 import tracemalloc
+import importlib.util
 
 import numpy as np
 import pandas as pd
@@ -14,12 +15,15 @@ pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
 from copairs import nulls, fastap, compute
 from copairs.map import average_precision
-from tests.helpers import run_isolated, simulate_random_dframe
+from tests.helpers import fake_gpu, run_isolated, simulate_random_dframe
 from copairs._backend import backend_module
 from copairs.map.average_precision import build_rank_lists
 
 GPU = "cuda" in nulls.available_backends()
 needs_gpu = pytest.mark.skipif(not GPU, reason="needs CuPy and a usable CUDA GPU")
+needs_cupy = pytest.mark.skipif(
+    importlib.util.find_spec("cupy") is None, reason="CuPy is not installed"
+)
 AP_BACKENDS = ["numba", pytest.param("cuda", marks=needs_gpu)]
 
 
@@ -599,3 +603,24 @@ def test_draw_average_precisions_shared_memory_limit(extra):
         np.testing.assert_array_equal(got, expected)
     else:
         np.testing.assert_allclose(got, expected, rtol=0, atol=1e-3)
+
+
+@needs_cupy
+def test_cuda_pairs_cast_to_uint32_on_the_host(monkeypatch):
+    """Pairs reach the GPU as uint32, 8 bytes per pair, whatever their host dtype."""
+    cp, launches = fake_gpu(monkeypatch)
+    cuda = backend_module("cuda")
+    rng = np.random.default_rng(15)
+    pos, neg = random_pairs(rng, 50, 100, 2000)
+    feats = rng.normal(size=(50, 4))
+    for metric in ("cosine", "euclidean"):
+        cp.allocated.clear()
+        cuda.pair_similarity(feats, metric)(neg.astype(np.int64))
+        assert max(cp.allocated) <= 8 * len(neg), cp.allocated
+    cp.allocated.clear()
+    launches.clear()
+    cuda.ap_from_pairs(pos, neg, rng.random(len(pos)), rng.random(len(neg)))
+    assert max(cp.allocated) <= 8 * len(neg), cp.allocated
+    for _, args in launches:
+        pairs = [a for a in args if isinstance(a, np.ndarray) and a.ndim == 2]
+        assert all(a.dtype == np.uint32 for a in pairs)

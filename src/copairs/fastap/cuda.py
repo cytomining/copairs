@@ -151,9 +151,11 @@ def _kernel(name: str):
 
 
 def _device_pairs(pairs):
-    """Contiguous uint32 ``(n, 2)`` pairs on the GPU (indices are < 2**32)."""
-    pairs = cp.asarray(pairs).reshape(-1, 2)
-    return cp.ascontiguousarray(pairs.astype(cp.uint32, copy=False))
+    """Contiguous uint32 ``(n, 2)`` pairs on the GPU, for indices below ``2**32``.
+
+    Cast on the host, so only 8 bytes per pair are copied and held.
+    """
+    return cp.asarray(np.ascontiguousarray(pairs, dtype=np.uint32).reshape(-1, 2))
 
 
 def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
@@ -164,9 +166,10 @@ def pair_similarity(feats: np.ndarray, metric, on_device: bool = False):
     ``on_device`` a CuPy array. Pairs are checked on the host and copied to
     the GPU :data:`PAIR_CHUNK` at a time.
     """
-    if not isinstance(metric, str) or metric not in FAST_METRICS:
-        return None
     feats = np.asarray(feats)
+    # The kernels index rows with uint32 pairs.
+    if not isinstance(metric, str) or metric not in FAST_METRICS or len(feats) >= 2**32:
+        return None
     if feats.dtype not in (np.float32, np.float64):
         feats = feats.astype(np.float64)
     if metric in MINKOWSKI_METRICS:
