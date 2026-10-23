@@ -22,7 +22,7 @@ from copairs.map import (
     mean_average_precision,
     mean_average_precision_hierarchical,
 )
-from tests.helpers import ap_frame, query_meta
+from tests.helpers import ML_SPEC, ap_frame, query_meta
 from copairs.methods import NULLS
 from tests.test_nulls import run_python
 
@@ -255,8 +255,8 @@ def plate_label_aps(compounds=20, labels=6, plates=3, seed=0):
     feats = rng.standard_normal((len(meta), 8))
     feats += 0.8 * has[:, :2] @ rng.standard_normal((2, 8))
     ap = multilabel.average_precision(
-        meta, feats, ["target"], [], ["plate"], ["target"], multilabel_col="target",
-        progress_bar=False,
+        meta, feats, multilabel_col="target", progress_bar=False,
+        **dict(ML_SPEC, neg_sameby=["plate"]),
     )  # fmt: skip
     return ap[ap["target"].str.startswith("L")]
 
@@ -288,13 +288,13 @@ def test_backends_give_identical_label_pvalues(stop_after, monkeypatch):
     pytest.importorskip("numba")
     from copairs.nulls import _numba
 
-    calls, maps = [], _numba.label_maps
+    calls, maps = [], _numba.maps
 
-    def spy(*args):
-        calls.append(args[-1])
-        return maps(*args)
+    def spy(kernels, *args):
+        calls.append(kernels[1] is _numba._label_maps)
+        return maps(kernels, *args)
 
-    monkeypatch.setattr(_numba, "label_maps", spy)
+    monkeypatch.setattr(_numba, "maps", spy)
     ap = plate_label_aps()
     kwargs = dict(
         null_size=3000, threshold=0.05, seed=7, progress_bar=False,
@@ -307,7 +307,7 @@ def test_backends_give_identical_label_pvalues(stop_after, monkeypatch):
     pd.testing.assert_frame_equal(got["numba"], got["numpy"])
     assert len(got["numpy"]) == 6
     assert 0 < got["numpy"]["below_p"].sum() < len(got["numpy"])
-    assert calls  # the Numba run's draws ran in its label kernels
+    assert calls and all(calls)  # the Numba run's draws ran in its label kernels
     if stop_after is not None:  # some labels stopped: p is not (hits + 1) / 3001
         scaled = got["numpy"]["p_value"].to_numpy() * 3001
         assert not np.allclose(scaled, np.round(scaled), rtol=0, atol=1e-6)
@@ -322,20 +322,25 @@ def test_auto_backend_runs_numba_kernels(monkeypatch):
     from copairs.nulls import _numba
 
     calls = []
-    for name in ("joint_nulls", "permutation_maps", "label_maps"):
+    joint_nulls, maps = _numba.joint_nulls, _numba.maps
 
-        def spy(*args, _real=getattr(_numba, name), _name=name):
-            calls.append(_name)
-            return _real(*args)
+    def joint_spy(*args):
+        calls.append("joint")
+        return joint_nulls(*args)
 
-        monkeypatch.setattr(_numba, name, spy)
+    def maps_spy(kernels, *args):
+        calls.append("label" if kernels[1] is _numba._label_maps else "permutation")
+        return maps(kernels, *args)
+
+    monkeypatch.setattr(_numba, "joint_nulls", joint_spy)
+    monkeypatch.setattr(_numba, "maps", maps_spy)
     ap = plate_aps(groups=4)
     kwargs = dict(null_size=500, threshold=0.05, seed=0, progress_bar=False)
     labelled = plate_label_aps()
     for null in ("joint", "permutation"):
         mean_average_precision(ap, ["g"], null=null, **kwargs)
     mean_average_precision(labelled, ["target"], **kwargs)
-    assert set(calls) == {"joint_nulls", "permutation_maps", "label_maps"}
+    assert set(calls) == {"joint", "permutation", "label"}
     calls.clear()
     mean_average_precision(ap, ["g"], null="permutation", backend="numpy", **kwargs)
     mean_average_precision(labelled, ["target"], backend="numpy", **kwargs)

@@ -52,6 +52,30 @@ def numba_threads():
         pytest.importorskip("numba").set_num_threads(before[0])
 
 
+def record_numba_runs(monkeypatch, parallel_kernel):
+    """Record a run's Numba draws: ``(parallel flags, parallel launches)``.
+
+    Each call of ``_numba.maps`` appends its ``parallel`` flag, and each
+    parallel kernel launched whether it is ``_numba``'s ``parallel_kernel``.
+    """
+    from copairs.nulls import _numba
+
+    parallel, launched = [], []
+    maps, launch = _numba.maps, _numba._launch
+
+    def recorded_maps(*args):
+        parallel.append(args[-1])
+        return maps(*args)
+
+    def recorded_launch(kernel, *args):
+        launched.append(kernel is getattr(_numba, parallel_kernel))
+        return launch(kernel, *args)
+
+    monkeypatch.setattr(_numba, "maps", recorded_maps)
+    monkeypatch.setattr(_numba, "_launch", recorded_launch)
+    return parallel, launched
+
+
 def layout_meta(plates, reps, ctrls):
     """``reps`` replicates of group "q" and ``ctrls`` controls on each plate."""
     rows = []
@@ -225,11 +249,12 @@ def test_numba_matches_numpy_draws(
     got_pm, got_maps = scalar_draws(layout, start, 300, k0, k1, kernels=kernels)
     np.testing.assert_array_equal(got_pm, pm)
     np.testing.assert_array_equal(got_maps, expected)
+    compiled = layout.compiled(_numba)
     for parallel in (True, False):  # on Numba's threads or the caller's
-        maps = _numba.permutation_maps(layout, start, 300, k0, k1, parallel)
+        maps = _numba.maps(compiled, layout, start, 300, k0, k1, parallel)
         np.testing.assert_array_equal(maps, expected)
     identity = permutation._group_maps_np(np_tables, np.arange(layout.n)[None])[0]
-    assert _numba.permutation_identity(layout) == identity
+    assert _numba.identity_map(compiled, layout) == identity
     out = {b: np.empty(2000) for b in ("numpy", "numba")}
     runs = {
         b: permutation.permutation_null(
@@ -696,21 +721,10 @@ def test_pvalues_do_not_depend_on_workers(backend, monkeypatch, numba_threads):
     monkeypatch.setattr(permutation, "_Pool", CountedPool)
     monkeypatch.setattr(permutation, "ThreadPoolExecutor", RecordedExecutor)
     if backend == "numba":
-        from copairs.nulls import _numba
-
-        maps, launch = _numba.permutation_maps, _numba._launch
-
-        def recorded(*args):
-            parallel.append(args[-1])
-            return maps(*args)
-
-        def recorded_launch(kernel, *args):
-            launched.append(kernel is _numba._permutation_maps_parallel)
-            return launch(kernel, *args)
-
         numba_threads(2)
-        monkeypatch.setattr(_numba, "permutation_maps", recorded)
-        monkeypatch.setattr(_numba, "_launch", recorded_launch)
+        parallel, launched = record_numba_runs(
+            monkeypatch, "_permutation_maps_parallel"
+        )
     p, kernels = [], []
     for w in (1, 4):
         parallel.clear()
@@ -965,11 +979,27 @@ def label_group(meta, feats, label, spec=ML_SPEC):
     return ap["average_precision"].mean(), layouts[0], pool, pairs
 
 
-def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0, backend="numpy"):
-    """Observed mAP of ``label`` and the null's draws for it."""
+def label_case(design, label, ties=False):
+    """``label_group`` of ``label`` in a LABEL_DESIGNS design, its features seeded.
+
+    ``ties`` rounds the features, which ties many similarities and zeroes
+    some profiles (NaN).
+    """
+    make_meta, spec, _ = LABEL_DESIGNS[design]
+    meta = make_meta()
+    feats = np.random.default_rng(len(meta) + ord(label)).standard_normal(
+        (len(meta), 6)
+    )
+    if ties:
+        feats = np.round(feats)
+    return label_group(meta, feats, label, spec)
+
+
+def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0):
+    """Observed mAP of ``label`` and the NumPy null's draws for it."""
     observed, layout, pool, _ = label_group(meta, feats, label, spec)
     out = np.empty(null_size)
-    run = permutation._label_run(*layout, pool, seed, backend=backend)
+    run = permutation._label_run(*layout, pool, seed)
     count, draws = run.count(null_size, out=out)
     assert draws == null_size
     return observed, run.identity, count, out
@@ -1001,16 +1031,8 @@ def test_label_vectorized_matches_scalar_draws(
     """
     if tables == "search":
         monkeypatch.setattr(permutation, "RANK_POOL", 0)
-    make_meta, spec, _ = LABEL_DESIGNS[design]
-    meta = make_meta()
-    feats = np.random.default_rng(len(meta) + ord(label)).standard_normal(
-        (len(meta), 6)
-    )
-    if ties:  # rounding ties many similarities and zeroes some profiles (NaN)
-        feats = np.round(feats)
-    observed, (members, edges, lone, comps, block_of, key), pool, _ = label_group(
-        meta, feats, label, spec
-    )
+    observed, group, pool, _ = label_case(design, label, ties)
+    members, edges, lone, comps, block_of, key = group
     assert pool.ranked == (tables == "ranked")
     assert len(comps) == (2 if design == "plates" else 1)
     draws = 10**6 if lone_table else 0
@@ -1047,14 +1069,7 @@ def test_label_numba_matches_numpy_draws(design, label, ties, ranked, monkeypatc
 
     if not ranked:
         monkeypatch.setattr(permutation, "RANK_POOL", 0)
-    make_meta, spec, _ = LABEL_DESIGNS[design]
-    meta = make_meta()
-    feats = np.random.default_rng(len(meta) + ord(label)).standard_normal(
-        (len(meta), 6)
-    )
-    if ties:  # rounding ties many similarities and zeroes some profiles (NaN)
-        feats = np.round(feats)
-    _, group, pool, _ = label_group(meta, feats, label, spec)
+    _, group, pool, _ = label_case(design, label, ties)
     members, edges, lone, _, block_of, key = group
     assert pool.ranked == ranked
     layout = permutation._LabelLayout(members, edges, lone, block_of, pool)
@@ -1069,11 +1084,12 @@ def test_label_numba_matches_numpy_draws(design, label, ties, ranked, monkeypatc
     )
     np.testing.assert_array_equal(got_pm, pm)
     np.testing.assert_array_equal(got_maps, expected)
+    compiled = layout.compiled(_numba)
     for parallel in (True, False):  # on Numba's threads or the caller's
-        maps = _numba.label_maps(layout, start, 300, k0, k1, parallel)
+        maps = _numba.maps(compiled, layout, start, 300, k0, k1, parallel)
         np.testing.assert_array_equal(maps, expected)
     identity = permutation._label_maps_np(np_tables, layout.member_code[None])[0]
-    assert _numba.label_identity(layout) == identity
+    assert _numba.identity_map(compiled, layout) == identity
     full = np.empty(2000)
     expected = permutation._label_run(*group, pool, 3).count(2000, out=full)
     for backend, parallel in (("numpy", True), ("numba", True), ("numba", False)):
@@ -1292,21 +1308,8 @@ def test_label_pools_are_shared_and_workers_do_not_matter(
 
     monkeypatch.setattr(permutation, "_LabelPool", CountedPool)
     if backend == "numba":
-        from copairs.nulls import _numba
-
-        maps, launch = _numba.label_maps, _numba._launch
-
-        def recorded(*args):
-            parallel.append(args[-1])
-            return maps(*args)
-
-        def recorded_launch(kernel, *args):
-            launched.append(kernel is _numba._label_maps_parallel)
-            return launch(kernel, *args)
-
         numba_threads(2)
-        monkeypatch.setattr(_numba, "label_maps", recorded)
-        monkeypatch.setattr(_numba, "_launch", recorded_launch)
+        parallel, launched = record_numba_runs(monkeypatch, "_label_maps_parallel")
     p, kernels = [], []
     for w in (1, 4):
         parallel.clear()

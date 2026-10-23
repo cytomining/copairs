@@ -317,29 +317,6 @@ def _permutation_identity(
     )  # fmt: skip
 
 
-def permutation_identity(layout):
-    """Return the mAP of ``layout``'s group under its observed labels, as a float."""
-    identity = np.arange(layout.n, dtype=np.int64)
-    return float(_permutation_identity(identity, *layout.map_args()))
-
-
-def permutation_maps(layout, start, size, k0, k1, parallel=True):
-    """float64 mAPs of draws ``start, ..., start + size - 1`` of ``layout``'s group.
-
-    ``parallel`` runs the draws on Numba's threads (:func:`_launch`);
-    otherwise they run on the calling thread, which releases the GIL, so
-    threads can run several groups' draws at once.
-    """
-    out = np.empty(size, dtype=np.float64)
-    map_args = layout.map_args()[1:]  # after n, which draw_args starts with
-    args = (*layout.draw_args(), k0, k1, *map_args, start, out)
-    if parallel:
-        _launch(_permutation_maps_parallel, *args)
-    else:
-        _permutation_maps(*args, 0, size)
-    return out
-
-
 @cached_njit(_SOURCES, nogil=True)
 def _label_maps(
     n_block, bm_ptr, bm_slot, cr_lo, cr_hi, k0, k1, n, adjm, deg, keys,
@@ -400,21 +377,31 @@ def _label_identity(
     )  # fmt: skip
 
 
-def label_identity(layout):
-    """Return the mAP of ``layout``'s multilabel group under its observed labels."""
-    identity = np.asarray(layout.identity, dtype=np.int64)
-    return float(_label_identity(identity, *layout.map_args()))
+def identity_map(kernels, layout):
+    """Return the mAP of ``layout``'s group under its observed labels, as a float.
 
-
-def label_maps(layout, start, size, k0, k1, parallel=True):
-    """float64 mAPs of multilabel draws ``start, ..., start + size - 1``.
-
-    ``parallel`` as in :func:`permutation_maps`.
+    ``kernels`` are the layout's ``(identity, serial, parallel)`` kernels
+    (``layout.compiled``, single-label or multilabel). The identity kernel
+    takes the observed labels' codes (``layout.identity``) and
+    ``layout.map_args()``.
     """
+    identity = np.asarray(layout.identity, dtype=np.int64)
+    return float(kernels[0](identity, *layout.map_args()))
+
+
+def maps(kernels, layout, start, size, k0, k1, parallel=True):
+    """float64 mAPs of draws ``start, ..., start + size - 1`` of ``layout``'s group.
+
+    ``kernels`` as in :func:`identity_map`; the draw kernels take
+    ``layout.kernel_args(k0, k1)``. ``parallel`` runs the draws on Numba's
+    threads (:func:`_launch`); otherwise they run on the calling thread,
+    which releases the GIL, so threads can run several groups' draws at once.
+    """
+    _, serial, parallel_kernel = kernels
     out = np.empty(size, dtype=np.float64)
-    args = (*layout.draw_args(), k0, k1, *layout.map_args(), start, out)
+    args = (*layout.kernel_args(k0, k1), start, out)
     if parallel:
-        _launch(_label_maps_parallel, *args)
+        _launch(parallel_kernel, *args)
     else:
-        _label_maps(*args, 0, size)
+        serial(*args, 0, size)
     return out

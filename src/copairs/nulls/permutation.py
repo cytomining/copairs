@@ -536,14 +536,23 @@ class _Layout:
             self.rmu, self.rcm, pool.rrr, pool.ranked,
         )  # fmt: skip
 
+    def kernel_args(self, k0, k1):
+        """Arguments of the Numba draw kernels before ``start``, given the keys."""
+        # map_args after n, which draw_args starts with
+        return (*self.draw_args(), k0, k1, *self.map_args()[1:])
+
     def tables(self, draws):
         """Return the NumPy backend's :class:`_NumpyTables` for ``draws`` draws."""
         return _NumpyTables(self, draws)
 
     @staticmethod
     def compiled(kernels):
-        """``(identity, maps)`` of the Numba backend, from :mod:`copairs.nulls._numba`."""
-        return kernels.permutation_identity, kernels.permutation_maps
+        """``(identity, serial, parallel)`` kernels of :mod:`copairs.nulls._numba`."""
+        return (
+            kernels._permutation_identity,
+            kernels._permutation_maps,
+            kernels._permutation_maps_parallel,
+        )
 
 
 class _NumpyTables:
@@ -1023,11 +1032,14 @@ class _Run:
         self.key = key
         self.chunk = _draw_chunk(layout.n)
         if backend == "numba":
-            identity, maps = layout.compiled(_import_numba_backend())
-            self.identity = identity(layout)
+            numba_backend = _import_numba_backend()
+            kernels = layout.compiled(numba_backend)
+            self.identity = numba_backend.identity_map(kernels, layout)
             if parallel:
                 self.chunk = _NUMBA_CHUNK
-            self._maps = lambda start, size: maps(layout, start, size, *key, parallel)
+            self._maps = lambda start, size: numba_backend.maps(
+                kernels, layout, start, size, *key, parallel
+            )
         else:
             tables = layout.tables(draws)
             self.identity = float(tables.maps(layout.identity[None])[0])
@@ -1691,14 +1703,22 @@ class _LabelLayout:
             pool.nrow, pool.nbits, self.loc, self.lone, self.gptr, self.grow,
         )  # fmt: skip
 
+    def kernel_args(self, k0, k1):
+        """Arguments of the Numba draw kernels before ``start``, given the keys."""
+        return (*self.draw_args(), k0, k1, *self.map_args())
+
     def tables(self, draws):
         """Return the NumPy backend's :class:`_LabelNumpyTables` for ``draws`` draws."""
         return _LabelNumpyTables(self, draws)
 
     @staticmethod
     def compiled(kernels):
-        """``(identity, maps)`` of the Numba backend, from :mod:`copairs.nulls._numba`."""
-        return kernels.label_identity, kernels.label_maps
+        """``(identity, serial, parallel)`` kernels of :mod:`copairs.nulls._numba`."""
+        return (
+            kernels._label_identity,
+            kernels._label_maps,
+            kernels._label_maps_parallel,
+        )
 
 
 class _LabelNumpyTables:
