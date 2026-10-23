@@ -858,7 +858,7 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     return layouts
 
 
-def check_pos_diffby(layouts, codes):
+def check_pos_diffby(layouts, codes, whole_pools=False):
     """Raise unless relabelling keeps each group's positive pairs under ``pos_diffby``.
 
     ``codes[p, c]`` is profile ``p``'s value code in the APs' ``pos_diffby``
@@ -872,10 +872,15 @@ def check_pos_diffby(layouts, codes):
     none. A column whose profiles never differ for a pair of blocks fixes
     the pair (never positive) whatever the other columns. Layouts outside
     these rules raise, so this check is sufficient, not necessary.
+
+    With ``whole_pools``, a layout's ``blocks`` are its blocks' whole pools,
+    members included (the label null's components); shared pools are then
+    summarized once, however many groups rank them.
     """
     codes = np.asarray(codes, dtype=np.int64)
     n_col = codes.shape[1]
     ref_uniq = {}
+    no_members = np.zeros(0, dtype=np.int64)
 
     def refs_stats(refs):  # per column: the references' sorted distinct values
         key = id(refs)
@@ -892,6 +897,12 @@ def check_pos_diffby(layouts, codes):
         stats = []  # per block, per column: (its one value or None, no repeats,
         # member values, sorted reference values)
         for b, refs in enumerate(blocks):
+            if whole_pools:  # the pool's one value, no repeats and values
+                stats.append([
+                    (u[0] if len(u) == 1 else None, len(u) == len(refs), no_members, u)
+                    for u in refs_stats(refs)
+                ])  # fmt: skip
+                continue
             mine = codes[members[block_of == b]]
             col = []
             for c, u in enumerate(refs_stats(refs)):
@@ -1830,13 +1841,12 @@ def label_permutation_pvalues(
         groups, np.asarray(rows, dtype=np.int64), num_pos, num_neg, pairs
     )
     if pairs.pos_diffby is not None and np.shape(pairs.pos_diffby)[1]:
-        # A draw fills a component's slots from all its profiles: the
-        # members and, as references, the rest.
-        def as_single(members, edges, lone, comps, block_of, key):
-            refs = [np.setdiff1d(comp_profiles[c], members) for c in comps]
-            return members, edges, refs, block_of
-
-        check_pos_diffby([as_single(*lay) for lay in layouts], pairs.pos_diffby)
+        # A draw fills a component's slots from all its profiles.
+        whole = [
+            (members, edges, [comp_profiles[c] for c in comps], block_of)
+            for members, edges, _, comps, block_of, _ in layouts
+        ]
+        check_pos_diffby(whole, pairs.pos_diffby, whole_pools=True)
     degree = np.diff(nbr_ptr)
 
     def pool_bytes(g):

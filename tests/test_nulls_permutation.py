@@ -421,6 +421,51 @@ def test_rank_table_matches_binary_search(monkeypatch):
     np.testing.assert_array_equal(ranked[3], searched[3])
 
 
+def test_whole_pool_pos_diffby_check_matches_member_split():
+    """Checking whole pools decides as checking members and references apart.
+
+    The label null passes its components whole. Random layouts on 1-3 pools,
+    each column constant, distinct or repeating per pool, raise in both forms
+    or in neither, and both outcomes occur.
+    """
+    rng = np.random.default_rng(5)
+
+    def raises(layout, **kwargs):
+        try:
+            permutation.check_pos_diffby([layout], codes, **kwargs)
+        except ValueError:  # the check's refusal is the outcome
+            return True
+        return False
+
+    outcomes = []
+    while len(outcomes) < 300:
+        cut = rng.choice(np.arange(1, 12), rng.integers(0, 3), replace=False)
+        pools = np.split(np.arange(12), np.sort(cut))
+        codes = np.empty((12, 2), dtype=np.int64)
+        for c, pool in itertools.product(range(2), pools):
+            kind = rng.integers(3)
+            if kind == 0:
+                codes[pool, c] = rng.integers(3)
+            elif kind == 1:
+                codes[pool, c] = rng.choice(30, len(pool), replace=False)
+            else:
+                codes[pool, c] = rng.integers(3, size=len(pool))
+        chosen = [pool[rng.random(len(pool)) < 0.5] for pool in pools]
+        used = [b for b, m in enumerate(chosen) if len(m)]
+        members = np.concatenate([chosen[b] for b in used])
+        if len(members) < 2:
+            continue
+        block_of = np.repeat(np.arange(len(used)), [len(chosen[b]) for b in used])
+        refs = [np.setdiff1d(pools[b], members) for b in used]
+        split = raises((members, None, refs, block_of))
+        whole = raises(
+            (members, None, [pools[b] for b in used], block_of), whole_pools=True
+        )
+        assert split == whole
+        outcomes.append(split)
+    assert 0 < sum(outcomes) < len(outcomes)
+
+
 def test_interleaved_pools_are_built_once(monkeypatch):
     """Groups ranking pools A, B, A build two pools, also when A and B share a prefix."""
     refs = {0: [10, 11, 12], 1: [10, 11, 13], 2: [10, 11, 12]}  # A, B, A
