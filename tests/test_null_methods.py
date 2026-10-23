@@ -440,6 +440,27 @@ def test_p_values_empty(method):
 
 
 @pytest.mark.parametrize(
+    "confs", [[2, 10], [[1, 5, 1], [2, 7, 3]], [[1, 5, 1, 9], [2, 7, 3, 9]], [[[1, 5]]]]
+)
+def test_null_dists_need_conf_rows(confs, tmp_path):
+    """Configurations that are not (n, 2) rows raise rather than being reshaped.
+
+    The legacy method fails on them too, while unpacking a row.
+    """
+    with pytest.raises(ValueError, match=r"shape \(n, 2\)"):
+        compute.get_null_dists(confs, 10, 0)
+    with pytest.raises((TypeError, ValueError)):
+        compute.get_null_dists(confs, 10, 0, tmp_path, False, method="legacy")
+
+
+@pytest.mark.parametrize("method", ["fast", "legacy"])
+def test_null_dists_of_no_confs(method, tmp_path):
+    """An empty list of configurations gives no nulls under either method."""
+    got = compute.get_null_dists([], 10, 0, tmp_path, False, method=method)
+    assert got.shape == (0, 10)
+
+
+@pytest.mark.parametrize(
     "bad,match", [(dict(seed=-1), "seed must be"), (dict(null_size=-1), "null_size")]
 )
 def test_empty_input_still_validates(bad, match):

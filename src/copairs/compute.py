@@ -618,7 +618,12 @@ def _without_positives(confs: np.ndarray) -> np.ndarray:
 
 def _fast_null_dists(confs, null_size, seed, backend) -> np.ndarray:
     """:func:`get_null_dists` with ``method="fast"``."""
-    confs = np.asarray(confs).reshape(-1, 2)
+    # Like the legacy method, take (n, 2) rows, or no configurations at all.
+    confs = np.asarray(confs)
+    if confs.size == 0:
+        confs = confs.reshape(0, 2)
+    elif confs.ndim != 2 or confs.shape[1] != 2:
+        raise ValueError(f"confs must have shape (n, 2), got {confs.shape}")
     null_size = check_null_size(null_size)
     seed = resolve_seed(seed)
     ranked = ~_without_positives(confs)
