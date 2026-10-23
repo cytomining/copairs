@@ -117,8 +117,7 @@ extern "C" __global__ void minkowski_pairs_f64(const double* x, long long d,
 // q = #{positive keys of i <= key}.
 extern "C" __global__ void negative_hist(const unsigned int* neg_pairs, const float* keys,
                                          long long n_neg, const long long* ptr,
-                                         const float* vals, unsigned long long* hist,
-                                         unsigned long long* n_negative) {
+                                         const float* vals, unsigned long long* hist) {
     for (long long e = blockIdx.x * (long long)blockDim.x + threadIdx.x; e < 2 * n_neg;
          e += (long long)gridDim.x * blockDim.x) {
         long long i = neg_pairs[e];
@@ -129,23 +128,23 @@ extern "C" __global__ void negative_hist(const unsigned int* neg_pairs, const fl
             if (le(vals[mid], key)) lo = mid + 1; else hi = mid;
         }
         atomicAdd(hist + lo + i, 1ull);
-        atomicAdd(n_negative + i, 1ull);
     }
 }
 
+// AP of each profile i from its bins, and its number of negatives: all its bins.
 extern "C" __global__ void ap_from_hist(const long long* ptr, const unsigned long long* hist,
-                                        long long n, double* ap) {
+                                        long long n, double* ap, unsigned long long* n_neg) {
     for (long long i = blockIdx.x * (long long)blockDim.x + threadIdx.x; i < n;
          i += (long long)gridDim.x * blockDim.x) {
         long long num_pos = ptr[i + 1] - ptr[i], base = ptr[i] + i;
-        if (num_pos == 0) { ap[i] = nan(""); continue; }
         unsigned long long before = 0;
         double acc = 0.0;
         for (long long t = 0; t < num_pos; ++t) {
             before += hist[base + t];
             acc += (double)(t + 1) / (double)(t + 1 + before);
         }
-        ap[i] = acc / (double)num_pos;
+        ap[i] = num_pos == 0 ? nan("") : acc / (double)num_pos;
+        n_neg[i] = before + hist[base + num_pos];
     }
 }
 """
@@ -317,17 +316,16 @@ def ap_from_pairs(
     )
     del pairs, profile, keys, order
     hist = cp.zeros(int(ptr[-1]) + n, dtype=cp.uint64)
-    n_neg = cp.zeros(n, dtype=cp.uint64)
     step = max(1, budget_bytes // _NEGATIVE_BYTES)
     for start in range(0, len(neg_pairs), step):
         pairs = _device_pairs(neg_pairs[start : start + step])
         keys = rank_keys(_chunk_sims(neg_sims, start, pairs), cp)
-        args = (pairs, keys, np.int64(len(pairs)), ptr, vals, hist, n_neg)
+        args = (pairs, keys, np.int64(len(pairs)), ptr, vals, hist)
         _kernel("negative_hist")((_cuda.grid(2 * len(pairs)),), (_cuda.BLOCK,), args)
         del pairs, keys  # free this chunk before the next one
-    ap = cp.empty(n, dtype=cp.float64)
+    ap, n_neg = cp.empty(n, dtype=cp.float64), cp.empty(n, dtype=cp.uint64)
     _kernel("ap_from_hist")(
-        (_cuda.grid(n),), (_cuda.BLOCK,), (ptr, hist, np.int64(n), ap)
+        (_cuda.grid(n),), (_cuda.BLOCK,), (ptr, hist, np.int64(n), ap, n_neg)
     )
     ap, num_pos = ap.get(), cp.diff(ptr).get()
     total = num_pos + n_neg.get().astype(np.int64)
