@@ -167,3 +167,76 @@ def test_average_precision_numba_similarity():
     np.testing.assert_allclose(
         fast["average_precision"], numpy["average_precision"], atol=0.05
     )
+
+
+def reference_draw_ap(query, reference):
+    """AP of each query by fully sorting its rank list (ties: queries first)."""
+    k = len(query)
+    feats = np.concatenate([query, reference]).astype(np.float64)
+    feats = (feats / np.linalg.norm(feats, axis=1, keepdims=True)).astype(np.float32)
+    sims = feats[:k] @ feats.T
+    sims[np.arange(k), np.arange(k)] = -np.inf
+    order = np.argsort(-sims, axis=1, kind="stable")[:, :-1]
+    rel_k = np.nonzero(order < k)[1].reshape(k, k - 1)
+    return (np.arange(1, k, dtype=np.float64) / (rel_k + 1)).mean(axis=1)
+
+
+@pytest.mark.parametrize("k,m,ties", [(2, 5, False), (10, 40, False), (25, 100, True)])
+def test_draw_average_precisions(k, m, ties):
+    """Batched draw APs equal fully sorted rank lists."""
+    rng = np.random.default_rng(4)
+    feats = rng.normal(size=(500, 8 if ties else 64)).astype(np.float32)
+    if ties:
+        feats = np.round(feats)
+        feats[:, 0] = 1
+    queries = np.stack([rng.choice(500, k, replace=False) for _ in range(30)])
+    refs = np.stack([rng.choice(500, m, replace=False) for _ in range(30)])
+    expected = np.stack(
+        [reference_draw_ap(feats[q], feats[r]) for q, r in zip(queries, refs)]
+    )
+    got = fastap.draw_average_precisions(
+        feats, queries, refs, budget_bytes=4 * (k + m) * 100 * 7
+    )
+    np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-15)
+
+
+def test_draw_average_precisions_validation():
+    """Too few queries, mismatched draws and degenerate features raise."""
+    feats = np.eye(4, dtype=np.float32)
+    with pytest.raises(ValueError, match="at least 2 queries"):
+        fastap.draw_average_precisions(feats, [[0]], [[1, 2]])
+    with pytest.raises(ValueError, match="n_draws"):
+        fastap.draw_average_precisions(feats, [[0, 1]], [[2], [3]])
+    with pytest.raises(ValueError, match="zero-norm"):
+        fastap.draw_average_precisions(np.zeros((4, 2)), [[0, 1]], [[2, 3]])
+
+
+@pytest.mark.parametrize("bad", [-1, 4])
+def test_draw_average_precisions_index_range(bad):
+    """Indices outside feats raise instead of wrapping to other rows."""
+    feats = np.eye(4, dtype=np.float32)
+    with pytest.raises(ValueError, match="rows of feats"):
+        fastap.draw_average_precisions(feats, [[0, bad]], [[2, 3]])
+    with pytest.raises(ValueError, match="rows of feats"):
+        fastap.draw_average_precisions(feats, [[0, 1]], [[2, bad]])
+
+
+def test_draw_average_precisions_large_norms():
+    """Rows whose squared norm overflows float32 keep their cosine ranking."""
+    rng = np.random.default_rng(6)
+    feats = rng.normal(size=(40, 16)).astype(np.float32)
+    queries = np.stack([rng.choice(40, 5, replace=False) for _ in range(10)])
+    refs = np.stack([rng.choice(40, 20, replace=False) for _ in range(10)])
+    expected = fastap.draw_average_precisions(feats, queries, refs)
+    big = feats.copy()
+    big[::2] *= np.float32(2.0**66)  # exact scaling; squares exceed float32
+    got = fastap.draw_average_precisions(big, queries, refs)
+    np.testing.assert_array_equal(got, expected)
+
+
+def test_draw_average_precisions_nonfinite_normalized():
+    """Pre-normalized features are still checked: NaN would break the ranking."""
+    feats = np.eye(4, dtype=np.float32)
+    feats[1, 0] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        fastap.draw_average_precisions(feats, [[0, 1]], [[2, 3]], normalized=True)

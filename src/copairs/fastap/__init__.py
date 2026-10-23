@@ -4,7 +4,8 @@ This package needs the optional ``numba`` extra (``pip install
 'copairs[numba]'``). copairs imports it only when ``backend="numba"`` is
 requested, through ``copairs.compute._import_numba_backend``. AP values match
 copairs' rank-list implementation to float64 rounding given the same
-similarities.
+similarities. :func:`draw_average_precisions` scores many query-vs-reference
+draws at once.
 """
 
 from typing import Callable
@@ -12,6 +13,7 @@ from typing import Callable
 import numpy as np
 
 from copairs.fastap import multilabel
+from copairs.fastap.draws import draw_average_precisions
 from copairs.fastap.ranking import ap_from_pairs
 from copairs.fastap.similarity import FAST_METRICS, PairSimilarity
 from copairs.fastap.normalization import expected_ap_array
@@ -20,6 +22,7 @@ __all__ = [
     "FAST_METRICS",
     "PairSimilarity",
     "ap_from_pairs",
+    "draw_average_precisions",
     "expected_ap_array",
     "multilabel",
     "pair_similarity",
