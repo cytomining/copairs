@@ -63,6 +63,20 @@ def _row_ap(sims, k, out, n_tasks):
             out[row] = ap_from_counts(hist, 0, k - 1)
 
 
+def _drawn_rows(feats: np.ndarray, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return the rows of ``feats`` that ``idx`` uses, and ``idx`` into them.
+
+    Returns ``feats`` and ``idx`` unchanged when every row is used. Rows are
+    normalized one by one, so a subset gives the same unit rows.
+    """
+    used = np.zeros(len(feats), dtype=bool)
+    used[idx.ravel()] = True
+    if used.all():
+        return feats, idx
+    position = np.cumsum(used, dtype=np.int64) - 1
+    return feats[used], position[idx]
+
+
 def _chunk(n_draws: int, k: int, m: int, d: int, budget_bytes: int) -> int:
     per_draw = 4 * (k + m) * (d + k)
     return int(max(1, min(n_draws, budget_bytes // per_draw)))
@@ -88,6 +102,9 @@ def draw_average_precisions(
     normalized : bool
         Whether ``feats`` rows already have unit norm (skips normalization;
         features are still checked to be finite).
+
+        Only the rows that some draw uses are converted, normalized and
+        checked: zero-norm or non-finite rows raise ValueError when drawn.
     budget_bytes : int
         Upper bound on gathered features and similarities held at once.
 
@@ -107,8 +124,9 @@ def draw_average_precisions(
     for idx in (queries, references):
         if idx.size and (idx.min() < 0 or idx.max() >= len(feats)):
             raise ValueError(f"indices must address the {len(feats)} rows of feats")
-    x = unit_rows(feats, normalized)
     idx = np.concatenate([queries, references], axis=1)
+    feats, idx = _drawn_rows(np.asarray(feats), idx)
+    x = unit_rows(feats, normalized)
     out = np.empty((n_draws, k), dtype=np.float64)
     step = _chunk(n_draws, k, m, x.shape[1], budget_bytes)
     for start in range(0, n_draws, step):

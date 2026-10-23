@@ -1,5 +1,7 @@
 """Tests for the Numba similarity kernels and counting-based average precision."""
 
+import tracemalloc
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -379,3 +381,41 @@ def test_draw_average_precisions_nonfinite_normalized():
     feats[1, 0] = np.nan
     with pytest.raises(ValueError, match="non-finite"):
         fastap.draw_average_precisions(feats, [[0, 1]], [[2, 3]], normalized=True)
+
+
+@pytest.mark.parametrize("normalized", [False, True])
+def test_draw_average_precisions_touch_only_drawn_rows(normalized):
+    """Only rows that draws use are converted, so a few draws stay cheap.
+
+    APs equal those from normalizing every row first.
+    """
+    rng = np.random.default_rng(9)
+    feats = rng.normal(size=(100_000, 64))  # float64: 51 MB
+    if normalized:
+        feats /= np.linalg.norm(feats, axis=1, keepdims=True)
+    queries = rng.choice(len(feats), size=(20, 4))
+    refs = rng.choice(len(feats), size=(20, 30))
+    expected = fastap.draw_average_precisions(
+        fastap.draws.unit_rows(feats, normalized), queries, refs, normalized=True
+    )
+    tracemalloc.start()
+    try:
+        got = fastap.draw_average_precisions(feats, queries, refs, normalized)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    np.testing.assert_array_equal(got, expected)
+    assert peak < feats.nbytes / 10, peak
+
+
+def test_draw_average_precisions_check_drawn_rows():
+    """Drawn rows that are zero or non-finite still raise; others are unused."""
+    feats = np.eye(6, dtype=np.float32)
+    feats[1] = 0
+    feats[4, 0] = np.nan
+    with pytest.raises(ValueError, match="zero-norm"):
+        fastap.draw_average_precisions(feats, [[0, 1]], [[2, 3]])
+    with pytest.raises(ValueError, match="non-finite"):
+        fastap.draw_average_precisions(feats, [[0, 2]], [[4, 3]], normalized=True)
+    got = fastap.draw_average_precisions(feats, [[0, 2]], [[3, 5]])
+    np.testing.assert_array_equal(got, [[1.0, 1.0]])
