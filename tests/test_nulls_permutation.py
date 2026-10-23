@@ -192,8 +192,10 @@ def test_numba_matches_numpy_draws(
     for r in range(len(pm)):
         _numba._draw_nb(start + r, *lean.draw_args(), k0, k1, got, chosen)
         np.testing.assert_array_equal(got, pm[r])
-    maps = _numba.permutation_maps(lean, start, 300, k0, k1)
-    np.testing.assert_array_equal(maps, permutation._group_maps_np(layout, pm))
+    expected = permutation._group_maps_np(layout, pm)
+    for parallel in (True, False):  # on Numba's threads or the caller's
+        maps = _numba.permutation_maps(lean, start, 300, k0, k1, parallel)
+        np.testing.assert_array_equal(maps, expected)
     identity = permutation._group_maps_np(layout, np.arange(layout.n)[None])[0]
     assert _numba.permutation_identity(lean) == identity
     out = {b: np.empty(2000) for b in ("numpy", "numba")}
@@ -594,11 +596,13 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
 def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
     """Groups sharing pools give the same p-values on 1 or 4 threads, or alone.
 
-    Under the Numba backend the threads launch its kernel concurrently.
+    Under the Numba backend, given 2 Numba threads, one thread runs each
+    group's draws on Numba's threads and 4 threads run them on their own
+    (see test_concurrent_calls_on_the_workqueue_layer for user threads).
     """
     ap = shared_pool_aps()
     args = (["g"], 300, 0.05, 0)
-    built, workers = [], []
+    built, workers, parallel = [], [], []
 
     class CountedPool(permutation._Pool):
         def __init__(self, blocks, *args):
@@ -612,14 +616,30 @@ def test_pvalues_do_not_depend_on_workers(backend, monkeypatch):
 
     monkeypatch.setattr(permutation, "_Pool", CountedPool)
     monkeypatch.setattr(permutation, "ThreadPoolExecutor", RecordedExecutor)
-    p = [
-        mean_average_precision(
-            ap, *args, progress_bar=False, max_workers=w, backend=backend
-        )["p_value"].tolist()
-        for w in (1, 4)
-    ]
+    if backend == "numba":
+        from copairs.nulls import _numba
+
+        maps = _numba.permutation_maps
+
+        def recorded(*args):
+            parallel.append(args[-1])
+            return maps(*args)
+
+        monkeypatch.setattr(_numba, "threads", lambda: 2)
+        monkeypatch.setattr(_numba, "permutation_maps", recorded)
+    p, kernels = [], []
+    for w in (1, 4):
+        parallel.clear()
+        p.append(
+            mean_average_precision(
+                ap, *args, progress_bar=False, max_workers=w, backend=backend
+            )["p_value"].tolist()
+        )
+        kernels.append(set(parallel))
     assert built == [2] * 6  # each run builds each of the 3 pools once
     assert workers == [1, 4]
+    if backend == "numba":
+        assert kernels == [{True}, {False}]
     alone = [
         mean_average_precision(
             ap[ap["g"] == g], *args, progress_bar=False, backend=backend

@@ -16,6 +16,7 @@ from copairs.map import (
 )
 from tests.helpers import ap_frame, query_meta
 from copairs.methods import NULLS
+from tests.test_nulls import run_python
 
 
 def test_copied_null_averages_configuration_nulls(tmp_path):
@@ -241,3 +242,82 @@ def test_auto_backend_runs_numba_kernels(monkeypatch):
     calls.clear()
     mean_average_precision(ap, ["g"], null="permutation", backend="numpy", **kwargs)
     assert calls == []
+
+
+# User threads run every null's Numba kernels at once on Numba's workqueue
+# threading layer, which aborts the process (SIGABRT) when two threads launch
+# parallel kernels concurrently.
+_CONCURRENT_NULLS = """
+import os
+os.environ["NUMBA_THREADING_LAYER"] = "workqueue"
+os.environ["NUMBA_NUM_THREADS"] = "2"
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import numba
+import numpy as np
+import pandas as pd
+from copairs import compute
+from copairs.map import average_precision, mean_average_precision
+
+rows = []
+for p in range(3):
+    rows += [(f"q{i}", p) for i in range(12)] + [("ctrl", p)] * 15
+meta = pd.DataFrame(rows, columns=["g", "plate"])
+meta["ctrl"] = meta["g"] == "ctrl"
+meta["ref"] = np.where(meta["ctrl"], np.arange(len(meta)), -1)
+feats = np.random.default_rng(0).standard_normal((len(meta), 8))
+ap = average_precision(
+    meta, feats, ["g", "ref"], [], ["plate"], ["ctrl"], progress_bar=False
+)
+ap = ap[~ap["ctrl"]]
+confs = ap[["n_pos_pairs", "n_total_pairs"]].to_numpy()
+kw = dict(threshold=0.05, seed=0, progress_bar=False, backend="numba")
+calls = {
+    "joint": lambda: mean_average_precision(ap, ["g"], 20000, null="joint", **kw),
+    # 12 groups on 2 Numba threads: each group's kernel on its pool thread
+    "permutation": lambda: mean_average_precision(ap, ["g"], 20000, **kw),
+    # one group at a time: Numba's parallel kernel
+    "permutation-1": lambda: mean_average_precision(
+        ap, ["g"], 20000, max_workers=1, **kw
+    ),
+    "copied": lambda: mean_average_precision(ap, ["g"], 20000, null="copied", **kw),
+    "ap": lambda: compute.p_values(
+        ap["average_precision"].to_numpy(), confs, 20000, 0, progress_bar=False,
+        backend="numba",
+    ),
+}
+
+
+def pvalues(name):
+    out = calls[name]()
+    return np.asarray(out if name == "ap" else out["p_value"]).tolist()
+
+
+expected = {name: pvalues(name) for name in calls}
+names = [name for name in calls for _ in range(4)]
+barrier = threading.Barrier(len(calls))
+
+
+def run(name):
+    barrier.wait(timeout=120)
+    return pvalues(name)
+
+
+for _ in range(3):
+    with ThreadPoolExecutor(len(calls)) as ex:
+        got = list(ex.map(run, names))
+    assert got == [expected[name] for name in names]
+print(numba.threading_layer())
+"""
+
+
+def test_concurrent_calls_on_the_workqueue_layer():
+    """User threads may run the Numba nulls at once, on any threading layer.
+
+    Numba's workqueue layer (its fallback without TBB or OpenMP) aborts the
+    process when two threads launch parallel kernels concurrently, so they
+    launch one at a time; p-values match those of calls run alone.
+    """
+    pytest.importorskip("numba")
+    assert run_python(_CONCURRENT_NULLS).strip() == "workqueue"

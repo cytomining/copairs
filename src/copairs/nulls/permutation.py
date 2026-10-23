@@ -50,6 +50,7 @@ from copairs.nulls.philox import (
     make_uniform_pair,
 )
 from copairs.nulls.backend import resolve_backend, _import_numba_backend
+from copairs.nulls.sampler import _numpy_workers
 
 # A slot sorts up to this many drawn profiles by insertion, more by quicksort.
 _INSERTION = 128
@@ -875,7 +876,7 @@ def group_key(seed: int, members) -> tuple[np.uint64, np.uint64]:
 
 def permutation_null(
     members, edges, blocks, block_of, similarity, null_size, seed, pool=None,
-    out=None, backend="auto",
+    out=None, backend="auto", parallel=True,
 ):  # fmt: skip
     """Run ``null_size`` label permutations of one group.
 
@@ -886,7 +887,8 @@ def permutation_null(
     ``out`` receives the draws' mAPs if given. ``backend`` is ``"auto"``
     (default), ``"numba"`` or ``"numpy"``; all give identical draws and
     mAPs, so ``"auto"`` picks Numba whenever it imports
-    (:func:`~copairs.nulls.resolve_backend`).
+    (:func:`~copairs.nulls.resolve_backend`). Under Numba, ``parallel``
+    runs the draws on Numba's threads, else on the calling thread.
     """
     backend = resolve_backend(backend)
     if pool is None or not pool.matches(blocks):
@@ -896,7 +898,11 @@ def permutation_null(
         layout = _Layout(members, edges, block_of, similarity, pool, vectorized=False)
         kernels = _import_numba_backend()
         identity = kernels.permutation_identity(layout)
-        chunk, kernel = _NUMBA_CHUNK, kernels.permutation_maps
+        chunk = _NUMBA_CHUNK
+
+        def kernel(layout, start, size, k0, k1):
+            return kernels.permutation_maps(layout, start, size, k0, k1, parallel)
+
     else:
         layout = _Layout(members, edges, block_of, similarity, pool, int(null_size))
         identity = float(_group_maps_np(layout, np.arange(layout.n)[None])[0])
@@ -1019,13 +1025,15 @@ def permutation_pvalues(
     progress_bar : bool
         Whether to show a progress bar over groups.
     max_workers : int, optional
-        Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s).
+        Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s
+        over the CPUs this process may run on).
         Each group's p-value depends only on its own draws, so results do not
         depend on it. The pools they build at once hold at most
         ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or one
-        pool if it alone is larger. Under the Numba backend the threads
-        build groups' pools and layouts, and each group's draws run in one
-        kernel at a time on Numba's threads (``NUMBA_NUM_THREADS``).
+        pool if it alone is larger. Under the Numba backend each thread
+        also runs its groups' draws, unless fewer groups run at once than
+        Numba has threads (``NUMBA_NUM_THREADS``): then each group's draws
+        run on Numba's threads, one group at a time.
     pos_diffby : np.ndarray, optional
         ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
         columns, indexed like the pairs; layouts whose draws could break
@@ -1050,12 +1058,21 @@ def permutation_pvalues(
     if pos_diffby is not None and np.shape(pos_diffby)[1]:
         check_pos_diffby(layouts, pos_diffby)
 
+    # ThreadPoolExecutor's default, over the CPUs this process may run on.
+    workers = min(32, _numpy_workers() + 4) if max_workers is None else max_workers
+    # Groups' draws run on their pool threads when those keep Numba's threads
+    # busy, else on Numba's threads.
+    parallel = backend == "numba" and (
+        min(len(groups), workers) < _import_numba_backend().threads()
+    )
+
     def pvalue(g):
         try:
             pool = pools.acquire(g, layouts[g][2])
             count, identity, _ = permutation_null(
-                *layouts[g], similarity, null_size, seed, pool, backend=backend
-            )
+                *layouts[g], similarity, null_size, seed, pool, backend=backend,
+                parallel=parallel,
+            )  # fmt: skip
         finally:
             pools.release(g)
         if observed is not None and abs(identity - observed[g]) > 1e-6:
@@ -1067,7 +1084,7 @@ def permutation_pvalues(
         return (count + 1) / (null_size + 1)
 
     pvals = np.empty(len(groups), dtype=np.float64)
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+    with ThreadPoolExecutor(max_workers=workers) as ex:
         try:
             # Pools ranking overlapping references slice one key table.
             table = _key_table(layouts, similarity, ex.map)
