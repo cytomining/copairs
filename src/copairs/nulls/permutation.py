@@ -58,6 +58,9 @@ MAX_POOL = 2**14
 # hold at most this much, or one pool if it alone is larger (MAX_POOL
 # references take about 2 GiB unranked).
 POOL_BUDGET = 2**32
+# Bytes of one key table over the profiles of all pools of a call, which
+# pools then slice (8192 profiles).
+KEY_TABLE_BUDGET = 2**28
 # Pairs per similarity call (and per sorted chunk) while building a pool.
 _PAIR_CHUNK = 2**20
 # Pools up to this size also store each reference's rank of every pool
@@ -251,13 +254,23 @@ def _keys(similarity, a, b):
     return codes.astype(np.uint32)
 
 
-def _key_matrix(similarity, profiles):
-    """Rank codes between all ``profiles``, ``_PAIR_CHUNK`` pairs at a time."""
+def _key_matrix(similarity, profiles, map=map):
+    """Rank codes between all ``profiles``, ``_PAIR_CHUNK`` pairs at a time.
+
+    ``map`` runs the chunks (e.g. an executor's, to compute them on threads);
+    each writes its own rows and columns.
+    """
     r = len(profiles)
     out = np.zeros((r, r), dtype=np.uint32)
+    bands = []
     lo = 0
     while lo < r:  # rows lo:hi against columns lo:, mirrored below the diagonal
         hi = min(r, lo + max(1, _PAIR_CHUNK // (r - lo)))
+        bands.append((lo, hi))
+        lo = hi
+
+    def band(lo_hi):
+        lo, hi = lo_hi
         keys = _keys(
             similarity,
             np.repeat(profiles[lo:hi], r - lo),
@@ -265,9 +278,46 @@ def _key_matrix(similarity, profiles):
         ).reshape(hi - lo, r - lo)
         out[lo:hi, lo:] = keys
         out[lo:, lo:hi] = keys.T
-        lo = hi
+
+    for _ in map(band, bands):
+        pass
     np.fill_diagonal(out, 0)
     return out
+
+
+class _KeyTable:
+    """Rank codes between all profiles of a set of pools, computed once.
+
+    Pools slice their key matrices from it instead of recomputing them; a
+    pair's code does not depend on the chunk it is computed in.
+    """
+
+    def __init__(self, profiles, similarity, map=map):
+        self.profiles = np.asarray(profiles, dtype=np.int64)  # sorted
+        self.keys = _key_matrix(similarity, self.profiles, map)
+
+    def matrix(self, refs):
+        """Return the key matrix of ``refs``, as ``_key_matrix`` computes it."""
+        ix = np.searchsorted(self.profiles, refs)
+        return self.keys[np.ix_(ix, ix)]
+
+
+def _key_table(layouts, similarity, map=map):
+    """Return a ``_KeyTable`` of the layouts' pools, or None if it does not pay.
+
+    It is built when its ``4 * U**2`` bytes over the ``U`` profiles of all
+    pools fit in ``KEY_TABLE_BUDGET`` and its ``U**2`` pairs are fewer than
+    the distinct pools' key matrices hold together.
+    """
+    pools = {tuple(b.tobytes() for b in lay[2]): lay[2] for lay in layouts}
+    refs = [np.concatenate(blocks) for blocks in pools.values()]
+    if not refs:
+        return None
+    profiles = np.unique(np.concatenate(refs))
+    u = len(profiles)
+    if 4 * u * u > KEY_TABLE_BUDGET or u * u >= sum(len(r) ** 2 for r in refs):
+        return None
+    return _KeyTable(profiles, similarity, map)
 
 
 def _row_words(row_ptr, rows):
@@ -295,7 +345,7 @@ def _row_ranks(row_ptr, flat, keys):
 class _Pool:
     """Reference keys of one pool: its blocks' references, concatenated."""
 
-    def __init__(self, blocks, similarity):
+    def __init__(self, blocks, similarity, table=None):
         self.blocks = blocks
         self.refs = np.concatenate(blocks).astype(np.int64)
         if len(self.refs) > MAX_POOL:
@@ -307,7 +357,10 @@ class _Pool:
         size = np.cumsum([0] + [len(b) for b in blocks])
         self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         r = len(self.refs)
-        self.krr = krr = _key_matrix(similarity, self.refs)
+        if table is None:
+            self.krr = krr = _key_matrix(similarity, self.refs)
+        else:
+            self.krr = krr = table.matrix(self.refs)
         # Each reference's codes to the other references of its block, sorted.
         # Its own code becomes NaN's, which sorts last, and is cut off.
         width = self.cr_hi - self.cr_lo
@@ -854,8 +907,9 @@ class _SharedPools:
     alive pool's remaining groups have started, so its pools are freed.
     """
 
-    def __init__(self, layouts, similarity):
+    def __init__(self, layouts, similarity, table=None):
         self.similarity = similarity
+        self.table = table
         self.key = [tuple(b.tobytes() for b in layout[2]) for layout in layouts]
         self.left = Counter(self.key)
         self.pools = {}
@@ -879,7 +933,7 @@ class _SharedPools:
                         self.freed.wait()
                     self.used += need
                 try:
-                    pool = _Pool(blocks, self.similarity)
+                    pool = _Pool(blocks, self.similarity, self.table)
                 except BaseException:
                     self._free(need)
                     raise
@@ -961,7 +1015,6 @@ def permutation_pvalues(
     layouts = group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs)
     if pos_diffby is not None and np.shape(pos_diffby)[1]:
         check_pos_diffby(layouts, pos_diffby)
-    pools = _SharedPools(layouts, similarity)
 
     def pvalue(g):
         try:
@@ -979,11 +1032,14 @@ def permutation_pvalues(
             )
         return (count + 1) / (null_size + 1)
 
-    # Visit groups pool by pool, so few pools are alive at a time.
-    order = sorted(range(len(groups)), key=lambda g: pools.key[g])
     pvals = np.empty(len(groups), dtype=np.float64)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         try:
+            # Pools ranking overlapping references slice one key table.
+            table = _key_table(layouts, similarity, ex.map)
+            pools = _SharedPools(layouts, similarity, table)
+            # Visit groups pool by pool, so few pools are alive at a time.
+            order = sorted(range(len(groups)), key=lambda g: pools.key[g])
             done = progress(
                 ex.map(pvalue, order), len(order), progress_bar, "permutation null"
             )

@@ -427,9 +427,9 @@ def test_interleaved_pools_are_built_once(monkeypatch):
     built = []
 
     class CountedPool(permutation._Pool):
-        def __init__(self, blocks, similarity):
+        def __init__(self, blocks, *args):
             built.append([b.tolist() for b in blocks])
-            super().__init__(blocks, similarity)
+            super().__init__(blocks, *args)
 
     monkeypatch.setattr(permutation, "_Pool", CountedPool)
     args = (groups, np.arange(6), np.ones(6), np.full(6, 4), pos, neg, similarity)
@@ -472,12 +472,12 @@ def test_pool_memory_is_bounded(monkeypatch):
     lock, alive, peak = threading.Lock(), [0], [0]
 
     class SlowPool(permutation._Pool):
-        def __init__(self, blocks, similarity):
+        def __init__(self, blocks, *args):
             with lock:
                 alive[0] += 1
                 peak[0] = max(peak[0], alive[0])
             time.sleep(0.2)  # let other threads reach their pools
-            super().__init__(blocks, similarity)
+            super().__init__(blocks, *args)
 
     release = permutation._SharedPools.release
 
@@ -496,6 +496,45 @@ def test_pool_memory_is_bounded(monkeypatch):
     assert got["p_value"].tolist() == expected["p_value"].tolist()
 
 
+def test_overlapping_pools_slice_one_key_table(monkeypatch):
+    """Distinct pools over shared references take their keys from one table."""
+    rng = np.random.default_rng(9)
+    rows = [(f"c{p}_{i}", p) for p in range(6) for i in range(5)]
+    for g in range(10):  # each group on 3 of 6 plates: overlapping pools
+        rows += [(f"q{g}", int(p)) for p in rng.choice(6, 3, replace=False)]
+    meta = pd.DataFrame(rows, columns=["g", "plate"])
+    meta["ref"] = np.where(meta["g"].str.startswith("c"), meta.index, -1)
+    feats = rng.standard_normal((len(meta), 5))
+    spec = dict(
+        pos_sameby=["g", "ref"], pos_diffby=[], neg_sameby=["plate"],
+        neg_diffby=["g", "ref"],
+    )  # fmt: skip
+    ap = average_precision(meta, feats, progress_bar=False, **spec)
+    ap = ap[ap["ref"] < 0]
+    args = (["g"], 300, 0.05, 0)
+    monkeypatch.setattr(permutation, "KEY_TABLE_BUDGET", 0, raising=False)
+    expected = mean_average_precision(ap, *args, progress_bar=False)
+    monkeypatch.undo()
+    sizes = []
+    key_matrix = permutation._key_matrix
+
+    def counted(similarity, profiles, *args):
+        sizes.append(len(profiles))
+        return key_matrix(similarity, profiles, *args)
+
+    monkeypatch.setattr(permutation, "_key_matrix", counted)
+    got = mean_average_precision(ap, *args, progress_bar=False)
+    assert sizes == [30]  # one table over the 6 plates' controls
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    _, layout, pairs = group_of_q(layout_meta(2, 2, 4), feats[:12], SPEC)
+    blocks = layout[2]
+    table = permutation._KeyTable(np.sort(np.concatenate(blocks)), pairs.similarity)
+    np.testing.assert_array_equal(
+        permutation._Pool(blocks, pairs.similarity, table).krr,
+        key_matrix(pairs.similarity, np.concatenate(blocks)),
+    )
+
+
 def test_pvalues_do_not_depend_on_workers(monkeypatch):
     """Groups sharing pools give the same p-values on 1 or 4 threads, or alone."""
     ap = shared_pool_aps()
@@ -503,9 +542,9 @@ def test_pvalues_do_not_depend_on_workers(monkeypatch):
     built, workers = [], []
 
     class CountedPool(permutation._Pool):
-        def __init__(self, blocks, similarity):
+        def __init__(self, blocks, *args):
             built.append(len(blocks))
-            super().__init__(blocks, similarity)
+            super().__init__(blocks, *args)
 
     class RecordedExecutor(permutation.ThreadPoolExecutor):
         def __init__(self, max_workers):
