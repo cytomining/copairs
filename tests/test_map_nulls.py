@@ -1,11 +1,18 @@
 """Tests for the choice of mAP null in copairs' mAP functions."""
 
+import os
+import sys
+import json
+import shutil
+import subprocess
 import dataclasses
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
+import copairs
 import copairs.map.map as map_module
 from copairs import compute
 from copairs.map import (
@@ -344,3 +351,121 @@ def test_concurrent_calls_on_the_workqueue_layer():
     """
     pytest.importorskip("numba")
     assert run_python(_CONCURRENT_NULLS).strip() == "workqueue"
+
+
+# P-values of the named mAP nulls on both backends, and the cache hits of
+# their Numba kernels, of a copy of copairs in the directory argv[1].
+_MAP_CACHE_PROBE = """
+import sys, json
+import numpy as np
+import pandas as pd
+import copairs
+from copairs.map import average_precision, mean_average_precision
+from copairs.nulls import _numba
+
+assert copairs.__file__.startswith(sys.argv[1]), copairs.__file__
+rows = []
+for p in range(3):  # members with two positives, so the head sort counts
+    rows += [(f"q{i}", p) for i in range(4)] + [("ctrl", p)] * 6
+meta = pd.DataFrame(rows, columns=["g", "plate"])
+meta["ctrl"] = meta["g"] == "ctrl"
+meta["ref"] = np.where(meta["ctrl"], np.arange(len(meta)), -1)
+feats = np.random.default_rng(0).standard_normal((len(meta), 5))
+ap = average_precision(
+    meta, feats, ["g", "ref"], [], ["plate"], ["ctrl"], progress_bar=False
+)
+ap = ap[~ap["ctrl"]]
+kernels = {
+    "joint": ["_joint_nulls"],
+    "permutation": ["_permutation_maps", "_permutation_maps_parallel"],
+}
+out = {"hits": {}}
+for null in sys.argv[2].split(","):
+    for backend in ("numba", "numpy"):
+        res = mean_average_precision(
+            ap, ["g"], 500, 0.05, 0, progress_bar=False, null=null, backend=backend
+        )
+        out[f"{null}/{backend}"] = res["p_value"].tolist()
+    stats = [getattr(_numba, k).stats.cache_hits for k in kernels[null]]
+    out["hits"][null] = sum(sum(s.values()) for s in stats)
+print(json.dumps(out))
+"""
+
+
+@pytest.mark.parametrize(
+    "name,old,new,nulls",
+    [
+        (
+            "joint.py",
+            "        return total / (m1 - m0)\n",
+            "        return 0.5 * total / (m1 - m0)\n",
+            ["joint", "permutation"],
+        ),
+        (
+            "permutation.py",
+            "        blk = 0\n",
+            "        blk = 1\n",
+            ["permutation", "joint"],
+        ),
+        (
+            "common.py",
+            "            while k >= 0 and vals[k] > v:\n",
+            "            while k >= 0 and vals[k] < v:\n",
+            ["joint"],
+        ),
+    ],
+    ids=["joint", "permutation", "common"],
+)
+def test_numba_cache_follows_edits_to_compiled_files(tmp_path, name, old, new, nulls):
+    """Cached mAP null kernels follow edits to the files of the functions they compile.
+
+    Numba checks a cached kernel only against its own file. The joint and
+    permutation kernels compile their factories (joint.py, permutation.py)
+    and the shared head sort (common.py), and Philox. An edit to the first
+    null's files must reach its Numba p-values in the next process, while the
+    other null still loads its kernels from the cache. The NumPy backend
+    does not run these functions, so its p-values stay.
+    """
+    pytest.importorskip("numba")
+    shutil.copytree(
+        Path(copairs.__file__).parent,
+        tmp_path / "copairs",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    env = {
+        **os.environ,
+        "NUMBA_CACHE_DIR": str(tmp_path / "numba_cache"),
+        "NUMBA_NUM_THREADS": "2",
+    }
+
+    def run():
+        done = subprocess.run(
+            [sys.executable, "-c", _MAP_CACHE_PROBE, str(tmp_path), ",".join(nulls)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    before = run()
+    cached = run()
+    assert all(cached["hits"][null] >= 1 for null in nulls)
+    assert {k: v for k, v in cached.items() if k != "hits"} == {
+        k: v for k, v in before.items() if k != "hits"
+    }
+    source = tmp_path / "copairs" / "nulls" / name
+    text = source.read_text()
+    assert text.count(old) >= 1
+    source.write_text(text.replace(old, new))
+    after = run()
+    edited, *others = nulls
+    assert after[f"{edited}/numba"] != before[f"{edited}/numba"]
+    assert after["hits"][edited] == 0
+    for null in nulls:
+        assert after[f"{null}/numpy"] == before[f"{null}/numpy"]
+    for null in others:
+        assert after[f"{null}/numba"] == before[f"{null}/numba"]
+        assert after["hits"][null] >= 1
