@@ -3,10 +3,40 @@
 import logging
 from typing import List
 
+import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
 logger = logging.getLogger("copairs")
+
+
+def _multipletests(
+    pvals: np.ndarray, method: str = "fdr_bh"
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """Run multipletests, also for no tests (statsmodels < 0.15 divides by zero).
+
+    No tests give what statsmodels 0.15 returns: empty arrays and NaN alphas.
+    """
+    pvals = np.asarray(pvals, dtype=float)
+    if len(pvals) == 0:
+        return np.zeros(0, dtype=bool), pvals, np.nan, np.nan
+    return multipletests(pvals, method=method)
+
+
+def check_hierarchical_by(hierarchical_by: list[str], sameby: list[str]) -> None:
+    """Raise ValueError unless ``hierarchical_by`` is a proper subset of ``sameby``."""
+    if not set(hierarchical_by).issubset(set(sameby)):
+        raise ValueError(
+            f"hierarchical_by columns {hierarchical_by} must be a subset of "
+            f"sameby columns {sameby}"
+        )
+
+    if set(hierarchical_by) == set(sameby):
+        raise ValueError(
+            f"hierarchical_by columns {hierarchical_by} must be a proper subset of "
+            f"sameby columns {sameby}. If they are equal, use standard correction "
+            f"by not specifying hierarchical_by."
+        )
 
 
 def apply_hierarchical_fdr_correction(
@@ -56,19 +86,7 @@ def apply_hierarchical_fdr_correction(
     which is the expected biological behavior.
 
     """
-    # Validate that hierarchical_by is a subset of sameby
-    if not set(hierarchical_by).issubset(set(sameby)):
-        raise ValueError(
-            f"hierarchical_by columns {hierarchical_by} must be a subset of "
-            f"sameby columns {sameby}"
-        )
-
-    if set(hierarchical_by) == set(sameby):
-        raise ValueError(
-            f"hierarchical_by columns {hierarchical_by} must be a proper subset of "
-            f"sameby columns {sameby}. If they are equal, use standard correction "
-            f"by not specifying hierarchical_by."
-        )
+    check_hierarchical_by(hierarchical_by, sameby)
 
     logger.info("Applying hierarchical FDR correction...")
     map_scores = map_scores.copy()
@@ -81,7 +99,7 @@ def apply_hierarchical_fdr_correction(
     stage1_pvals.columns = ["stage1_p_value"]
 
     # Apply BH correction at the group level
-    reject_stage1, stage1_corrected, _, _ = multipletests(
+    reject_stage1, stage1_corrected, _, _ = _multipletests(
         stage1_pvals["stage1_p_value"], method="fdr_bh"
     )
     stage1_pvals["stage1_corrected_p_value"] = stage1_corrected
@@ -109,7 +127,7 @@ def apply_hierarchical_fdr_correction(
             map_scores.loc[group_indices, "corrected_p_value"] = group_pvals[0]
         else:
             # Apply BH correction within the group
-            _, group_corrected, _, _ = multipletests(group_pvals, method="fdr_bh")
+            _, group_corrected, _, _ = _multipletests(group_pvals, method="fdr_bh")
             map_scores.loc[group_indices, "corrected_p_value"] = group_corrected
 
     return map_scores
@@ -136,6 +154,6 @@ def apply_fdr_correction(
 
     """
     map_scores = map_scores.copy()
-    _, pvals_corrected, _, _ = multipletests(map_scores["p_value"], method=method)
+    _, pvals_corrected, _, _ = _multipletests(map_scores["p_value"], method=method)
     map_scores["corrected_p_value"] = pvals_corrected
     return map_scores

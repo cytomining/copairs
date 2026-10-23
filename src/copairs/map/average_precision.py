@@ -1,7 +1,8 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Callable
+from dataclasses import field, dataclass
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,170 @@ from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_inp
 from .normalization import normalize_ap
 
 logger = logging.getLogger("copairs")
+
+
+# Key of the pairs an AP function attaches to the frame it returns.
+PAIRS_ATTR = "copairs_pairs"
+
+
+class _AttachedPairs(dict):
+    """A frame's pairs, carried in ``DataFrame.attrs``.
+
+    pandas deep-copies ``attrs`` on every operation and writes them to parquet
+    as JSON. This handle is shared by copies, serializes as ``{}`` and pickles
+    to an empty handle, so frames stay cheap to copy and safe to save, and a
+    reloaded frame has no pairs. Handles are equal only to themselves, so
+    pandas drops them when concatenating frames of different AP calls.
+    """
+
+    __slots__ = ("pairs",)
+
+    def __init__(self, pairs=None):
+        super().__init__()
+        self.pairs = pairs
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __reduce__(self):
+        return (_AttachedPairs, ())
+
+    def __eq__(self, other):
+        return self is other
+
+    def __ne__(self, other):
+        return self is not other
+
+
+def attach_pairs(frame: pd.DataFrame, pairs) -> pd.DataFrame:
+    """Attach ``pairs`` to ``frame`` (in place) and return it."""
+    frame.attrs[PAIRS_ATTR] = _AttachedPairs(pairs)
+    return frame
+
+
+def attached_pairs(frame: pd.DataFrame):
+    """Return the pairs an AP function attached to ``frame``, or None."""
+    handle = frame.attrs.get(PAIRS_ATTR)
+    return handle.pairs if isinstance(handle, _AttachedPairs) else None
+
+
+# SciPy metrics whose cdist estimates a scale (variances, covariance) from
+# each batch of pairs, so a pair's similarity depends on the batch it is in.
+BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
+
+
+class _FeatureSimilarity:
+    """``pairs -> similarities`` of an AP call's features, as its AP stage computed them.
+
+    Batches of ``batch_size`` pairs go through the same pairwise function as
+    in :func:`copairs.compute.get_similarity_fn`, one after another in the
+    calling thread: the nulls call it from their own worker threads.
+    """
+
+    def __init__(self, feats, distance, batch_size):
+        self.feats = feats
+        self.distance = distance
+        self.batch_size = batch_size
+        self._fn = compute.pairwise_similarity_fn(distance)
+
+    def __call__(self, pairs):
+        pairs = np.asarray(pairs)
+        out = np.empty(len(pairs), dtype=np.float32)
+        for lo in range(0, len(pairs), self.batch_size):
+            batch = pairs[lo : lo + self.batch_size]
+            out[lo : lo + len(batch)] = self._fn(
+                self.feats[batch[:, 0]], self.feats[batch[:, 1]]
+            )
+        return out
+
+
+def check_recomputable(similarity) -> None:
+    """Raise if ``similarity`` cannot recompute its AP stage's similarities.
+
+    The permutation null ranks profiles by similarities it recomputes in its
+    own batches of pairs; a metric that estimates its scale from each batch
+    gives other values there than in the AP stage.
+    """
+    if (
+        isinstance(similarity, _FeatureSimilarity)
+        and isinstance(similarity.distance, str)
+        and similarity.distance in BATCH_DEPENDENT_METRICS
+    ):
+        raise ValueError(
+            f"distance={similarity.distance!r} estimates its scale from each "
+            "batch of pairs, so the permutation null cannot recompute the "
+            "similarities the APs were ranked by. Pass null='joint' or "
+            "null='copied', which use the APs as computed."
+        )
+
+
+@dataclass(frozen=True, eq=False)
+class RankPairs:
+    """The pairs behind an AP table, for mAP nulls that re-rank profiles.
+
+    Attached to the frame :func:`average_precision` returns (and returned with
+    it by ``return_pairs=True``); indices are rows of that frame. Instances
+    compare and hash by identity, since their fields are arrays.
+
+    Attributes
+    ----------
+    pos, neg : np.ndarray
+        ``(n, 2)`` positive and negative pairs.
+    similarity : callable
+        ``pairs -> similarities`` (NumPy), the function the APs were computed
+        with.
+    pos_diffby : np.ndarray or None
+        ``(profiles, columns)`` integer codes of the ``pos_diffby`` columns of
+        each row, which the permutation null checks its draws keep; None
+        when there are none (or unknown, then unchecked).
+    """
+
+    pos: np.ndarray
+    neg: np.ndarray
+    similarity: Callable[[np.ndarray], np.ndarray]
+    pos_diffby: np.ndarray | None = None
+
+
+@dataclass(frozen=True, eq=False, kw_only=True)
+class LabelPairs(RankPairs):
+    """The pairs behind a multilabel AP table, whose rows are (profile, label).
+
+    Attached to the frame :func:`copairs.map.multilabel.average_precision`
+    returns (and returned with it by ``return_pairs=True``). ``pos`` pairs
+    rows of that frame, as in :class:`RankPairs`: the two rows of a positive
+    pair hold the label the pair shares, and a pair sharing several labels
+    appears once per label. ``neg`` and the rows of ``pos_diffby`` index
+    profiles (rows of the metadata); ``profile`` and ``row_key`` map AP rows
+    to profiles and labels. The permutation null also needs the pairs that
+    share exactly one label and meet the negative rules on the other
+    columns (negatives but for that label); they are found when it asks,
+    not kept with the frame.
+
+    Attributes
+    ----------
+    profile : np.ndarray
+        Profile of each AP row, by the AP frame's index.
+    row_key : np.ndarray
+        Label (index into ``keys``) of each AP row, by the AP frame's index.
+    label_col : str
+        The multilabel column.
+    keys : np.ndarray
+        The labels with positive pairs.
+    """
+
+    profile: np.ndarray
+    row_key: np.ndarray
+    label_col: str
+    keys: np.ndarray
+    # () -> (pairs, key): the pairs sharing exactly one label, keys[key],
+    # that meet the negative rules on the other columns; None when the
+    # label column is not one of the negative pairs' diffby columns.
+    _lone: Callable[[], tuple[np.ndarray, np.ndarray]] | None = field(
+        default=None, repr=False
+    )
 
 
 def build_rank_lists(
@@ -92,6 +257,7 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
     progress_bar: bool = True,
+    return_pairs: bool = False,
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -143,10 +309,27 @@ def average_precision(
     distance : str
         The distance function used for computing similarities. Default is "cosine".
 
+    progress_bar : bool
+        Whether or not to show tqdm's progress bar.
+
+    return_pairs : bool
+        Also return the :class:`RankPairs` the APs were computed from, which
+        ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
+        needs. They are attached to the returned frame either way, in
+        ``frame.attrs["copairs_pairs"]``, and follow it through filtering
+        and copies (not saving, pickling or concatenating with other AP
+        calls' frames). The permutation null accepts filtering out whole
+        groups, not some of a group's members: their APs were computed with
+        the dropped members as positives. They keep ``feats`` and every
+        positive and negative
+        pair (8 bytes per pair) alive with the frame, whichever null is used;
+        drop them with ``frame.attrs.pop("copairs_pairs")``.
+
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the following columns:
+        A DataFrame (with ``return_pairs``, a ``(DataFrame, RankPairs)``
+        tuple) containing the following columns:
         - 'average_precision': The calculated average precision score for each profile.
         - 'normalized_average_precision': The normalized AP score (scale-independent).
         - 'n_pos_pairs': The number of positive pairs for each profile.
@@ -231,7 +414,27 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
-    return meta
+    pairs = RankPairs(
+        pos_pairs,
+        neg_pairs,
+        _FeatureSimilarity(feats, distance, batch_size),
+        _diffby_codes(meta, pos_diffby),
+    )
+    attach_pairs(meta, pairs)
+    return (meta, pairs) if return_pairs else meta
+
+
+def _columns(cols) -> list:
+    """``cols`` (a column name or a list of them) as a list."""
+    return [cols] if isinstance(cols, str) else list(cols)
+
+
+def _diffby_codes(meta: pd.DataFrame, pos_diffby) -> np.ndarray | None:
+    """``(profiles, columns)`` integer codes of ``meta``'s ``pos_diffby`` columns, or None."""
+    diffby = _columns(pos_diffby)
+    if not diffby:
+        return None
+    return np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
 
 
 def p_values(
