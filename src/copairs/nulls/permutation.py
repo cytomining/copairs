@@ -391,25 +391,34 @@ def _row_ranks(row_ptr, flat, keys):
     return out
 
 
+def _concat_codes(parts):
+    """``(profiles, lo, hi)``: ``parts`` concatenated, part ``b`` at codes ``lo[b]:hi[b]``."""
+    size = np.cumsum([0] + [len(b) for b in parts])
+    profiles = np.concatenate(parts).astype(np.int64)
+    return profiles, size[:-1].astype(np.int64), size[1:].astype(np.int64)
+
+
+def _pool_keys(similarity, profiles, table=None):
+    """Key matrix of ``profiles``: sliced from ``table`` (a ``_KeyTable``), or computed."""
+    if table is None:
+        return _key_matrix(similarity, profiles)
+    return table.matrix(profiles)
+
+
 class _Pool:
     """Reference keys of one pool: its blocks' references, concatenated."""
 
     def __init__(self, blocks, similarity, table=None):
         self.blocks = blocks
-        self.refs = np.concatenate(blocks).astype(np.int64)
+        self.refs, self.cr_lo, self.cr_hi = _concat_codes(blocks)
         if len(self.refs) > MAX_POOL:
             raise ValueError(
                 f"a group pool has {len(self.refs)} reference profiles; the "
                 f"permutation null supports up to {MAX_POOL}. Split references "
                 "into blocks (neg_sameby) or rank fewer of them."
             )
-        size = np.cumsum([0] + [len(b) for b in blocks])
-        self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         r = len(self.refs)
-        if table is None:
-            self.krr = krr = _key_matrix(similarity, self.refs)
-        else:
-            self.krr = krr = table.matrix(self.refs)
+        self.krr = krr = _pool_keys(similarity, self.refs, table)
         # Each reference's codes to the other references of its block, sorted.
         # Its own code becomes NaN's, which sorts last, and is cut off.
         width = self.cr_hi - self.cr_lo
@@ -1504,16 +1513,11 @@ class _LabelPool:
     def __init__(self, comps, comp_profiles, nbr_ptr, nbr, similarity, table=None):
         self.comps = comps
         parts = [comp_profiles[c] for c in comps]
-        self.profiles = np.concatenate(parts).astype(np.int64)
+        self.profiles, self.cr_lo, self.cr_hi = _concat_codes(parts)
         p = len(self.profiles)  # at most MAX_POOL (_label_layouts)
-        size = np.cumsum([0] + [len(c) for c in parts])
-        self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         self.code = np.full(len(nbr_ptr) - 1, -1, dtype=np.int64)
         self.code[self.profiles] = np.arange(p)
-        if table is None:
-            self.keys = _key_matrix(similarity, self.profiles)
-        else:
-            self.keys = table.matrix(self.profiles)
+        self.keys = _pool_keys(similarity, self.profiles, table)
         lo, hi = nbr_ptr[self.profiles], nbr_ptr[self.profiles + 1]
         self.nptr = np.concatenate([[0], np.cumsum(hi - lo)]).astype(np.int64)
         self.nrow = np.empty(self.nptr[-1], dtype=np.uint32)
