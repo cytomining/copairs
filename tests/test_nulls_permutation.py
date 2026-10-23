@@ -641,7 +641,6 @@ def label_group(meta, feats, label, spec=ML_SPEC):
     layouts, comp_profiles, (nbr_ptr, nbr) = permutation.label_layouts(
         [np.arange(len(ap))],
         ap.index.to_numpy(),
-        ap["target"].to_numpy(),
         ap["n_pos_pairs"].to_numpy().astype(np.int64),
         (ap["n_total_pairs"] - ap["n_pos_pairs"]).to_numpy().astype(np.int64),
         pairs,
@@ -768,11 +767,12 @@ def test_label_permutation_through_mean_average_precision():
         mean_average_precision(
             split, ["target", "half"], 100, 0.05, 0, progress_bar=False, pairs=pairs
         )
-    with pytest.raises(ValueError, match="needs their 'target' column"):
-        mean_average_precision(
-            ap.drop(columns="target").assign(g=ap["target"]), ["g"], 100, 0.05, 0,
-            progress_bar=False,
-        )  # fmt: skip
+    # Labels come from the pairs: the frame needs no label column.
+    renamed = mean_average_precision(
+        ap.drop(columns="target").assign(g=ap["target"]), ["g"], 500, 0.05, 0,
+        progress_bar=False,
+    )  # fmt: skip
+    assert renamed["p_value"].tolist() == res["p_value"].tolist()
 
 
 def test_label_permutation_calibrated():
@@ -912,9 +912,8 @@ def label_pool_args(meta, feats):
     """``(comp_profiles, nbr_ptr, nbr, similarity)`` of PLATE_SPEC's label pools."""
     ap, pairs = multilabel_ap(meta, feats, PLATE_SPEC, return_pairs=True)
     _, comp_profiles, (nbr_ptr, nbr) = permutation.label_layouts(
-        [], ap.index.to_numpy(), ap["target"].to_numpy(), np.zeros(0), np.zeros(0),
-        pairs,
-    )  # fmt: skip
+        [], ap.index.to_numpy(), np.zeros(0), np.zeros(0), pairs
+    )
     return comp_profiles, nbr_ptr, nbr, pairs.similarity
 
 

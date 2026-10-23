@@ -582,19 +582,22 @@ def test_multilabel_frames_carry_label_pairs():
     )
     pd.testing.assert_frame_equal(plain, ap)
     assert pairs == pairs and pairs != attached_pairs(plain)  # identity
-    # Row i of the frame is profile pairs.profile[i], whatever its position.
+    # Row i of the frame is profile pairs.profile[i] for label
+    # pairs.keys[pairs.row_key[i]], whatever its position.
     np.testing.assert_array_equal(pairs.profile[ap.index], ap["cpd"])
-    labels = [set(t) for t in meta["target"]]
     keys = pairs.keys.tolist()
     assert keys == ["A", "B", "C", "D"]  # the labels with positive pairs
-    for (a, b), k in zip(pairs.pos, pairs.pos_key):
-        assert keys[k] in labels[a] & labels[b]
+    assert [keys[k] for k in pairs.row_key[ap.index]] == ap["target"].tolist()
+    labels = [set(t) for t in meta["target"]]
+    # Positive pairs join two AP rows of one label, held by both profiles.
+    for a, b in pairs.pos:
+        (k, m), (x, y) = ap.loc[[a, b], "target"], ap.loc[[a, b], "cpd"]
+        assert k == m and k in labels[x] & labels[y]
     for a, b in pairs.neg:
         assert not labels[a] & labels[b]
-    rows = ap.set_index(["cpd", "target"])
-    for (a, k), n_pos in rows["n_pos_pairs"].items():
-        on_label = pairs.pos[pairs.pos_key == keys.index(k)]
-        assert n_pos == (on_label == a).sum()
+    np.testing.assert_array_equal(
+        np.bincount(pairs.pos.ravel(), minlength=len(ap))[ap.index], ap["n_pos_pairs"]
+    )
     # Lone pairs share exactly one label, which has positive pairs.
     lone = {(int(a), int(b), keys[k]) for (a, b), k in zip(pairs.lone, pairs.lone_key)}
     expected = {
@@ -632,18 +635,22 @@ def test_joint_null_reads_label_pairs():
     )
 
     def as_set(found):
-        return {tuple(sorted(e)) for e in found.tolist()}
+        return {tuple(sorted(e)) for e in np.asarray(found).tolist()}
 
-    for order in (ap, ap.iloc[::-1]):  # whatever the rows' order
-        assert as_set(map_module._label_row_pairs(order, pairs)) == as_set(explicit)
+    assert as_set(pairs.pos) == as_set(explicit)
     kwargs = dict(
         null_size=2000, threshold=0.05, seed=SEED, progress_bar=False, null="joint"
     )
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         read = mean_average_precision(ap, ["target"], **kwargs)
+        # The pairs index the frame's rows, whatever its columns.
+        renamed = mean_average_precision(
+            ap.drop(columns="target").assign(g=ap["target"]), ["g"], **kwargs
+        )
     given = mean_average_precision(ap, ["target"], pos_pairs=explicit, **kwargs)
     assert read["p_value"].tolist() == given["p_value"].tolist()
+    assert renamed["p_value"].tolist() == read["p_value"].tolist()
     with pytest.warns(UserWarning, match="Falling back"):
         bare = mean_average_precision(
             pickle.loads(pickle.dumps(ap)), ["target"], **kwargs
@@ -651,8 +658,8 @@ def test_joint_null_reads_label_pairs():
     assert bare["p_value"].tolist() != read["p_value"].tolist()
     # Pairs to a dropped row join its group to a profile outside it.
     part = ap.drop(index=ap.index[(ap["target"] == "A") & (ap["cpd"] == 0)])
-    found = map_module._label_row_pairs(part, pairs)
-    assert (found >= len(ap)).any(axis=1).sum() == 3  # compound 0's A positives
+    leaving = ~np.isin(pairs.pos, part.index)
+    assert leaving.any(axis=1).sum() == 3  # compound 0's A positives
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         read = mean_average_precision(part, ["target"], **kwargs)
@@ -669,9 +676,7 @@ def test_joint_null_reads_label_pairs():
         mean_average_precision(clique, ["target"], **kwargs)["p_value"].tolist()
         == inferred["p_value"].tolist()
     )
-    with pytest.raises(ValueError, match="reads their 'target' column"):
-        mean_average_precision(ap.drop(columns="target"), ["cpd"], **kwargs)
-    with pytest.raises(ValueError, match="index reaches row"):
+    with pytest.raises(ValueError, match="positive pairs but"):
         mean_average_precision(ap.set_axis(ap.index + 100), ["target"], **kwargs)
 
 

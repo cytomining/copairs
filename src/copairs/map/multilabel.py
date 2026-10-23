@@ -169,8 +169,9 @@ def average_precision(
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
     # The merged frame keeps these rows' positions as its index, so row i of
-    # the AP frame is profile ix[i].
+    # the AP frame is profile ix[i] for label keys[row_key[i]].
     profile = results["ix"].to_numpy().astype(np.int64)
+    row_key = np.repeat(np.arange(len(keys), dtype=np.int32), list(map(len, ix_list)))
     lone = lone_key = None
     if multilabel_col in _columns(neg_diffby) and multilabel_col not in _columns(
         neg_sameby
@@ -178,14 +179,14 @@ def average_precision(
         lone, lone_key = _lone_pairs(meta, multilabel_col, neg_sameby, neg_diffby, keys)
     diffby = [c for c in _columns(pos_diffby) if c != multilabel_col]
     pairs = LabelPairs(
-        np.asarray(pos_pairs),
+        _row_pairs(pos_pairs, pos_counts, profile, row_key),
         np.asarray(neg_pairs),
         _FeatureSimilarity(feats, distance, batch_size),
         _diffby_codes(meta, diffby),
         profile=profile,
+        row_key=row_key,
         label_col=multilabel_col,
         keys=np.asarray(keys),
-        pos_key=np.repeat(np.arange(len(pos_counts)), pos_counts),
         lone=lone,
         lone_key=lone_key,
     )
@@ -196,6 +197,20 @@ def average_precision(
     attach_pairs(results, pairs)
     logger.info("Finished.")
     return (results, pairs) if return_pairs else results
+
+
+def _row_pairs(pairs, counts, profile, row_key):
+    """Positive profile pairs, ``counts[k]`` per label ``k``, as pairs of AP rows.
+
+    AP rows are sorted by label and then profile (``row_key``, ``profile``),
+    so each end's row for its pair's label is found by one binary search.
+    """
+    pairs = np.asarray(pairs)
+    n = np.int64(1 + int(profile.max(initial=-1)))
+    words = row_key.astype(np.int64) * n + profile
+    key = np.repeat(np.arange(len(counts), dtype=np.int64), counts)
+    rows = np.searchsorted(words, key[:, None] * n + pairs.astype(np.int64))
+    return rows.astype(np.uint32 if len(profile) < 2**32 else np.int64)
 
 
 def _columns(cols) -> list:

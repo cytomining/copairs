@@ -1507,7 +1507,7 @@ def _segments(key, n_keys):
     return order, np.searchsorted(key[order], np.arange(n_keys + 1))
 
 
-def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
+def label_layouts(groups, rows, num_pos, num_neg, pairs):
     """Members, edges, lone pairs and components of each multilabel group.
 
     Parameters
@@ -1515,9 +1515,7 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
     groups : list of np.ndarray
         Each group's positions in ``rows``; a group holds one label.
     rows : np.ndarray
-        The AP rows (indices of ``pairs.profile``).
-    labels : np.ndarray
-        Each row's label (``pairs.label_col``).
+        The AP rows (indices of ``pairs.profile`` and ``pairs.row_key``).
     num_pos, num_neg : np.ndarray
         Each row's positive and negative pair counts, checked against
         ``pairs``.
@@ -1548,8 +1546,12 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
             f"{len(pairs.profile)} rows; pass the pairs of the frame these "
             "scores come from"
         )
-    profile = np.asarray(pairs.profile, dtype=np.int64)[rows]
-    pos = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
+    profile_of = np.asarray(pairs.profile, dtype=np.int64)
+    row_key = np.asarray(pairs.row_key, dtype=np.int64)
+    profile, label_of = profile_of[rows], row_key[rows]
+    # Positive pairs of AP rows as pairs of profiles, with their labels.
+    pos_rows = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
+    pos, pos_key = profile_of[pos_rows], row_key[pos_rows[:, 0]]
     neg = np.asarray(pairs.neg, dtype=np.int64).reshape(-1, 2)
     lone = np.asarray(pairs.lone, dtype=np.int64).reshape(-1, 2)
     n_prof = 1 + max(
@@ -1566,28 +1568,25 @@ def label_layouts(groups, rows, labels, num_pos, num_neg, pairs):
     comp_profiles = {
         int(c): order[a:b] for c, a, b in zip(roots, starts, ends, strict=True)
     }
-    key_index = {k: i for i, k in enumerate(np.asarray(pairs.keys).tolist())}
-    n_keys = len(key_index)
-    pos_order, pos_ptr = _segments(np.asarray(pairs.pos_key), n_keys)
+    labels = np.asarray(pairs.keys).tolist()
+    n_keys = len(labels)
+    pos_order, pos_ptr = _segments(pos_key, n_keys)
     lone_order, lone_ptr = _segments(np.asarray(pairs.lone_key), n_keys)
     local = np.full(n_prof, -1, dtype=np.int64)
     layouts = []
     for ix in groups:
-        values = set(np.asarray(labels)[ix].tolist())
+        values = np.unique(label_of[ix])
         if len(values) != 1:
             raise ValueError(
                 "the permutation null of multilabel APs needs each group to hold "
                 f"one {pairs.label_col!r} value; group by it"
             )
-        label = values.pop()
-        key = key_index.get(label)
+        key = int(values[0])
+        label = labels[key]
         members = profile[ix]
         n = len(members)
-        if key is None or len(np.unique(members)) != n:
-            raise ValueError(
-                f"group {label!r}: its rows must be distinct profiles holding a "
-                "label with positive pairs"
-            )
+        if len(np.unique(members)) != n:
+            raise ValueError(f"group {label!r}: its rows must be distinct profiles")
         local[members] = np.arange(n)
         layout = [members]
         for found, order_, ptr in (
@@ -1657,8 +1656,8 @@ def label_permutation_null(
 
 
 def label_permutation_pvalues(
-    groups, rows, labels, num_pos, num_total, pairs, null_size, seed,
-    observed=None, progress_bar=False, max_workers=None, stop_after=None,
+    groups, rows, num_pos, num_total, pairs, null_size, seed, observed=None,
+    progress_bar=False, max_workers=None, stop_after=None,
 ):  # fmt: skip
     """P-value of each multilabel group's mAP against moves of its label.
 
@@ -1675,9 +1674,8 @@ def label_permutation_pvalues(
     groups : list of np.ndarray
         Each group's rows of the AP table; a group holds one label.
     rows : np.ndarray
-        The AP table's index (rows of ``pairs.profile``).
-    labels : np.ndarray
-        The AP rows' labels (``pairs.label_col``).
+        The AP table's index (rows of ``pairs.profile``), which also gives
+        each row's label (``pairs.row_key``).
     num_pos, num_total, null_size, seed, observed, progress_bar, max_workers, stop_after
         As in :func:`permutation_pvalues`; pools are components' profiles.
     pairs : copairs.map.LabelPairs
@@ -1696,9 +1694,8 @@ def label_permutation_pvalues(
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
     layouts, comp_profiles, (nbr_ptr, nbr) = label_layouts(
-        groups, np.asarray(rows, dtype=np.int64), np.asarray(labels), num_pos,
-        num_neg, pairs,
-    )  # fmt: skip
+        groups, np.asarray(rows, dtype=np.int64), num_pos, num_neg, pairs
+    )
     if pairs.pos_diffby is not None and np.shape(pairs.pos_diffby)[1]:
         # A draw fills a component's slots from all its profiles: the
         # members and, as references, the rest.

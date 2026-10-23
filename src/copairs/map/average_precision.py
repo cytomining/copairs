@@ -146,21 +146,23 @@ class LabelPairs(RankPairs):
     """The pairs behind a multilabel AP table, whose rows are (profile, label).
 
     Attached to the frame :func:`copairs.map.multilabel.average_precision`
-    returns (and returned with it by ``return_pairs=True``). ``pos``, ``neg``,
-    ``lone`` and the rows of ``pos_diffby`` index profiles (rows of the
-    metadata), not AP rows; ``profile`` maps one to the other.
+    returns (and returned with it by ``return_pairs=True``). ``pos`` pairs
+    rows of that frame, as in :class:`RankPairs`: the two rows of a positive
+    pair hold the label the pair shares, and a pair sharing several labels
+    appears once per label. ``neg``, ``lone`` and the rows of ``pos_diffby``
+    index profiles (rows of the metadata); ``profile`` and ``row_key`` map
+    AP rows to profiles and labels.
 
     Attributes
     ----------
     profile : np.ndarray
         Profile of each AP row, by the AP frame's index.
+    row_key : np.ndarray
+        Label (index into ``keys``) of each AP row, by the AP frame's index.
     label_col : str
         The multilabel column.
     keys : np.ndarray
         The labels with positive pairs.
-    pos_key : np.ndarray
-        Label (index into ``keys``) of each positive pair; a pair sharing
-        several labels appears once per label.
     lone, lone_key : np.ndarray or None
         ``(n, 2)`` pairs that share exactly one label, ``keys[lone_key]``,
         and meet the negative rules on the other columns, so that without
@@ -169,9 +171,9 @@ class LabelPairs(RankPairs):
     """
 
     profile: np.ndarray
+    row_key: np.ndarray
     label_col: str
     keys: np.ndarray
-    pos_key: np.ndarray
     lone: np.ndarray | None
     lone_key: np.ndarray | None
 
