@@ -2,8 +2,8 @@
 
 Imports CuPy at the top, so copairs loads this module only through
 :func:`copairs._backend.import_backend`, when the ``"cuda"`` backend is
-requested or ``backend="auto"`` checks for a GPU (``pip install
-'copairs[gpu]'``). It does not depend on :mod:`copairs.fastap` or
+requested or :func:`copairs.nulls.available_backends` checks for a GPU
+(``pip install 'copairs[gpu]'``). It does not depend on :mod:`copairs.fastap` or
 :mod:`copairs.nulls`, whose CUDA kernels both use it.
 """
 

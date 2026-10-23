@@ -70,11 +70,10 @@ def get_map_pvalue(
         the mAP equals an atom of the null (e.g. perfect retrieval).
     backend : str
         Backend of the fast method: ``"auto"`` (default), ``"cuda"``,
-        ``"numba"`` or ``"numpy"``. ``"auto"`` picks a usable GPU (``pip
-        install 'copairs[gpu]'``), else Numba when installed, else NumPy, and
-        all of them give identical p-values there. An explicit ``"cuda"``
-        adds float32 gap stepping, which matches NumPy by an error bound
-        rather than by identical arithmetic (see :func:`copairs.nulls.ap_nulls`).
+        ``"numba"`` or ``"numpy"``. ``"auto"`` picks Numba when installed,
+        else NumPy, which give identical p-values. ``"cuda"`` (``pip install
+        'copairs[gpu]'``) runs only when asked for (see
+        :func:`copairs.nulls.ap_nulls`).
 
     Returns
     -------

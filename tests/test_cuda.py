@@ -2,8 +2,8 @@
 
 Tests marked ``needs_gpu`` run only where CuPy compiles kernels for a visible
 GPU. The others cover machines without one: CuPy missing, CuPy installed
-without a usable GPU, a GPU whose kernels fail to compile, and the dispatch
-of ``"auto"`` against an explicit ``"cuda"``.
+without a usable GPU, a GPU whose kernels fail to compile, and ``"auto"``
+staying on the CPU where only an explicit ``"cuda"`` runs the GPU.
 """
 
 import types
@@ -128,7 +128,7 @@ def test_cuda_without_a_gpu():
 
 
 def test_auto_skips_a_cupy_that_fails_to_import(tmp_path):
-    """An installed CuPy that fails to import leaves "auto" on the CPU, warning once.
+    """An installed CuPy that fails to import is not listed, with one warning.
 
     ``backend="cuda"`` raises the import error itself.
     """
@@ -168,9 +168,10 @@ def test_cuda_ap_stage_without_numba_names_the_extra():
 
 @needs_cupy
 def test_import_does_not_load_cupy():
-    """Importing copairs and running the NumPy and Numba paths leave CuPy unloaded.
+    """Importing copairs and running the default paths leave CuPy unloaded.
 
-    Only ``backend="auto"`` of the null functions, and ``"cuda"``, import it.
+    ``"auto"``, the null functions' default, never runs the GPU, so it does
+    not import CuPy either; only ``"cuda"`` and ``available_backends`` do.
     """
     result = run_isolated(
         "import sys\n"
@@ -186,8 +187,11 @@ def test_import_does_not_load_cupy():
         "ap = map.average_precision(meta, feats, ['l'], ['p'], [], ['l'],\n"
         "                           progress_bar=False)\n"
         "map.mean_average_precision(ap, ['l'], null_size=10, threshold=0.05,\n"
-        "                           seed=0, progress_bar=False, backend='numpy')\n"
+        "                           seed=0, progress_bar=False)\n"
         "nulls.ap_nulls([[2, 5]], 4, 0, backend='numpy')\n"
+        "nulls.ap_nulls([[2, 5]], 4, 0)\n"
+        "nulls.ap_pvalues([0.5], [0], [[2, 5]], 4, 0)\n"
+        "assert nulls.resolve_backend('auto') != 'cuda'\n"
         + ("nulls.ap_nulls([[2, 5]], 4, 0, backend='numba')\n" if HAS_NUMBA else "")
         + "assert 'cupy' not in sys.modules\n"
     )
@@ -252,7 +256,7 @@ def test_cuda_probed_once_per_process(cuda_runtime, monkeypatch):
 
 
 class _HostCuda:
-    """Stands in for :mod:`copairs.nulls.cuda` on the CPU, recording ``fast_gaps``.
+    """Stands in for :mod:`copairs.nulls.cuda` on the CPU, recording its calls.
 
     Samples and counts with the NumPy backend, so p-values must equal NumPy's.
     """
@@ -296,19 +300,23 @@ class _HostCuda:
 
 @pytest.fixture
 def host_cuda(monkeypatch):
-    """Make "auto" resolve to "cuda" and run :class:`_HostCuda` in its place."""
+    """Make a GPU look usable and run :class:`_HostCuda` in place of its kernels."""
     fake = _HostCuda()
+    cpu = [name for name in nulls.available_backends() if name != "cuda"]
     for module in (backend, sampler, pvalues):
         monkeypatch.setattr(module, "_import_cuda_backend", lambda: fake)
-    monkeypatch.setattr(backend, "available_backends", lambda: ["cuda", "numpy"])
+    monkeypatch.setattr(backend, "_cuda_usable", lambda: True)
+    monkeypatch.setattr(backend, "available_backends", lambda: ["cuda", *cpu])
     return fake
 
 
-def test_auto_runs_cuda_without_float32_gaps(host_cuda):
-    """Where "auto" picks CUDA it runs the float64 gap search; "cuda" steps in float32.
+def test_auto_never_runs_cuda(host_cuda):
+    """With a usable GPU, "auto" still runs on the CPU; only "cuda" runs the GPU.
 
-    Counts and p-values come from the device counters either way.
+    The CUDA samples match NumPy's by error bounds, not identical arithmetic,
+    and no GPU has tested them bit for bit, so "auto" must not pick them.
     """
+    assert nulls.resolve_backend("auto") == ("numba" if HAS_NUMBA else "numpy")
     rng = np.random.default_rng(0)
     confs = np.concatenate([CONFS, WIDE[:4]])
     conf_ix = rng.integers(len(confs), size=40)
@@ -320,7 +328,7 @@ def test_auto_runs_cuda_without_float32_gaps(host_cuda):
         "ap": nulls.ap_pvalues(scores, conf_ix, confs, 300, 7, backend="numpy"),
         "map": nulls.map_pvalues(scores[:3], *group_args, 300, 7, backend="numpy"),
     }
-    for name, fast in (("auto", False), ("cuda", True)):
+    for name, on_gpu in (("auto", False), ("cuda", True)):
         host_cuda.fast_gaps.clear()
         got = {
             "nulls": nulls.ap_nulls(confs, 300, 7, backend=name),
@@ -331,8 +339,10 @@ def test_auto_runs_cuda_without_float32_gaps(host_cuda):
                 scores[:3], *group_args, 300, 7, backend=name, budget_bytes=2**12
             ),
         }
-        assert set(host_cuda.fast_gaps) == {fast}, name
-        assert len(host_cuda.fast_gaps) > 3, "the small budget samples in chunks"
+        if on_gpu:
+            assert len(host_cuda.fast_gaps) > 3, "the small budget samples in chunks"
+        else:
+            assert not host_cuda.fast_gaps, name
         for key, expected in numpy.items():
             np.testing.assert_array_equal(got[key], expected, err_msg=(name, key))
     host_cuda.fast_gaps.clear()
@@ -345,26 +355,26 @@ def test_auto_runs_cuda_without_float32_gaps(host_cuda):
             "n_total_pairs": 10,
         }
     )
+    compute.get_null_dists(confs, 50, 1, progress_bar=False)
     compute.p_values(scores[:5], confs[conf_ix[:5]], 200, 1, progress_bar=False)
     mean_average_precision(frame, ["g"], 200, 0.05, 1, progress_bar=False)
-    assert host_cuda.fast_gaps and not any(host_cuda.fast_gaps)
+    assert not host_cuda.fast_gaps
 
 
 @needs_gpu
-def test_auto_picks_cuda_bitwise_numpy():
-    """On a GPU "auto" runs CUDA, whose samples and p-values are NumPy's bit for bit."""
-    assert nulls.resolve_backend("auto") == "cuda"
+def test_cuda_samples_and_pvalues_bitwise_numpy():
+    """CUDA samples and p-values are NumPy's bit for bit."""
     confs = np.concatenate([CONFS, WIDE])
     for dtype in (np.float64, np.float32):
         expected = nulls.ap_nulls(confs, 2000, 3, backend="numpy", dtype=dtype)
-        got = nulls.ap_nulls(confs, 2000, 3, backend="auto", dtype=dtype)
+        got = nulls.ap_nulls(confs, 2000, 3, backend="cuda", dtype=dtype)
         assert got.tobytes() == expected.tobytes(), dtype
     rng = np.random.default_rng(1)
     conf_ix = rng.integers(len(confs), size=200)
     scores = nulls.ap_nulls(confs, 1, 11, dtype=np.float64, backend="numpy")[conf_ix, 0]
     kwargs = dict(null_size=5000, seed=2, budget_bytes=2**16)
     a = nulls.ap_pvalues(scores, conf_ix, confs, backend="numpy", **kwargs)
-    b = nulls.ap_pvalues(scores, conf_ix, confs, backend="auto", **kwargs)
+    b = nulls.ap_pvalues(scores, conf_ix, confs, backend="cuda", **kwargs)
     assert a.tobytes() == b.tobytes()
 
 
@@ -421,24 +431,21 @@ def test_cuda_map_pvalues_match_brute_force():
     ptr, conf_ix, conf_cnt = [0, 2, 5], [0, 3, 1, 4, 8], [2, 1, 1, 3, 1]
     scores = np.array([0.31, 0.62])
     expected = brute_map_pvalues(scores, ptr, conf_ix, conf_cnt, CONFS, 3000, 4)
-    for name in ("auto", "cuda"):
-        got = nulls.map_pvalues(
-            scores, ptr, conf_ix, conf_cnt, CONFS, 3000, 4, backend=name
-        )
-        np.testing.assert_array_equal(got, expected)
+    got = nulls.map_pvalues(scores, ptr, conf_ix, conf_cnt, CONFS, 3000, 4, "cuda")
+    np.testing.assert_array_equal(got, expected)
 
 
 def _child_backend():
     # Samples on NumPy: Numba's GNU OpenMP layer, which earlier tests may have
     # started, terminates forked children that run parallel kernels.
-    return nulls.resolve_backend("auto"), nulls.ap_nulls(CONFS, 50, 4, backend="numpy")
+    return nulls.available_backends(), nulls.ap_nulls(CONFS, 50, 4, backend="numpy")
 
 
 @needs_gpu
-def test_forked_child_falls_back_to_cpu():
-    """A process forked after CUDA was initialised picks a CPU backend."""
+def test_forked_child_finds_no_gpu():
+    """A process forked after CUDA was initialised does not list the GPU."""
     expected = nulls.ap_nulls(CONFS, 50, seed=4, backend="cuda")  # initialises CUDA
     with multiprocessing.get_context("fork").Pool(1) as pool:
-        auto, null = pool.apply_async(_child_backend).get(timeout=300)
-    assert auto == ("numba" if HAS_NUMBA else "numpy")
+        backends, null = pool.apply_async(_child_backend).get(timeout=300)
+    assert "cuda" not in backends
     np.testing.assert_array_equal(null, expected)

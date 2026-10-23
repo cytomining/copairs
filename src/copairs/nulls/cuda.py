@@ -6,15 +6,14 @@ Imported only through :func:`copairs.nulls.backend._import_cuda_backend`
 The sampler kernel is a line-by-line port of
 :func:`copairs.nulls.sampler._ap_sample`: the same Philox blocks and the same
 double-precision operations in the same order, compiled without FMA
-contraction. With ``fast_gaps=False``, the kernel ``backend="auto"`` runs, its
-samples are therefore those of the NumPy backend bit for bit. ``fast_gaps=True``
-(an explicit ``backend="cuda"``) steps long gaps in float32, which GPUs with
-few float64 units run up to 64 times faster: each step is taken in float32
-only when the float32 product clears ``u`` by twice its error bound relative
-to Algorithm A's float64 product, and otherwise the float64 product is
-replayed. That bound makes its gaps equal Algorithm A's (and the samples
-NumPy's), but it rests on an error analysis rather than on identical
-arithmetic, so ``"auto"`` does not use it.
+contraction. With ``fast_gaps=False`` its samples are therefore those of the
+NumPy backend bit for bit. ``fast_gaps=True`` (``backend="cuda"``) steps long
+gaps in float32, which GPUs with few float64 units run up to 64 times faster:
+each step is taken in float32 only when the float32 product clears ``u`` by
+twice its error bound relative to Algorithm A's float64 product, and otherwise
+the float64 product is replayed. That bound makes its gaps equal Algorithm A's
+(and the samples NumPy's), but it rests on an error analysis rather than on
+identical arithmetic.
 
 The counts compare float64 nulls against the same thresholds, and sum a
 group's members in the same order, as the NumPy backend; they are exact.

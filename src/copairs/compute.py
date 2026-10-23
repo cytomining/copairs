@@ -575,11 +575,10 @@ def get_null_dists(
         configuration is now seeded by its values rather than its position.
     backend : str
         Backend of the fast method: ``"auto"`` (default), ``"cuda"``,
-        ``"numba"`` or ``"numpy"``. ``"auto"`` picks a usable GPU (``pip
-        install 'copairs[gpu]'``), else Numba when installed, else NumPy; all
-        of them return identical values there. An explicit ``"cuda"`` adds
-        float32 gap stepping, which matches NumPy by an error bound rather
-        than by identical arithmetic (see :func:`copairs.nulls.ap_nulls`).
+        ``"numba"`` or ``"numpy"``. ``"auto"`` picks Numba when installed,
+        else NumPy, which return identical values. ``"cuda"`` (``pip install
+        'copairs[gpu]'``) runs only when asked for (see
+        :func:`copairs.nulls.ap_nulls`).
 
     Returns
     -------

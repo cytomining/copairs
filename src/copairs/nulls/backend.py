@@ -3,7 +3,8 @@
 Numba (``pip install 'copairs[numba]'``) and CuPy (``pip install
 'copairs[gpu]'``) are optional. Nothing here imports them at module level:
 :func:`_import_numba_backend` and :func:`_import_cuda_backend` load the
-kernels the first time their backend is used, or ``"auto"`` checks for it.
+kernels the first time their backend is used, ``"auto"`` checks for Numba,
+and :func:`available_backends` for both.
 """
 
 import warnings
@@ -40,14 +41,20 @@ def available_backends() -> list[str]:
     Numba when the Numba backend imports. An installed Numba or CuPy that
     fails to import is left out with a warning naming the error, once, as is
     a GPU whose kernels fail to compile; a machine without a GPU or driver
-    just has no CUDA backend. The check runs once per process.
+    just has no CUDA backend. The check runs once per process. ``"auto"``
+    picks among the CPU backends only (see :func:`resolve_backend`).
     """
-    backends = ["numpy"]
-    if importlib.util.find_spec("numba") is not None and _numba_imports():
-        backends.insert(0, "numba")
+    backends = _cpu_backends()
     if importlib.util.find_spec("cupy") is not None and _cuda_usable():
         backends.insert(0, "cuda")
     return backends
+
+
+def _cpu_backends() -> list[str]:
+    """``["numba", "numpy"]`` when the Numba backend imports, else ``["numpy"]``."""
+    if importlib.util.find_spec("numba") is not None and _numba_imports():
+        return ["numba", "numpy"]
+    return ["numpy"]
 
 
 @cache
@@ -90,18 +97,19 @@ def _cuda_usable() -> bool:
 def resolve_backend(backend: str) -> str:
     """Return a concrete backend name for ``backend``.
 
-    ``"auto"`` picks the first of :func:`available_backends`: ``"cuda"``
-    when CuPy can compile kernels for a visible GPU, else ``"numba"`` when
-    the Numba backend imports, else ``"numpy"``. That choice cannot change
-    results: under ``"auto"`` every backend returns bitwise-identical null
-    samples and counts (tested), CUDA running its float64 gap search.
-    ``"numba"`` and ``"cuda"`` raise an ImportError naming the extra when
-    their package is missing, and ``"cuda"`` a RuntimeError when no GPU is
-    usable.
+    ``"auto"`` picks ``"numba"`` when the Numba backend imports, else
+    ``"numpy"``. That choice cannot change results: the two return
+    bitwise-identical null samples and counts (tested). ``"auto"`` never
+    picks ``"cuda"``, which runs only when asked for: its samples equal
+    NumPy's by error bounds rather than by identical arithmetic (see
+    :mod:`copairs.nulls.cuda`), and it has not been tested bit for bit on a
+    GPU. ``"numba"`` and ``"cuda"`` raise an ImportError naming the extra
+    when their package is missing, and ``"cuda"`` a RuntimeError when no
+    GPU is usable.
     """
     _check_backend(backend)
     if backend == "auto":
-        return available_backends()[0]
+        return _cpu_backends()[0]
     if backend == "numba":
         _import_numba_backend()
     elif backend == "cuda":

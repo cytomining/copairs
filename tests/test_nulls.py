@@ -171,7 +171,7 @@ def test_available_backends():
     cpu = [b for b in BACKENDS if b != "cuda"]
     assert cpu == (["numba", "numpy"] if HAS_NUMBA else ["numpy"])
     assert BACKENDS in (cpu, ["cuda", *cpu])
-    assert nulls.resolve_backend("auto") == BACKENDS[0]
+    assert nulls.resolve_backend("auto") == cpu[0]  # never "cuda"
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

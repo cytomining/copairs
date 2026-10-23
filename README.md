@@ -58,8 +58,8 @@ The AP and mAP p-value functions (`compute.p_values`,
 `backend="numpy"` needs nothing extra; `backend="numba"` compiles the same
 code with [Numba](https://numba.pydata.org) (the `numba` extra above). The
 backends return bitwise-identical nulls and p-values, so `backend="auto"`
-(default) uses a usable GPU (see below), else Numba whenever it is installed;
-if Numba fails to import, `"auto"` warns once and uses NumPy.
+(default) uses Numba whenever it is installed; if Numba fails to import,
+`"auto"` warns once and uses NumPy. `"auto"` never picks the GPU (see below).
 
 The NumPy backend samples on one thread per CPU the process may run on (its
 CPU affinity, which follows `taskset` and Slurm allocations but not a CPU
@@ -78,13 +78,11 @@ copairs' kernels at run time, so it also needs the CUDA libraries (NVRTC, and
 cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
 `pip install 'cupy-cuda12x[ctk]'`.
 
-- Nulls and p-values: `backend="auto"` picks `"cuda"` when CuPy compiles
-  kernels for a visible GPU. Its samples and p-values are bitwise identical to
-  the NumPy and Numba backends'. An explicit `backend="cuda"` also steps long
-  gaps of Algorithm A in float32, which is faster on GPUs with few float64
-  units. An error bound keeps those gaps equal to the float64 ones, so samples
-  match NumPy's in the tests, but not by identical arithmetic, and `"auto"`
-  does not use it.
+- Nulls and p-values: `backend="cuda"`, only when asked for, samples and
+  counts on the GPU. It steps long gaps of Algorithm A in float32, which is
+  faster on GPUs with few float64 units. Error bounds keep those gaps equal to
+  the float64 ones, so samples are NumPy's, but not by identical arithmetic,
+  and no GPU run has tested them bit for bit yet; `"auto"` stays on the CPU.
 - AP stage: `backend="cuda"`, only when asked for, computes pair similarities
   and AP on the GPU, keeping similarities there, and runs multilabel matching,
   per-label AP and normalized AP on Numba. Given the same similarities, its APs
@@ -92,12 +90,11 @@ cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
   they match to float32 rounding. `draw_average_precisions(...,
   backend="cuda")` scores draws of up to 6144 queries on the GPU and larger
   ones on Numba.
-- Without CuPy or a usable GPU, `"auto"` stays on the CPU (warning only when a
-  GPU is visible but kernels fail to compile) and `backend="cuda"` raises an
-  error that names the extra and the reason. With CuPy installed, the first
-  `"auto"` call imports it, which takes a few seconds. The check runs once per
-  process: a process forked after its parent used CUDA cannot use the GPU, so
-  `"auto"` picks a CPU backend there.
+- Without CuPy or a usable GPU, `backend="cuda"` raises an error that names
+  the extra and the reason, and `copairs.nulls.available_backends()` leaves
+  `"cuda"` out (warning only when a GPU is visible but kernels fail to
+  compile). The check runs once per process: a process forked after its
+  parent used CUDA cannot use the GPU, so `"cuda"` is unavailable there.
 
 ### Testing
 
