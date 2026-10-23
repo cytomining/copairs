@@ -36,7 +36,7 @@ vectorized twins, and Numba compiles them as it does the single-label ones.
 """
 
 from typing import NamedTuple
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import numpy as np
@@ -87,14 +87,17 @@ RANK_POOL = 2**12
 # Elements of the per-slot arrays of one vectorized chunk of draws.
 _CHUNK_ELEMENTS = 2**22
 _FULL_TABLE = 2**20  # largest (code, code) table a layout gathers from
-# Draws per call of the Numba kernels, which hold only their mAPs. Without
-# stop_after, a group whose draws run on the calling thread takes at most
-# _draw_chunk(n) per call instead, so a large group's draws spread over the
-# threads (rounds of stop_after run one at a time anyway).
+# Most draws per task: the Numba kernels' draws per launch on Numba's
+# threads. Other tasks take fewer as groups grow (_draw_chunk), bounding the
+# NumPy backend's per-slot arrays and spreading a large group's draws over
+# the threads.
 _NUMBA_CHUNK = 2**16
 # A run that may stop early (``stop_after``) starts with this many draws and
-# doubles them each round, up to the layout's chunk.
+# doubles them each round, up to _NUMBA_CHUNK; a round runs as tasks of the
+# run's chunk.
 _FIRST_ROUND = 256
+# Draw tasks in flight per thread; the scheduler submits more as they finish.
+_TASKS_PER_WORKER = 4
 
 # Rank code of a NaN key: after every number.
 _NAN = np.uint32(0xFFFFFFFF)
@@ -533,14 +536,23 @@ class _Layout:
             self.rmu, self.rcm, pool.rrr, pool.ranked,
         )  # fmt: skip
 
+    def kernel_args(self, k0, k1):
+        """Arguments of the Numba draw kernels before ``start``, given the keys."""
+        # map_args after n, which draw_args starts with
+        return (*self.draw_args(), k0, k1, *self.map_args()[1:])
+
     def tables(self, draws):
         """Return the NumPy backend's :class:`_NumpyTables` for ``draws`` draws."""
         return _NumpyTables(self, draws)
 
     @staticmethod
     def compiled(kernels):
-        """``(identity, maps)`` of the Numba backend, from :mod:`copairs.nulls._numba`."""
-        return kernels.permutation_identity, kernels.permutation_maps
+        """``(identity, serial, parallel)`` kernels of :mod:`copairs.nulls._numba`."""
+        return (
+            kernels._permutation_identity,
+            kernels._permutation_maps,
+            kernels._permutation_maps_parallel,
+        )
 
 
 class _NumpyTables:
@@ -593,10 +605,6 @@ class _NumpyTables:
                 [layout.smr_ptr[1:], len(layout.smr) + pool.srr_ptr[1:]]
             )
 
-    def chunk(self):
-        """Draws per vectorized chunk, bounding the per-slot arrays."""
-        return _draw_chunk(self.layout.n)
-
     def draws(self, start, size, k0, k1):
         """``pm`` of draws ``start, ...`` (:func:`_draws_np`)."""
         return _draws_np(self.layout, start, size, k0, k1)
@@ -607,8 +615,8 @@ class _NumpyTables:
 
 
 def _draw_chunk(n):
-    """Draws per vectorized chunk of a group of ``n`` members."""
-    return int(min(2**16, max(256, _CHUNK_ELEMENTS // max(n * n, 1))))
+    """Draws per task of a group of ``n`` members: per vectorized NumPy chunk."""
+    return int(min(_NUMBA_CHUNK, max(256, _CHUNK_ELEMENTS // max(n * n, 1))))
 
 
 def _uniforms_np(c0, c1, count, k0, k1):
@@ -1012,27 +1020,29 @@ class _Run:
     ``key`` is the Philox key of the group's draws. Under ``backend="numpy"``
     they run vectorized on the layout's NumPy tables, built for ``draws``
     draws; under ``"numba"`` the compiled scalar functions run them, on
-    Numba's threads if ``parallel``, else on the calling thread (in tasks
-    as large as NumPy's chunks, which shrink as groups grow). ``identity``
+    Numba's threads if ``parallel``, else on the calling thread. ``identity``
     is the observed labels' mAP, recomputed from the pairs, ``thr`` its
-    :func:`~copairs.nulls.common.tie_thresholds`, ``chunk`` the draws per
-    task, and ``rounds`` the largest round of ``stop_after`` (:class:`_Hits`).
+    :func:`~copairs.nulls.common.tie_thresholds`, and ``chunk`` the draws
+    per task: ``_NUMBA_CHUNK`` on Numba's threads, else :func:`_draw_chunk`,
+    so a large group's tasks spread over the calling threads.
     """
 
     def __init__(self, layout, key, backend="numpy", draws=0, parallel=True):
         self.layout = layout
         self.key = key
+        self.chunk = _draw_chunk(layout.n)
         if backend == "numba":
-            identity, maps = layout.compiled(_import_numba_backend())
-            self.identity = identity(layout)
-            self.chunk = self.rounds = _NUMBA_CHUNK
-            if not parallel:
-                self.chunk = min(_NUMBA_CHUNK, _draw_chunk(layout.n))
-            self._maps = lambda start, size: maps(layout, start, size, *key, parallel)
+            numba_backend = _import_numba_backend()
+            kernels = layout.compiled(numba_backend)
+            self.identity = numba_backend.identity_map(kernels, layout)
+            if parallel:
+                self.chunk = _NUMBA_CHUNK
+            self._maps = lambda start, size: numba_backend.maps(
+                kernels, layout, start, size, *key, parallel
+            )
         else:
             tables = layout.tables(draws)
             self.identity = float(tables.maps(layout.identity[None])[0])
-            self.chunk = self.rounds = tables.chunk()
             self._maps = lambda start, size: tables.maps(
                 tables.draws(start, size, *key)
             )
@@ -1045,13 +1055,12 @@ class _Run:
     def count(self, null_size, stop_after=None, out=None):
         """``(count, draws)`` of up to ``null_size`` draws, as :func:`_count_hits`."""
         return _count_hits(
-            self.maps_of, null_size, self.thr, self.chunk, stop_after, out,
-            self.rounds,
-        )  # fmt: skip
+            self.maps_of, null_size, self.thr, self.chunk, stop_after, out
+        )
 
 
 def permutation_null(
-    members, edges, blocks, block_of, similarity, null_size, seed, pool=None,
+    members, edges, blocks, block_of, similarity, null_size, seed, *, pool=None,
     out=None, backend="auto", parallel=True,
 ):  # fmt: skip
     """Run ``null_size`` label permutations of one group.
@@ -1079,48 +1088,60 @@ class _Hits:
 
     Without ``stop_after`` all ``null_size`` draws run, in chunks of
     ``chunk`` that may arrive in any order. With it, rounds start at
-    :data:`_FIRST_ROUND` draws and double up to ``rounds`` (default
-    ``chunk``), one round at a time, and the run stops at its
-    ``stop_after``-th hit: ``draws`` is then the draw of that hit. Draw
-    ``j`` does not depend on the chunks or rounds, so neither does the
-    result.
+    :data:`_FIRST_ROUND` draws and double up to :data:`_NUMBA_CHUNK`, each
+    round in chunks of ``chunk`` and the next once it has arrived
+    (``round_done``), and the run stops at its ``stop_after``-th hit:
+    ``draws`` is then the draw of that hit. Chunks of a round may arrive in
+    any order and are counted in draw order. Draw ``j`` does not depend on
+    the chunks or rounds, so neither does the result.
     """
 
-    def __init__(self, null_size, thr, chunk, stop_after=None, rounds=None):
+    def __init__(self, null_size, thr, chunk, stop_after=None):
         self.null_size = null_size
         self.thr = thr
         self.chunk = chunk
-        self.rounds = chunk if rounds is None else rounds
         self.stop_after = stop_after
-        self.size = chunk if stop_after is None else min(_FIRST_ROUND, self.rounds)
+        self.size = min(_FIRST_ROUND, _NUMBA_CHUNK)  # draws of the next round
         self.count = 0  # hits so far
         self.draws = null_size  # draws the hits came from
         self.issued = 0  # draws handed out by tasks()
         self.arrived = 0  # draws whose mAPs were added
+        self.early = {}  # start -> mAPs that arrived before earlier draws
         self.done = null_size == 0
 
+    @property
+    def round_done(self):
+        """Whether every draw handed out so far has arrived."""
+        return self.arrived == self.issued
+
     def tasks(self):
-        """``(start, size)`` of the draws to run next: every chunk, or one round."""
-        if self.stop_after is None:
-            todo = list(chunks(self.null_size, self.chunk))
-        else:
-            todo = [(self.issued, min(self.size, self.null_size - self.issued))]
-            self.size = min(2 * self.size, self.rounds)
-        self.issued = sum(todo[-1])
-        return todo
+        """``(start, size)`` of the draws to run next: every chunk, or a round's."""
+        size = self.null_size - self.issued
+        if self.stop_after is not None:
+            size = min(self.size, size)
+            self.size = min(2 * self.size, _NUMBA_CHUNK)
+        first, self.issued = self.issued, self.issued + size
+        return [(first + a, m) for a, m in chunks(size, self.chunk)]
 
     def add(self, start, maps):
         """Count the mAPs of draws ``start, ...``; return whether the run is done."""
-        hits = maps >= self.thr
-        if self.stop_after is not None:
-            seen = np.cumsum(hits)
+        if self.stop_after is None:
+            self.count += int((maps >= self.thr).sum())
+            self.arrived += len(maps)
+            self.done = self.arrived == self.null_size
+            return self.done
+        self.early[start] = maps
+        while self.arrived in self.early:
+            start = self.arrived
+            seen = np.cumsum(self.early.pop(start) >= self.thr)
             if self.count + seen[-1] >= self.stop_after:
                 at = int(np.searchsorted(seen, self.stop_after - self.count))
                 self.count, self.draws = self.stop_after, start + at + 1
+                self.early.clear()
                 self.done = True
                 return True
-        self.count += int(hits.sum())
-        self.arrived += len(maps)
+            self.count += int(seen[-1])
+            self.arrived += len(seen)
         self.done = self.arrived == self.null_size
         return self.done
 
@@ -1131,7 +1152,7 @@ class _Hits:
         )
 
 
-def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None, rounds=None):
+def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
     """Count a group's draws whose mAP reaches ``thr``, one task after another.
 
     ``maps_of(start, size)`` returns the mAPs of draws ``start, ...,
@@ -1139,13 +1160,14 @@ def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None, round
     :class:`_Hits`. Returns ``(count, draws)``: the hits and the draws they
     came from. ``out`` receives the mAPs of the draws run.
     """
-    hits = _Hits(null_size, thr, chunk, stop_after, rounds)
+    hits = _Hits(null_size, thr, chunk, stop_after)
     while not hits.done:
         for start, size in hits.tasks():
             maps = maps_of(start, size)
             if out is not None:
                 out[start : start + size] = maps
-            hits.add(start, maps)
+            if hits.add(start, maps):
+                break
     return hits.count, hits.draws
 
 
@@ -1231,7 +1253,7 @@ def _check_identity(g, identity, observed):
 
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
-    null_size, seed, observed=None, progress_bar=False, max_workers=None,
+    null_size, seed, *, observed=None, progress_bar=False, max_workers=None,
     pos_diffby=None, stop_after=None, backend="auto",
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
@@ -1335,15 +1357,22 @@ def _run_groups(
     resolved ``backend``, its Numba draws on Numba's threads if
     ``parallel``.
     """
-    # A thread per CPU; at most 32, since each holds a chunk's draws.
-    workers = min(32, _numpy_workers()) if max_workers is None else max_workers
-    # Groups' draws run on their pool threads when those keep Numba's threads
-    # busy, else on Numba's threads.
-    parallel = backend == "numba" and (
-        min(len(keys), workers) < _import_numba_backend().threads()
-    )
+    pool = {}
+    if backend == "numba":
+        numba_backend = _import_numba_backend()
+        threads = numba_backend.threads()
+        # A thread per Numba thread. Groups' draws run on their pool threads
+        # when those keep Numba's threads busy, else on Numba's threads,
+        # which the pool threads set as the caller has (it is per thread).
+        workers = threads if max_workers is None else max_workers
+        parallel = min(len(keys), workers) < threads
+        pool = dict(initializer=numba_backend.set_threads, initargs=(threads,))
+    else:
+        # A thread per CPU; at most 32, since each holds a chunk's draws.
+        workers = min(32, _numpy_workers()) if max_workers is None else max_workers
+        parallel = False
     pvals = np.empty(len(keys), dtype=np.float64)
-    with ThreadPoolExecutor(max_workers=workers) as ex:
+    with ThreadPoolExecutor(max_workers=workers, **pool) as ex:
         try:
             # Pools ranking overlapping profiles slice one key table.
             table = _key_table(list(refs.values()), similarity, ex.map)
@@ -1364,25 +1393,38 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, stop_after):
 
     A group's pool is built once (``build(g)``), the group starts on it
     (``start(g, pool)`` gives its ``_Run``), and its draws run as chunk
-    tasks, or round by round with ``stop_after`` (:class:`_Hits`), so the
+    tasks, round by round with ``stop_after`` (:class:`_Hits`), so the
     draws of a large group spread over the threads. Only this thread submits
     tasks, and no task waits for another: a group starts once its pool is
     built, and a group with a new pool only once ``_SharedPools.reserve``
     admits it. Groups start pool by pool, at most ``workers`` at a time, so
     every pool alive has unfinished groups, which free it, and few layouts
-    are alive at once.
+    are alive at once. At most ``_TASKS_PER_WORKER * workers`` draw tasks
+    are in flight, in the order the groups handed them out; tasks of a
+    group that stopped are cancelled or ignored.
     """
     pools = _SharedPools(keys, nbytes)
     order = sorted(range(len(keys)), key=lambda g: keys[g])
     tasks = {}  # future -> (step, group, first draw)
     waiting = {}  # pool key -> groups waiting for its build
     runs = {}  # group -> (_Run, _Hits)
+    ready = deque()  # (group, first draw, size) of draw tasks to submit
+    flying = {}  # group -> its draw tasks in flight, to cancel when it stops
+    in_flight = 0  # draw tasks submitted and not yet seen done, stale ones too
     nxt = active = 0
 
     def draw(g):
-        run, hits = runs[g]
-        for first, size in hits.tasks():
-            tasks[ex.submit(run.maps_of, first, size)] = ("draws", g, first)
+        ready.extend((g, first, size) for first, size in runs[g][1].tasks())
+
+    def submit_draws():
+        nonlocal in_flight
+        while ready and in_flight < _TASKS_PER_WORKER * workers:
+            g, first, size = ready.popleft()
+            if g in runs:  # else the group stopped
+                future = ex.submit(runs[g][0].maps_of, first, size)
+                tasks[future] = ("draws", g, first)
+                flying.setdefault(g, set()).add(future)
+                in_flight += 1
 
     while nxt < len(order) or tasks:
         while nxt < len(order) and active < workers:
@@ -1402,6 +1444,11 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, stop_after):
         finished, _ = wait(tasks, return_when=FIRST_COMPLETED)
         for future in finished:
             step, g, first = tasks.pop(future)
+            if step == "draws":
+                in_flight -= 1
+                if g not in runs:  # the group stopped
+                    continue
+                flying[g].discard(future)
             result = future.result()
             if step == "build":
                 pools.pools[keys[g]] = result
@@ -1409,23 +1456,26 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, stop_after):
                     tasks[ex.submit(start, h, result)] = ("start", h, 0)
                 continue
             if step == "start":
-                chunk, rounds = result.chunk, result.rounds
                 runs[g] = (
                     result,
-                    _Hits(null_size, result.thr, chunk, stop_after, rounds),
+                    _Hits(null_size, result.thr, result.chunk, stop_after),
                 )
                 done = runs[g][1].done
                 if not done:
                     draw(g)
             else:
-                done = runs[g][1].add(first, result)
-                if not done and stop_after is not None:
+                hits = runs[g][1]
+                done = hits.add(first, result)
+                if not done and stop_after is not None and hits.round_done:
                     draw(g)  # the next round
             if done:
                 _, hits = runs.pop(g)
+                for rest in flying.pop(g, ()):
+                    rest.cancel()
                 pools.release(g)
                 active -= 1
                 yield g, hits.pvalue()
+        submit_draws()
 
 
 # Multilabel groups: a draw moves one label to other profiles.
@@ -1653,14 +1703,22 @@ class _LabelLayout:
             pool.nrow, pool.nbits, self.loc, self.lone, self.gptr, self.grow,
         )  # fmt: skip
 
+    def kernel_args(self, k0, k1):
+        """Arguments of the Numba draw kernels before ``start``, given the keys."""
+        return (*self.draw_args(), k0, k1, *self.map_args())
+
     def tables(self, draws):
         """Return the NumPy backend's :class:`_LabelNumpyTables` for ``draws`` draws."""
         return _LabelNumpyTables(self, draws)
 
     @staticmethod
     def compiled(kernels):
-        """``(identity, maps)`` of the Numba backend, from :mod:`copairs.nulls._numba`."""
-        return kernels.label_identity, kernels.label_maps
+        """``(identity, serial, parallel)`` kernels of :mod:`copairs.nulls._numba`."""
+        return (
+            kernels._label_identity,
+            kernels._label_maps,
+            kernels._label_maps_parallel,
+        )
 
 
 class _LabelNumpyTables:
@@ -1689,10 +1747,6 @@ class _LabelNumpyTables:
             self.lone_before[:n] = (
                 np.searchsorted(self.gwords, word) - layout.gptr[:-1, None]
             )
-
-    def chunk(self):
-        """Draws per vectorized chunk, bounding the per-slot arrays."""
-        return _draw_chunk(self.layout.n)
 
     def draws(self, start, size, k0, k1):
         """``pm`` of draws ``start, ...`` (:func:`_draws_pool_np`)."""
@@ -1926,7 +1980,7 @@ def _label_run(
 
 
 def label_permutation_pvalues(
-    groups, rows, num_pos, num_total, pairs, null_size, seed, observed=None,
+    groups, rows, num_pos, num_total, pairs, null_size, seed, *, observed=None,
     progress_bar=False, max_workers=None, stop_after=None, backend="auto",
 ):  # fmt: skip
     """P-value of each multilabel group's mAP against moves of its label.
