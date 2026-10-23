@@ -762,6 +762,49 @@ def test_split_draws_do_not_change_pvalues(stop_after, backend, monkeypatch):
             assert min(tasks.values()) == 1 and max(tasks.values()) > 2
 
 
+@pytest.mark.parametrize(
+    "parallel", [False, True], ids=["pool-threads", "numba-threads"]
+)
+def test_large_groups_spread_their_numba_draws(parallel, monkeypatch):
+    """On pool threads, a large group's Numba draws run as several tasks.
+
+    The tasks are as large as NumPy's chunks (2**22 // 30**2 = 4660 draws
+    for 30 members), so threads share them; on Numba's threads each launch
+    keeps up to _NUMBA_CHUNK draws. Rounds of stop_after, which run one at
+    a time, double up to _NUMBA_CHUNK either way. P-values match NumPy's.
+    """
+    pytest.importorskip("numba")
+    from copairs.nulls import _numba
+
+    labels = ["big"] * 30 + ["s1"] * 3 + ["s2"] * 3 + [f"c{i}" for i in range(40)]
+    meta = pd.DataFrame({"g": labels})
+    feats = np.random.default_rng(16).standard_normal((len(meta), 5))
+    ap = average_precision(meta, feats, progress_bar=False, **SPEC)
+    args = (ap.query("n_pos_pairs > 0"), ["g"], 10000, 0.05, 0)
+    kwargs = dict(progress_bar=False, max_workers=4)
+    expected = mean_average_precision(*args, backend="numpy", **kwargs)
+    calls, maps_of = Counter(), permutation._Run.maps_of
+
+    def counted(self, start, size):
+        calls[self.layout.n] += 1
+        return maps_of(self, start, size)
+
+    monkeypatch.setattr(permutation._Run, "maps_of", counted)
+    # 3 groups on 4 threads run on their own if Numba has 2 threads.
+    monkeypatch.setattr(_numba, "threads", lambda: 8 if parallel else 2)
+    got = mean_average_precision(*args, backend="numba", **kwargs)
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    assert calls == {30: 1 if parallel else 3, 3: 2}
+    # 20000 draws that never stop: rounds of 256, 512, ..., 8192, then 3872.
+    kwargs["stop_after"] = 10**6
+    args = (args[0], ["g"], 20000, 0.05, 0)
+    expected = mean_average_precision(*args, backend="numpy", **kwargs)
+    calls.clear()
+    got = mean_average_precision(*args, backend="numba", **kwargs)
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    assert calls == {30: 7, 3: 14}
+
+
 PLATE_SPEC = dict(ML_SPEC, neg_sameby=["plate"])
 
 

@@ -87,7 +87,10 @@ RANK_POOL = 2**12
 # Elements of the per-slot arrays of one vectorized chunk of draws.
 _CHUNK_ELEMENTS = 2**22
 _FULL_TABLE = 2**20  # largest (code, code) table a layout gathers from
-# Draws per call of the Numba kernels, which hold only their mAPs.
+# Draws per call of the Numba kernels, which hold only their mAPs. Without
+# stop_after, a group whose draws run on the calling thread takes at most
+# _draw_chunk(n) per call instead, so a large group's draws spread over the
+# threads (rounds of stop_after run one at a time anyway).
 _NUMBA_CHUNK = 2**16
 # A run that may stop early (``stop_after``) starts with this many draws and
 # doubles them each round, up to the layout's chunk.
@@ -1009,10 +1012,11 @@ class _Run:
     ``key`` is the Philox key of the group's draws. Under ``backend="numpy"``
     they run vectorized on the layout's NumPy tables, built for ``draws``
     draws; under ``"numba"`` the compiled scalar functions run them, on
-    Numba's threads if ``parallel``, else on the calling thread. ``identity``
+    Numba's threads if ``parallel``, else on the calling thread (in tasks
+    as large as NumPy's chunks, which shrink as groups grow). ``identity``
     is the observed labels' mAP, recomputed from the pairs, ``thr`` its
-    :func:`~copairs.nulls.common.tie_thresholds`, and ``chunk`` the draws
-    per task.
+    :func:`~copairs.nulls.common.tie_thresholds`, ``chunk`` the draws per
+    task, and ``rounds`` the largest round of ``stop_after`` (:class:`_Hits`).
     """
 
     def __init__(self, layout, key, backend="numpy", draws=0, parallel=True):
@@ -1021,12 +1025,14 @@ class _Run:
         if backend == "numba":
             identity, maps = layout.compiled(_import_numba_backend())
             self.identity = identity(layout)
-            self.chunk = _NUMBA_CHUNK
+            self.chunk = self.rounds = _NUMBA_CHUNK
+            if not parallel:
+                self.chunk = min(_NUMBA_CHUNK, _draw_chunk(layout.n))
             self._maps = lambda start, size: maps(layout, start, size, *key, parallel)
         else:
             tables = layout.tables(draws)
             self.identity = float(tables.maps(layout.identity[None])[0])
-            self.chunk = tables.chunk()
+            self.chunk = self.rounds = tables.chunk()
             self._maps = lambda start, size: tables.maps(
                 tables.draws(start, size, *key)
             )
@@ -1039,8 +1045,9 @@ class _Run:
     def count(self, null_size, stop_after=None, out=None):
         """``(count, draws)`` of up to ``null_size`` draws, as :func:`_count_hits`."""
         return _count_hits(
-            self.maps_of, null_size, self.thr, self.chunk, stop_after, out
-        )
+            self.maps_of, null_size, self.thr, self.chunk, stop_after, out,
+            self.rounds,
+        )  # fmt: skip
 
 
 def permutation_null(
@@ -1072,18 +1079,20 @@ class _Hits:
 
     Without ``stop_after`` all ``null_size`` draws run, in chunks of
     ``chunk`` that may arrive in any order. With it, rounds start at
-    :data:`_FIRST_ROUND` draws and double up to ``chunk``, one round at a
-    time, and the run stops at its ``stop_after``-th hit: ``draws`` is then
-    the draw of that hit. Draw ``j`` does not depend on the chunks or
-    rounds, so neither does the result.
+    :data:`_FIRST_ROUND` draws and double up to ``rounds`` (default
+    ``chunk``), one round at a time, and the run stops at its
+    ``stop_after``-th hit: ``draws`` is then the draw of that hit. Draw
+    ``j`` does not depend on the chunks or rounds, so neither does the
+    result.
     """
 
-    def __init__(self, null_size, thr, chunk, stop_after=None):
+    def __init__(self, null_size, thr, chunk, stop_after=None, rounds=None):
         self.null_size = null_size
         self.thr = thr
         self.chunk = chunk
+        self.rounds = chunk if rounds is None else rounds
         self.stop_after = stop_after
-        self.size = chunk if stop_after is None else min(_FIRST_ROUND, chunk)
+        self.size = chunk if stop_after is None else min(_FIRST_ROUND, self.rounds)
         self.count = 0  # hits so far
         self.draws = null_size  # draws the hits came from
         self.issued = 0  # draws handed out by tasks()
@@ -1096,7 +1105,7 @@ class _Hits:
             todo = list(chunks(self.null_size, self.chunk))
         else:
             todo = [(self.issued, min(self.size, self.null_size - self.issued))]
-            self.size = min(2 * self.size, self.chunk)
+            self.size = min(2 * self.size, self.rounds)
         self.issued = sum(todo[-1])
         return todo
 
@@ -1122,7 +1131,7 @@ class _Hits:
         )
 
 
-def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
+def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None, rounds=None):
     """Count a group's draws whose mAP reaches ``thr``, one task after another.
 
     ``maps_of(start, size)`` returns the mAPs of draws ``start, ...,
@@ -1130,7 +1139,7 @@ def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
     :class:`_Hits`. Returns ``(count, draws)``: the hits and the draws they
     came from. ``out`` receives the mAPs of the draws run.
     """
-    hits = _Hits(null_size, thr, chunk, stop_after)
+    hits = _Hits(null_size, thr, chunk, stop_after, rounds)
     while not hits.done:
         for start, size in hits.tasks():
             maps = maps_of(start, size)
@@ -1400,9 +1409,10 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, stop_after):
                     tasks[ex.submit(start, h, result)] = ("start", h, 0)
                 continue
             if step == "start":
+                chunk, rounds = result.chunk, result.rounds
                 runs[g] = (
                     result,
-                    _Hits(null_size, result.thr, result.chunk, stop_after),
+                    _Hits(null_size, result.thr, chunk, stop_after, rounds),
                 )
                 done = runs[g][1].done
                 if not done:
