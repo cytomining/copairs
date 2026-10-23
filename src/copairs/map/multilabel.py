@@ -14,6 +14,7 @@ from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_inp
 from .normalization import normalize_ap
 from .average_precision import (
     LabelPairs,
+    _columns,
     attach_pairs,
     _diffby_codes,
     _FeatureSimilarity,
@@ -219,11 +220,6 @@ def _row_pairs(pairs, counts, profile, row_key):
     key = np.repeat(np.arange(len(counts), dtype=np.int64), counts)
     rows = np.searchsorted(words, key[:, None] * n + pairs.astype(np.int64))
     return rows.astype(np.uint32 if len(profile) < 2**32 else np.int64)
-
-
-def _columns(cols) -> list:
-    """``cols`` (a column name or a list of them) as a list."""
-    return [cols] if isinstance(cols, str) else list(cols)
 
 
 def _lone_pairs(meta, multilabel_col, neg_sameby, other, keys):

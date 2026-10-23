@@ -424,9 +424,14 @@ def average_precision(
     return (meta, pairs) if return_pairs else meta
 
 
+def _columns(cols) -> list:
+    """``cols`` (a column name or a list of them) as a list."""
+    return [cols] if isinstance(cols, str) else list(cols)
+
+
 def _diffby_codes(meta: pd.DataFrame, pos_diffby) -> np.ndarray | None:
     """``(profiles, columns)`` integer codes of ``meta``'s ``pos_diffby`` columns, or None."""
-    diffby = [pos_diffby] if isinstance(pos_diffby, str) else list(pos_diffby)
+    diffby = _columns(pos_diffby)
     if not diffby:
         return None
     return np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
