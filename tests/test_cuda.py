@@ -455,27 +455,11 @@ class _HostCuda:
     def ap_nulls_to_host(self, plan, start, size, dtype, budget_bytes):
         return self.ap_nulls(plan, start, size, dtype)
 
-    class ScoreCounter:
-        def __init__(self, thr, budget_bytes):
-            self.thr = thr
-            self._counts = np.zeros(len(thr), dtype=np.int64)
+    def count_ge(self, null, thr, ptr, counts, budget_bytes):
+        pvalues._count_ge_host(null, thr, ptr, counts)
 
-        def __call__(self, null, ptr):
-            pvalues._count_ge_host(null, self.thr, ptr, self._counts)
-
-        def counts(self):
-            return self._counts
-
-    class GroupCounter:
-        def __init__(self, *args):
-            self.args = args
-            self._counts = np.zeros(len(args[0]) - 1, dtype=np.int64)
-
-        def __call__(self, null):
-            pvalues._group_ge_host(null, *self.args, self._counts)
-
-        def counts(self):
-            return self._counts
+    def group_ge(self, *args):
+        pvalues._group_ge_host(*args)
 
 
 @pytest.fixture
@@ -699,7 +683,7 @@ def device(request, monkeypatch):
 
 @pytest.mark.parametrize("budget", [56, 300, 2**30])
 def test_cuda_counts_match_host(device, budget):
-    """The GPU counters equal the NumPy counts, NaN samples and ties included.
+    """The GPU counts equal the NumPy counts, NaN samples and ties included.
 
     A small budget splits the scores into batches, and one configuration's
     scores into pieces, without changing the counts.
@@ -717,9 +701,9 @@ def test_cuda_counts_match_host(device, budget):
         thr[ptr[c] : ptr[c + 1]].sort()
     expected = np.zeros(len(thr), dtype=np.int64)
     pvalues._count_ge_host(null, thr, ptr, expected)
-    counter = cuda.ScoreCounter(thr, budget)
-    counter(cuda.cp.asarray(null), ptr)
-    np.testing.assert_array_equal(counter.counts(), expected)
+    counts = np.zeros(len(thr), dtype=np.int64)
+    cuda.count_ge(cuda.cp.asarray(null), thr, ptr, counts, budget)
+    np.testing.assert_array_equal(counts, expected)
 
     gptr, conf_ix, conf_cnt = (
         np.array([0, 2, 5]),
@@ -730,9 +714,9 @@ def test_cuda_counts_match_host(device, budget):
     gthr = np.array([0.4, 0.55])
     expected = np.zeros(2, dtype=np.int64)
     pvalues._group_ge_host(null, gptr, conf_ix, conf_cnt, n_group, gthr, expected)
-    group = cuda.GroupCounter(gptr, conf_ix, conf_cnt, n_group, gthr)
-    group(cuda.cp.asarray(null))
-    np.testing.assert_array_equal(group.counts(), expected)
+    counts = np.zeros(2, dtype=np.int64)
+    cuda.group_ge(cuda.cp.asarray(null), gptr, conf_ix, conf_cnt, n_group, gthr, counts)
+    np.testing.assert_array_equal(counts, expected)
 
 
 @pytest.mark.parametrize("budget", [56, 300])

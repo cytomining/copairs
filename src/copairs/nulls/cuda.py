@@ -314,33 +314,25 @@ extern "C" __global__ void group_ge(const double* null, long long size, long lon
 """
 
 
-class GroupCounter:
-    """Accumulate group-null exceedance counts over chunks of AP null samples.
+def group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
+    """GPU counterpart of :func:`copairs.nulls.pvalues._group_ge_host`.
 
-    The GPU counterpart of :func:`copairs.nulls.pvalues._group_ge_host`.
+    ``null`` is a ``(n_conf, size)`` chunk on the GPU; the groups (``ptr``,
+    ``conf_ix``, ``conf_cnt``, ``n_group`` and ``thr``) and their int64
+    ``counts`` are on the host, as there. The groups go to the GPU with each
+    chunk: 8 bytes per group and member.
     """
-
-    def __init__(self, ptr, conf_ix, conf_cnt, n_group, thr):
-        self.n_groups = len(ptr) - 1
-        self.args = (
-            *(cp.asarray(a, dtype=cp.int64) for a in (ptr, conf_ix, conf_cnt, n_group)),
-            cp.asarray(thr, dtype=cp.float64),
-        )
-        self._counts = cp.zeros(self.n_groups, dtype=cp.uint64)
-
-    def __call__(self, null):
-        """Add the exceedances of one ``(n_conf, size)`` float64 chunk of nulls."""
-        null = cp.ascontiguousarray(null, dtype=cp.float64)
-        size = null.shape[1]
-        _cuda.kernel(_GROUP_GE, "group_ge")(
-            _cuda.grid(size, blocks_per_sm=8, rows=self.n_groups),
-            (_cuda.BLOCK,),
-            (null, np.int64(size), np.int64(self.n_groups), *self.args, self._counts),
-        )
-
-    def counts(self) -> np.ndarray:
-        """Total exceedance count of each group."""
-        return self._counts.get().astype(np.int64)
+    null = cp.ascontiguousarray(null, dtype=cp.float64)
+    size, n_groups = null.shape[1], len(ptr) - 1
+    groups = (cp.asarray(a, dtype=cp.int64) for a in (ptr, conf_ix, conf_cnt, n_group))
+    thr = cp.asarray(thr, dtype=cp.float64)
+    hits = cp.zeros(n_groups, dtype=cp.uint64)
+    _cuda.kernel(_GROUP_GE, "group_ge")(
+        _cuda.grid(size, blocks_per_sm=8, rows=n_groups),
+        (_cuda.BLOCK,),
+        (null, np.int64(size), np.int64(n_groups), *groups, thr, hits),
+    )
+    counts += host(hits).astype(np.int64)
 
 
 _COUNT_KERNELS = r"""
@@ -380,28 +372,6 @@ _COUNT_GE = _cuda.PRELUDE + _COUNT_KERNELS
 # offsets' end.
 _BIN_BYTES = 24
 _BATCH_BYTES = 8
-
-
-class ScoreCounter:
-    """Accumulate AP-null exceedance counts of sorted thresholds over chunks.
-
-    The GPU counterpart of :func:`copairs.nulls.pvalues._count_ge_host`
-    applied chunk by chunk to the same counts. Thresholds and counts stay on
-    the host; see :func:`count_ge` for what the GPU holds.
-    """
-
-    def __init__(self, thr, budget_bytes: int):
-        self.thr = np.ascontiguousarray(thr, dtype=np.float64)
-        self._counts = np.zeros(len(self.thr), dtype=np.int64)
-        self.budget_bytes = budget_bytes
-
-    def __call__(self, null, ptr):
-        """Add the counts of one ``(n_conf, size)`` chunk, segments ``ptr`` (host)."""
-        count_ge(null, self.thr, ptr, self._counts, self.budget_bytes)
-
-    def counts(self) -> np.ndarray:
-        """Total exceedance count of each threshold."""
-        return self._counts
 
 
 def count_ge(null, thr, ptr, counts, budget_bytes: int):

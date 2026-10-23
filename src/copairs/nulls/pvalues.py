@@ -12,6 +12,8 @@ computations, so a null rank list identical to the observed one is counted as
 a tie, as in the paper's ``>=`` definition.
 """
 
+from functools import partial
+
 import numpy as np
 
 from copairs.nulls.common import (
@@ -122,26 +124,21 @@ def ap_pvalues(
     )
     n_work = len(batches) * len(range(0, null_size, chunk))
     if backend == "cuda":
-        count = _import_cuda_backend().ScoreCounter(thr, budget_bytes)
+        cuda = _import_cuda_backend()
+        count_ge = partial(cuda.count_ge, budget_bytes=budget_bytes)
     else:
-        kernel = (
+        count_ge = (
             _import_numba_backend().count_ge if backend == "numba" else _count_ge_host
         )
-        counts = np.zeros(len(thr), dtype=np.int64)
-
-        def count(null, seg):
-            kernel(null, thr, seg, counts)
-
+    counts = np.zeros(len(thr), dtype=np.int64)
     for b, start, size in progress(work, n_work, progress_bar, "AP null"):
         sl = slice(b, min(b + batch, len(confs)))
         part = tuple(a[sl] for a in plan)
         null = _ap_nulls(
             part, size, start, backend, np.float64, budget_bytes, max_workers
         )
-        count(null, ptr[sl.start : sl.stop + 1])
+        count_ge(null, thr, ptr[sl.start : sl.stop + 1], counts)
         del null  # free this chunk before sampling the next
-    if backend == "cuda":
-        counts = count.counts()
     pvals = np.empty(len(thr), dtype=np.float64)
     pvals[order] = (counts + 1) / (null_size + 1)
     return pvals
@@ -215,18 +212,12 @@ def map_pvalues(
     if len(thr) == 0:
         return np.zeros(0, dtype=np.float64)
     if backend == "cuda":
-        group = _import_cuda_backend().GroupCounter(
-            ptr, conf_ix, conf_cnt, n_group, thr
-        )
+        group_ge = _import_cuda_backend().group_ge
     else:
-        kernel = (
+        group_ge = (
             _import_numba_backend().group_ge if backend == "numba" else _group_ge_host
         )
-        counts = np.zeros(len(thr), dtype=np.int64)
-
-        def group(null):
-            kernel(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
-
+    counts = np.zeros(len(thr), dtype=np.int64)
     # The chunk and the counts' workspace rows share the budget.
     chunk = chunk_size(null_size, len(confs) + _GROUP_WORK_ROWS, budget_bytes)
     n_work = len(range(0, null_size, chunk))
@@ -236,8 +227,6 @@ def map_pvalues(
         null = _ap_nulls(
             plan, size, start, backend, np.float64, budget_bytes, max_workers
         )
-        group(null)
+        group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
         del null  # free this chunk before sampling the next
-    if backend == "cuda":
-        counts = group.counts()
     return (counts + 1) / (null_size + 1)
