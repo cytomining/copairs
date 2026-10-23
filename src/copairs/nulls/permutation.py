@@ -895,8 +895,7 @@ def permutation_null(
     :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP,
     and the reference pool, reusable by groups ranking the same references.
     ``out`` receives the draws' mAPs if given. ``backend`` is ``"auto"``
-    (default), ``"numba"`` or ``"numpy"``; all give identical draws and
-    mAPs, so ``"auto"`` picks Numba whenever it imports
+    (default), ``"numba"`` or ``"numpy"``, with identical draws and mAPs
     (:func:`~copairs.nulls.resolve_backend`). Under Numba, ``parallel``
     runs the draws on Numba's threads, else on the calling thread.
     """

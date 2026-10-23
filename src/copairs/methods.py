@@ -5,6 +5,12 @@ BACKENDS = ("auto", "numba", "numpy")
 NULLS = ("permutation", "joint", "copied")
 
 
+def check_backend(backend: str) -> None:
+    """Raise ValueError unless ``backend`` names a known backend."""
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+
+
 def check_method(method: str, backend: str = "auto") -> None:
     """Raise ValueError unless ``method`` and ``backend`` name known choices.
 
@@ -13,8 +19,7 @@ def check_method(method: str, backend: str = "auto") -> None:
     """
     if method not in METHODS:
         raise ValueError(f"unknown method {method!r}; expected one of {METHODS}")
-    if backend not in BACKENDS:
-        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+    check_backend(backend)
 
 
 def check_null(method: str, null: str | None) -> str:

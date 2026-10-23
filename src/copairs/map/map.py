@@ -94,8 +94,8 @@ def get_map_pvalue(
         each null's draws (the copied null's AP samples, the joint null's
         samples, the permutation null's relabellings and their mAPs), and
         ``"numpy"`` computes the same draws vectorized. The two give
-        bitwise-identical draws and p-values (tested), so ``"auto"`` picks
-        ``"numba"`` whenever it is installed and imports. Ignored by
+        bitwise-identical draws and p-values, so ``"auto"`` picks Numba
+        when it imports (:func:`copairs.nulls.resolve_backend`). Ignored by
         ``method="legacy"``.
     pos_pairs : np.ndarray, optional
         The `(n_pairs, 2)` positive pairs used to compute the AP scores,

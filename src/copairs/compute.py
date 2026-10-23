@@ -583,8 +583,8 @@ def get_null_dists(
         configuration is now seeded by its values rather than its position.
     backend : str
         Backend of the fast method: ``"auto"`` (default), ``"numba"`` or
-        ``"numpy"``. All return identical values, so ``"auto"`` picks
-        ``"numba"`` whenever it is installed.
+        ``"numpy"``, with identical values
+        (:func:`copairs.nulls.resolve_backend`).
 
     Returns
     -------

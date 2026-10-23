@@ -483,8 +483,7 @@ def joint_nulls(
 
     ``rows`` is a ``slice`` of the plan's signatures (default all); the result
     has one row per signature it selects, in its order. ``backend`` is
-    ``"auto"`` (default), ``"numba"`` or ``"numpy"``; all return identical
-    samples, so ``"auto"`` picks Numba whenever it imports
+    ``"auto"`` (default), ``"numba"`` or ``"numpy"``, with identical samples
     (:func:`~copairs.nulls.resolve_backend`).
     """
     sigs = np.arange(len(plan[0]) - 1)[rows or slice(None)]

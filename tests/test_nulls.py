@@ -164,6 +164,26 @@ def test_available_backends():
     assert nulls.resolve_backend("auto") == BACKENDS[0]
 
 
+def test_auto_looks_for_numba_once(monkeypatch):
+    """Backend "auto" finds the backends once per process, not per call.
+
+    Looking for an uninstalled Numba (``find_spec``) costs about 80 us, and
+    the nulls resolve their backend per group or chunk.
+    """
+    looked = []
+    find_spec = importlib.util.find_spec
+
+    def recorded(name, *args):
+        looked.append(name)
+        return find_spec(name, *args)
+
+    monkeypatch.setattr(importlib.util, "find_spec", recorded)
+    for _ in range(3):
+        assert nulls.resolve_backend("auto") == BACKENDS[0]
+        assert nulls.available_backends() == BACKENDS
+    assert looked == []
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_backends_bitwise_identical(backend):
     """Every backend returns the scalar reference's float64 values bit for bit.

@@ -9,13 +9,7 @@ import warnings
 import importlib.util
 from functools import cache
 
-from copairs.methods import BACKENDS
-
-
-def _check_backend(backend: str) -> None:
-    """Raise ValueError unless ``backend`` names a known backend."""
-    if backend not in BACKENDS:
-        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+from copairs.methods import check_backend
 
 
 def available_backends() -> list[str]:
@@ -24,9 +18,15 @@ def available_backends() -> list[str]:
     Numba is listed when the Numba backend imports. An installed Numba that
     fails to import is left out, with a warning naming the error, once.
     """
+    return list(_available())
+
+
+@cache
+def _available() -> tuple[str, ...]:
+    """:func:`available_backends`, found once per process."""
     if importlib.util.find_spec("numba") is None or not _numba_imports():
-        return ["numpy"]
-    return ["numba", "numpy"]
+        return ("numpy",)
+    return ("numba", "numpy")
 
 
 @cache
@@ -39,7 +39,7 @@ def _numba_imports() -> bool:
             f"Numba is installed but the Numba backend failed to import ({exc!r}); "
             "backend='auto' uses NumPy, which gives identical results.",
             RuntimeWarning,
-            stacklevel=3,
+            stacklevel=4,
         )
         return False
     return True
@@ -50,12 +50,15 @@ def resolve_backend(backend: str) -> str:
 
     ``"auto"`` picks ``"numba"`` when the Numba backend imports and
     ``"numpy"`` otherwise, including when an installed Numba fails to import.
-    That choice cannot change results: both backends return bitwise-identical
-    null samples and counts (tested). ``"numba"`` raises if it cannot import.
+    That choice cannot change results: for every null (AP, copied, joint and
+    permutation) both backends return bitwise-identical samples, draws and
+    counts (tested). It is made once per process. A Numba that imports but
+    cannot compile a kernel raises from the first call that needs it, under
+    ``"auto"`` too. ``"numba"`` raises if it cannot import.
     """
-    _check_backend(backend)
+    check_backend(backend)
     if backend == "auto":
-        return available_backends()[0]
+        return _available()[0]
     if backend == "numba":
         _import_numba_backend()
     return backend

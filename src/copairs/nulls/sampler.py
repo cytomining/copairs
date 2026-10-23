@@ -350,8 +350,8 @@ def ap_nulls(
     start : int
         Index of the first sample, so a null can be generated in chunks.
     backend : str
-        ``"auto"``, ``"numba"`` or ``"numpy"``. All return identical values;
-        ``"auto"`` picks ``"numba"`` when it is installed.
+        ``"auto"``, ``"numba"`` or ``"numpy"``, with identical values
+        (:func:`~copairs.nulls.resolve_backend`).
     dtype : np.float32 or np.float64
         Output precision. Samples are computed in float64 and rounded once.
 

@@ -62,8 +62,10 @@ copied null's AP samples, the joint null's samples, and the permutation
 null's relabellings and their mAPs. For each, the Numba backend compiles the
 scalar functions that define a draw and the NumPy backend computes the same
 draws vectorized. The two backends return bitwise-identical nulls and
-p-values (tested), so `backend="auto"` (default) uses Numba whenever it is
-installed; if Numba fails to import, `"auto"` warns once and uses NumPy. The
+p-values (tested), so `backend="auto"` (default) uses Numba whenever it
+imports; if an installed Numba fails to import, `"auto"` warns once and uses
+NumPy. A Numba that imports but cannot compile a kernel raises instead; the
+tests pass on Numba 0.60 (the extra's minimum) and 0.68. The
 first call of each null under Numba compiles its kernels (a few seconds per
 null) and caches the compiled code next to copairs' sources, where later
 processes load it in under a second.

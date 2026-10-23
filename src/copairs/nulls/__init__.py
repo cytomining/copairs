@@ -10,7 +10,8 @@ label-permutation mAP nulls.
 :mod:`copairs.nulls.pvalues` streams AP and mAP p-values against them in
 bounded memory. Every null has two backends: ``"numba"`` (optional, ``pip
 install 'copairs[numba]'``; kernels in :mod:`copairs.nulls._numba`) and
-``"numpy"``, bitwise identical; ``"auto"`` picks Numba when it is installed.
+``"numpy"``, bitwise identical; ``"auto"`` picks Numba when it imports
+(:func:`~copairs.nulls.backend.resolve_backend`).
 """
 
 from copairs.nulls import joint, permutation
