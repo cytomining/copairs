@@ -30,6 +30,7 @@ from copairs.nulls.common import (
     stream_key,
     group_edges,
     resolve_seed,
+    make_head_sort,
     tie_thresholds,
     check_null_size,
     check_pair_counts,
@@ -79,19 +80,7 @@ def _make_kernels(philox, uniform, jit=lambda f: f):
                 hi = mid
         return lo
 
-    @jit
-    def sort_entries(ent, size):
-        """Sort ``ent[:size]`` in place."""
-        if size > _INSERTION:
-            ent[:size].sort()
-            return
-        for i in range(1, size):
-            v = ent[i]
-            z = i - 1
-            while z >= 0 and ent[z] > v:
-                ent[z + 1] = ent[z]
-                z -= 1
-            ent[z + 1] = v
+    sort_entries = make_head_sort(_INSERTION, jit)
 
     @jit
     def group_map(

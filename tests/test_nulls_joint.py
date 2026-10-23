@@ -229,3 +229,13 @@ def test_stream_keys_are_pinned():
     assert common.stream_key(7, sig) == (1817989492, 2765743222)
     assert permutation.group_key(3, [12, 4, 7]) == common.stream_key(3, (4, 7, 12))
     assert common.stream_key(3, (4, 7, 12)) == (1999174365, 1542470604)
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 31, 32, 33, 100])
+def test_head_sort_sorts_the_head_only(n):
+    """The kernels' head sort sorts vals[:n] by insertion up to its threshold, beyond it too."""
+    vals = np.random.default_rng(n).random(n + 4)
+    head, tail = np.sort(vals[:n]), vals[n:].copy()
+    common.make_head_sort(32)(vals, n)
+    np.testing.assert_array_equal(vals[:n], head)
+    np.testing.assert_array_equal(vals[n:], tail)

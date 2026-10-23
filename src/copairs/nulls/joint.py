@@ -34,6 +34,7 @@ from copairs.nulls.common import (
     stream_key,
     group_edges,
     resolve_seed,
+    make_head_sort,
     tie_thresholds,
     check_null_size,
 )
@@ -57,6 +58,8 @@ _HALF_LOG_2PI = 0.5 * math.log(2 * math.pi)
 _LOG_SERIES = np.array([1.0 / (2 * k + 1) for k in range(12)])
 _SQRT_HALF = math.sqrt(0.5)
 _LN2 = math.log(2.0)
+# A member sorts up to this many positives by insertion, more by quicksort.
+_INSERTION = 32
 # Samples per vectorized call.
 _CHUNK = 2**16
 
@@ -164,19 +167,7 @@ def _make_sampler(philox, uniform, jit=lambda f: f):
             x = int(kf)
         return (n - x if flip else x), block
 
-    @jit
-    def sort_head(vals, n):
-        """Sort ``vals[:n]`` in place (insertion sort for the usual few positives)."""
-        if n > 32:
-            vals[:n].sort()
-            return
-        for i in range(1, n):
-            v = vals[i]
-            k = i - 1
-            while k >= 0 and vals[k] > v:
-                vals[k + 1] = vals[k]
-                k -= 1
-            vals[k + 1] = v
+    sort_head = make_head_sort(_INSERTION, jit)
 
     @jit
     def member_ap(vals, num_pos, num_neg, c0, c1, stream, k0, k1):

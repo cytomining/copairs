@@ -145,3 +145,28 @@ def group_edges(groups, profile, num_pos, pos_pairs):
     ptr = np.searchsorted(ga[inside][order], np.arange(len(groups) + 1))
     edges = local[pos_pairs[inside][order]]
     return [edges[ptr[g] : ptr[g + 1]] for g in range(len(groups))], leaves
+
+
+def make_head_sort(threshold: int, jit=lambda f: f):
+    """Build ``sort_head(vals, n)``, which sorts ``vals[:n]`` in place.
+
+    Up to ``threshold`` entries (the usual few) it sorts by insertion, more
+    with NumPy's sort; both give the same sorted values. ``jit`` compiles it
+    (e.g. ``numba.njit``) or leaves it Python.
+    """
+
+    @jit
+    def sort_head(vals, n):
+        """Sort ``vals[:n]`` in place."""
+        if n > threshold:
+            vals[:n].sort()
+            return
+        for i in range(1, n):
+            v = vals[i]
+            k = i - 1
+            while k >= 0 and vals[k] > v:
+                vals[k + 1] = vals[k]
+                k -= 1
+            vals[k + 1] = v
+
+    return sort_head
