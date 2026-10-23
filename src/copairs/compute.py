@@ -12,8 +12,8 @@ from scipy.spatial.distance import _METRICS_NAMES as SCIPY_METRICS_NAMES
 from scipy.spatial.distance import cdist
 
 from copairs import nulls
+from copairs.methods import check_method
 from copairs.nulls.common import resolve_seed, check_null_size
-from copairs.nulls.backend import check_method
 
 
 def parallel_map(

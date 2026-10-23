@@ -39,7 +39,9 @@ The AP and mAP p-value functions (`compute.p_values`,
   disk cache. Sample `j` of a `(num_pos, total)` null depends only on
   `(seed, num_pos, total, j)`, with `seed` in `[0, 2**64)`.
 - `"legacy"` is copairs 0.5.5's null, seeded per configuration and cached
-  under `cache_dir` (default `~/.copairs`).
+  under `cache_dir` (default `~/.copairs`). In the mAP functions it is the
+  `"copied"` null (see [mAP null distributions](#map-null-distributions)),
+  their default under it; other nulls raise.
 - The fast method's null samples come from a different random stream, so
   p-values agree with `"legacy"` within Monte Carlo error. Its mAP p-values
   count null values `>=` the observed mAP, as in the paper; legacy counts `>`,
@@ -90,11 +92,11 @@ We provide examples demonstrating how to use copairs for:
 ## mAP null distributions
 
 `mean_average_precision`, `mean_average_precision_hierarchical` and
-`get_map_pvalue` take `null=`, the null of a group's mAP. All three count null
-mAPs `>=` the observed mAP, so an mAP equal to an atom of the null (e.g.
-perfect retrieval) counts the atom.
+`get_map_pvalue` take `null=`, the null of a group's mAP. Under
+`method="fast"` (default) all three count null mAPs `>=` the observed mAP, so
+an mAP equal to an atom of the null (e.g. perfect retrieval) counts the atom.
 
-- `"permutation"` (default) tests the paper's null hypothesis directly: within
+- `"permutation"` (the default under `method="fast"`) tests the paper's null hypothesis directly: within
   each block of members ranked against the same references (e.g. one plate's
   replicates and controls), any of the block's profiles could have carried the
   group's label. Draws relabel profiles and recompute the mAP from the
@@ -154,9 +156,11 @@ perfect retrieval) counts the atom.
   sampled per `(n_pos_pairs, n_total_pairs)` configuration and the group's
   null averages them, so members with equal pair counts share one draw and
   the null does not narrow with replicates. Use it for results comparable to
-  0.5.5. They agree within Monte Carlo error, not bitwise: each configuration
-  is now seeded by its pair counts, and ties count `>=` where 0.5.5 counted
-  `>`.
+  0.5.5: `method="legacy"`, whose only null it is, samples and counts as
+  0.5.5 did (null mAPs `>` the observed mAP); `null="copied"` under the fast
+  method samples it exactly and counts `>=`. Both agree with 0.5.5 within
+  Monte Carlo error, not bitwise: each configuration is now seeded by its
+  pair counts.
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):

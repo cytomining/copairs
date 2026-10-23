@@ -141,11 +141,14 @@ def test_nulls_share_the_pair_count_check():
 
 
 def test_unknown_null():
-    """Unknown nulls, and pos_pairs outside the joint null, raise."""
+    """Unknown nulls, nulls legacy does not implement, and stray pos_pairs raise."""
     frame = ap_frame([("a", 1.0, 1, 100)] * 2)
     kwargs = dict(null_size=10, threshold=0.05, seed=0, progress_bar=False)
     with pytest.raises(ValueError, match="unknown null"):
         mean_average_precision(frame, ["g"], null="exact", **kwargs)
+    for null in ("permutation", "joint"):
+        with pytest.raises(ValueError, match="supports only null='copied'"):
+            mean_average_precision(frame, ["g"], method="legacy", null=null, **kwargs)
     with pytest.raises(ValueError, match="joint null only"):
         mean_average_precision(
             frame, ["g"], null="copied", pos_pairs=np.array([[0, 1]]), **kwargs

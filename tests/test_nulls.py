@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 from scipy.stats import chisquare
 
-from copairs import nulls
-from copairs.nulls import common, philox, backend, pvalues, sampler
+from copairs import nulls, methods
+from copairs.nulls import common, philox, pvalues, sampler
 from tests.helpers import brute_ap_pvalues, brute_group_nulls, brute_map_pvalues
 from copairs.map.normalization import expected_ap
 
@@ -386,7 +386,7 @@ def test_backend_validation():
         nulls.resolve_backend("tpu")
     with pytest.raises(ValueError, match="unknown backend"):
         nulls.ap_nulls(CONFS, 4, seed=0, backend="cuda")
-    backend.check_method("legacy", "numba")  # valid names, whether installed or not
+    methods.check_method("legacy", "numba")  # valid names, whether installed or not
 
 
 def test_ap_pvalues_validates_conf_ix():

@@ -9,25 +9,13 @@ import warnings
 import importlib.util
 from functools import cache
 
-METHODS = ("fast", "legacy")
-BACKENDS = ("auto", "numba", "numpy")
+from copairs.methods import BACKENDS
 
 
 def _check_backend(backend: str) -> None:
     """Raise ValueError unless ``backend`` names a known backend."""
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
-
-
-def check_method(method: str, backend: str = "auto") -> None:
-    """Raise ValueError unless ``method`` and ``backend`` name known choices.
-
-    The backend name is checked under ``method="legacy"`` too, which ignores
-    it, so a misspelled backend fails whichever method is used.
-    """
-    if method not in METHODS:
-        raise ValueError(f"unknown method {method!r}; expected one of {METHODS}")
-    _check_backend(backend)
 
 
 def available_backends() -> list[str]:
