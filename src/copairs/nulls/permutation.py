@@ -788,7 +788,7 @@ def check_pos_diffby(layouts, codes):
     n_col = codes.shape[1]
     ref_uniq = {}
 
-    def refs_stats(refs):  # per column: sorted values, any repeated
+    def refs_stats(refs):  # per column: the references' sorted distinct values
         key = id(refs)
         if key not in ref_uniq:
             ref_uniq[key] = (refs, [np.unique(codes[refs, c]) for c in range(n_col)])
