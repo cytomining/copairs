@@ -2,7 +2,7 @@
 
 import logging
 from typing import List, Callable
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 
 import numpy as np
 import pandas as pd
@@ -139,6 +139,45 @@ class RankPairs:
     neg: np.ndarray
     similarity: Callable[[np.ndarray], np.ndarray]
     pos_diffby: np.ndarray | None = None
+
+
+@dataclass(frozen=True, eq=False, kw_only=True)
+class LabelPairs(RankPairs):
+    """The pairs behind a multilabel AP table, whose rows are (profile, label).
+
+    Attached to the frame :func:`copairs.map.multilabel.average_precision`
+    returns (and returned with it by ``return_pairs=True``). ``pos`` pairs
+    rows of that frame, as in :class:`RankPairs`: the two rows of a positive
+    pair hold the label the pair shares, and a pair sharing several labels
+    appears once per label. ``neg`` and the rows of ``pos_diffby`` index
+    profiles (rows of the metadata); ``profile`` and ``row_key`` map AP rows
+    to profiles and labels. The permutation null also needs the pairs that
+    share exactly one label and meet the negative rules on the other
+    columns (negatives but for that label); they are found when it asks,
+    not kept with the frame.
+
+    Attributes
+    ----------
+    profile : np.ndarray
+        Profile of each AP row, by the AP frame's index.
+    row_key : np.ndarray
+        Label (index into ``keys``) of each AP row, by the AP frame's index.
+    label_col : str
+        The multilabel column.
+    keys : np.ndarray
+        The labels with positive pairs.
+    """
+
+    profile: np.ndarray
+    row_key: np.ndarray
+    label_col: str
+    keys: np.ndarray
+    # () -> (pairs, key): the pairs sharing exactly one label, keys[key],
+    # that meet the negative rules on the other columns; None when the
+    # label column is not one of the negative pairs' diffby columns.
+    _lone: Callable[[], tuple[np.ndarray, np.ndarray]] | None = field(
+        default=None, repr=False
+    )
 
 
 def build_rank_lists(
@@ -375,17 +414,27 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
-    diffby = [pos_diffby] if isinstance(pos_diffby, str) else list(pos_diffby)
     pairs = RankPairs(
         pos_pairs,
         neg_pairs,
         _FeatureSimilarity(feats, distance, batch_size),
-        np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
-        if diffby
-        else None,
+        _diffby_codes(meta, pos_diffby),
     )
     attach_pairs(meta, pairs)
     return (meta, pairs) if return_pairs else meta
+
+
+def _columns(cols) -> list:
+    """``cols`` (a column name or a list of them) as a list."""
+    return [cols] if isinstance(cols, str) else list(cols)
+
+
+def _diffby_codes(meta: pd.DataFrame, pos_diffby) -> np.ndarray | None:
+    """``(profiles, columns)`` integer codes of ``meta``'s ``pos_diffby`` columns, or None."""
+    diffby = _columns(pos_diffby)
+    if not diffby:
+        return None
+    return np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
 
 
 def p_values(

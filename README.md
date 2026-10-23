@@ -112,12 +112,16 @@ an mAP equal to an atom of the null (e.g. perfect retrieval) counts the atom.
   replicates and controls), any of the block's profiles could have carried the
   group's label. Draws relabel profiles and recompute the mAP from the
   observed similarities, so whatever dependence the data has between rank
-  lists stays in the null. Each group's positives must be its other members;
-  for groups of one profile whose positives are in other groups (e.g. one
-  profile per guide, positives by gene), use `"joint"`, which there is that
-  profile's AP null. It needs the pairs the APs came from, which
-  `average_precision` attaches to the frame it returns, so the usual calls
-  need nothing extra:
+  lists stays in the null. For multilabel APs
+  (`map.multilabel.average_precision`, grouped by the label column), a draw
+  moves the group's label to as many profiles of each component of the
+  negative-pair graph as hold it there; those profiles keep their other
+  labels. Each group's positives must be its other members; for groups of
+  one profile whose positives are in other groups (e.g. one profile per
+  guide, positives by gene), use `"joint"`, which there is that profile's AP
+  null. It needs the pairs the APs came from, which
+  `average_precision` and `multilabel.average_precision` attach to the frame
+  they return, so the usual calls need nothing extra:
 
   ```python
   ap = copairs.map.average_precision(meta, feats, ...)
@@ -137,9 +141,12 @@ an mAP equal to an atom of the null (e.g. perfect retrieval) counts the atom.
   or choose another null. The attached pairs keep the features and
   every positive and negative pair alive with the frame (8 bytes per pair,
   e.g. 800 MB for 10^8 negative pairs), whichever null is used;
-  `ap.attrs.pop("copairs_pairs")` drops them. Frames from
-  `map.multilabel.average_precision` carry no pairs: use `"joint"` or
-  `"copied"` for them. The null recomputes similarities from the features,
+  `ap.attrs.pop("copairs_pairs")` drops them. A multilabel group needs every
+  AP row of its label, since any profile holding the label could hold it
+  under the null, and a label moves among every profile of the
+  negative-pair components holding it (e.g. its plates under `neg_sameby`),
+  at most 16,384 profiles: a label held on more raises, so use `"joint"`
+  or `"copied"` for it. The null recomputes similarities from the features,
   so distances that estimate their scale from each batch of pairs
   (`seuclidean`, `mahalanobis`) raise under it; use `"joint"` or `"copied"`.
   Relabelled profiles keep the group's positive pairs, so with `pos_diffby`
@@ -153,6 +160,14 @@ an mAP equal to an atom of the null (e.g. perfect retrieval) counts the atom.
   references lack (the same well, clone or batch) make it too narrow, so match
   references to that structure (`neg_sameby`) or test whole units. It is the
   slowest of the three nulls, and its cost grows with group size.
+  `stop_after=10` stops a group's draws at the 10th that reaches its mAP and
+  reports 10 / draws (Besag and Clifford's sequential p-value). It spends few
+  draws on groups with large p-values, and groups that never reach 10 hits
+  run all `null_size` draws and keep their p-value; draw `j` is the same
+  either way. It stays calibrated, but p-values near a threshold carry about
+  `1 / sqrt(stop_after)` relative error however large `null_size` is, so
+  borderline calls depend on the seed: use it to screen, or raise it for
+  final calls. Other nulls reject it.
 - `"joint"` samples the members' APs together: a positive pair inside the
   group is one random number in both members' rank lists, so the null
   narrows as replicates are added. Other similarities are treated as
@@ -160,9 +175,10 @@ an mAP equal to an atom of the null (e.g. perfect retrieval) counts the atom.
   some profiles are close to many others), so on real data it can give too
   small p-values for groups of many replicates. It takes each group's
   positive pairs from the attached pairs (or `pairs=`, `pos_pairs=`), so
-  positives in other groups stay private to each member; frames without
-  pairs are treated as replicate groups when every member has
-  `len(group) - 1` positives.
+  positives in other groups stay private to each member; on multilabel
+  frames a pair joins its two profiles' AP rows for the label they share.
+  Frames without pairs are treated as replicate groups when every member
+  has `len(group) - 1` positives.
 - `"copied"` is the null model of copairs <= 0.5.5: each member's AP null is
   sampled per `(n_pos_pairs, n_total_pairs)` configuration and the group's
   null averages them, so members with equal pair counts share one draw and

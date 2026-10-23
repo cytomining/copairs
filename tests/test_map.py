@@ -12,12 +12,19 @@ import pytest
 from sklearn.metrics import average_precision_score
 
 import copairs.map.map as map_module
+import copairs.map.multilabel as multilabel_module
 from copairs import compute
 from copairs.map import get_map_pvalue, average_precision, mean_average_precision
-from tests.helpers import ap_frame, query_meta, simulate_random_dframe
+from tests.helpers import (
+    ML_SPEC,
+    ap_frame,
+    label_meta,
+    query_meta,
+    simulate_random_dframe,
+)
 from copairs.matching import UnpairedException, find_pairs
 from copairs.map.multilabel import average_precision as multilabel_average_precision
-from copairs.map.average_precision import attached_pairs
+from copairs.map.average_precision import LabelPairs, attached_pairs
 
 SEED = 0
 
@@ -562,6 +569,202 @@ def test_rank_pairs_compare_by_identity():
     assert pairs == pairs
     assert pairs != again
     assert len({pairs, again, pairs}) == 2
+
+
+def test_multilabel_frames_carry_label_pairs():
+    """Multilabel AP frames carry LabelPairs: per-label pairs and each row's profile."""
+    meta = label_meta()
+    meta["cpd"] = np.arange(len(meta))
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
+    ap, pairs = multilabel_average_precision(
+        meta,
+        feats,
+        **ML_SPEC,
+        multilabel_col="target",
+        progress_bar=False,
+        return_pairs=True,
+    )
+    assert isinstance(pairs, LabelPairs) and pairs.label_col == "target"
+    assert attached_pairs(ap) is pairs
+    assert attached_pairs(ap[ap["target"] == "A"].copy()) is pairs
+    assert attached_pairs(pickle.loads(pickle.dumps(ap))) is None
+    plain = multilabel_average_precision(
+        meta, feats, **ML_SPEC, multilabel_col="target", progress_bar=False
+    )
+    pd.testing.assert_frame_equal(plain, ap)
+    assert pairs == pairs and pairs != attached_pairs(plain)  # identity
+    # Row i of the frame is profile pairs.profile[i] for label
+    # pairs.keys[pairs.row_key[i]], whatever its position.
+    np.testing.assert_array_equal(pairs.profile[ap.index], ap["cpd"])
+    keys = pairs.keys.tolist()
+    assert keys == ["A", "B", "C", "D"]  # the labels with positive pairs
+    assert [keys[k] for k in pairs.row_key[ap.index]] == ap["target"].tolist()
+    labels = [set(t) for t in meta["target"]]
+    # Positive pairs join two AP rows of one label, held by both profiles.
+    for a, b in pairs.pos:
+        (k, m), (x, y) = ap.loc[[a, b], "target"], ap.loc[[a, b], "cpd"]
+        assert k == m and k in labels[x] & labels[y]
+    for a, b in pairs.neg:
+        assert not labels[a] & labels[b]
+    np.testing.assert_array_equal(
+        np.bincount(pairs.pos.ravel(), minlength=len(ap))[ap.index], ap["n_pos_pairs"]
+    )
+    # Lone pairs share exactly one label, which has positive pairs. Under
+    # these rules they come from the positive pairs, as a search finds them.
+    assert pairs._lone.func is multilabel_module._lone_of_positives
+    found, key = pairs._lone()
+    assert found.dtype == np.uint32 and key.dtype == np.int32
+    lone = {(int(a), int(b), keys[k]) for (a, b), k in zip(found, key)}
+    expected = {
+        (a, b, next(iter(labels[a] & labels[b])))
+        for a, b in itertools.combinations(range(len(meta)), 2)
+        if len(labels[a] & labels[b]) == 1 and labels[a] & labels[b] <= set(keys)
+    }
+    assert lone == expected and len(lone) > 0
+    searched = multilabel_module._lone_pairs(meta, "target", [], [], pairs.keys)
+    assert {(int(a), int(b), keys[k]) for (a, b), k in zip(*searched)} == lone
+    similarity = compute.get_similarity_fn("cosine", progress_bar=False)
+    np.testing.assert_array_equal(
+        pairs.similarity(pairs.neg), similarity(feats, pairs.neg, 20000)
+    )
+
+
+@pytest.mark.parametrize("neg_sameby", [[], ["plate"]])
+def test_lone_pairs_wait_for_the_null(neg_sameby, monkeypatch):
+    """Multilabel APs search pairs twice; lone pairs come when the null asks.
+
+    With neg_sameby=["plate"] the negative rules without the label are not
+    the positive rules, so the lone pairs need a third search, run then;
+    otherwise they come from the positive pairs, with no search.
+    """
+    meta = label_meta().assign(plate=[0, 1] * 4 + [0])
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
+    calls, find = [], multilabel_module.find_pairs_multilabel
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs)
+        return find(*args, **kwargs)
+
+    monkeypatch.setattr(multilabel_module, "find_pairs_multilabel", counted)
+    _, pairs = multilabel_average_precision(
+        meta, feats, ["target"], [], neg_sameby, ["target"], "target",
+        progress_bar=False, return_pairs=True,
+    )  # fmt: skip
+    assert len(calls) == 2  # positives and negatives
+    found, key = pairs._lone()
+    assert len(calls) == (3 if neg_sameby else 2)
+    labels, keys = [set(t) for t in meta["target"]], pairs.keys.tolist()
+    plate = meta["plate"].to_numpy()
+    expected = {
+        (a, b, next(iter(labels[a] & labels[b])))
+        for a, b in itertools.combinations(range(len(meta)), 2)
+        if len(labels[a] & labels[b]) == 1
+        and labels[a] & labels[b] <= set(keys)
+        and (not neg_sameby or plate[a] == plate[b])
+    }
+    assert {(int(a), int(b), keys[k]) for (a, b), k in zip(found, key)} == expected
+    assert len(expected) > 0
+
+
+def test_lone_pairs_skip_profiles_without_positive_labels(monkeypatch):
+    """The lone-pair query sees only profiles holding a label with positive pairs.
+
+    The others share no such label, so they form no lone pairs, but many of
+    them (a control compound's replicates under a control-only label) would
+    fill memory with pairs to discard. Profiles kept keep all their labels:
+    profiles 2 and 4 share C and the dropped "ctl", so they are not lone.
+    """
+    targets = [["A"], ["A", "B"], ["B", "C", "ctl"], ["A", "C"], ["C", "ctl"]]
+    targets += [["B", "C"]] + [["ctl"]] * 6
+    meta = pd.DataFrame({"target": targets, "plate": [0, 1] * 6})
+    keys = np.array(["A", "B", "C"])  # "ctl" has no positive pairs
+    seen, find = [], multilabel_module.find_pairs_multilabel
+
+    def recorded(dframe, *args, **kwargs):
+        seen.append(len(dframe))
+        return find(dframe, *args, **kwargs)
+
+    monkeypatch.setattr(multilabel_module, "find_pairs_multilabel", recorded)
+    lone, key = multilabel_module._lone_pairs(meta, "target", ["plate"], [], keys)
+    assert seen == [6]  # the profiles holding A, B or C
+    labels = [set(t) for t in targets]
+    expected = {
+        (a, b, next(iter(labels[a] & labels[b])))
+        for a, b in itertools.combinations(range(len(meta)), 2)
+        if len(labels[a] & labels[b]) == 1
+        and labels[a] & labels[b] <= set(keys)
+        and meta["plate"][a] == meta["plate"][b]
+    }
+    assert {(int(a), int(b), keys[k]) for (a, b), k in zip(lone, key)} == expected
+    assert expected == {(1, 3, "A"), (1, 5, "B"), (3, 5, "C")}
+
+
+def test_joint_null_reads_label_pairs():
+    """The joint null joins multilabel AP rows by their LabelPairs' positive pairs.
+
+    Positives must differ in "plate", so most label groups are not cliques:
+    without the pairs they fall back to the copied null, and with them they
+    get the joint null of their exact edges, as explicit pos_pairs give it.
+    """
+    meta = label_meta().assign(plate=[0, 1] * 4 + [0], cpd=range(9))
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
+    spec = (["target"], ["plate"], [], ["target"])
+    ap, pairs = multilabel_average_precision(
+        meta, feats, *spec, "target", progress_bar=False, return_pairs=True
+    )
+    rows = list(zip(ap.index, ap["cpd"], ap["target"]))
+    explicit = np.array(
+        [
+            (r, s)
+            for (r, a, k), (s, b, m) in itertools.combinations(rows, 2)
+            if k == m and meta["plate"][a] != meta["plate"][b]
+        ]
+    )
+
+    def as_set(found):
+        return {tuple(sorted(e)) for e in np.asarray(found).tolist()}
+
+    assert as_set(pairs.pos) == as_set(explicit)
+    kwargs = dict(
+        null_size=2000, threshold=0.05, seed=SEED, progress_bar=False, null="joint"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        read = mean_average_precision(ap, ["target"], **kwargs)
+        # The pairs index the frame's rows, whatever its columns.
+        renamed = mean_average_precision(
+            ap.drop(columns="target").assign(g=ap["target"]), ["g"], **kwargs
+        )
+    given = mean_average_precision(ap, ["target"], pos_pairs=explicit, **kwargs)
+    assert read["p_value"].tolist() == given["p_value"].tolist()
+    assert renamed["p_value"].tolist() == read["p_value"].tolist()
+    with pytest.warns(UserWarning, match="Falling back"):
+        bare = mean_average_precision(
+            pickle.loads(pickle.dumps(ap)), ["target"], **kwargs
+        )
+    assert bare["p_value"].tolist() != read["p_value"].tolist()
+    # Pairs to a dropped row join its group to a profile outside it.
+    part = ap.drop(index=ap.index[(ap["target"] == "A") & (ap["cpd"] == 0)])
+    leaving = ~np.isin(pairs.pos, part.index)
+    assert leaving.any(axis=1).sum() == 3  # compound 0's A positives
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        read = mean_average_precision(part, ["target"], **kwargs)
+    given = mean_average_precision(part, ["target"], pos_pairs=explicit, **kwargs)
+    assert read["p_value"].tolist() == given["p_value"].tolist()
+    # Label groups that are cliques get what the pair counts imply.
+    clique = multilabel_average_precision(
+        meta, feats, **ML_SPEC, multilabel_col="target", progress_bar=False
+    )
+    inferred = mean_average_precision(
+        pickle.loads(pickle.dumps(clique)), ["target"], **kwargs
+    )
+    assert (
+        mean_average_precision(clique, ["target"], **kwargs)["p_value"].tolist()
+        == inferred["p_value"].tolist()
+    )
+    with pytest.raises(ValueError, match="positive pairs but"):
+        mean_average_precision(ap.set_axis(ap.index + 100), ["target"], **kwargs)
 
 
 @pytest.mark.parametrize("distance", ["cosine", "correlation", "cityblock"])
