@@ -638,7 +638,7 @@ def label_group(meta, feats, label, spec=ML_SPEC):
     """Observed mAP, layout, pool and pairs of ``label``'s group."""
     ap, pairs = multilabel_ap(meta, feats, spec, return_pairs=True)
     ap = ap[ap["target"] == label]
-    layouts, comp_profiles, (nbr_ptr, nbr) = permutation.label_layouts(
+    layouts, comp_profiles, (nbr_ptr, nbr) = permutation._label_layouts(
         [np.arange(len(ap))],
         ap.index.to_numpy(),
         ap["n_pos_pairs"].to_numpy().astype(np.int64),
@@ -655,7 +655,7 @@ def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0):
     """Observed mAP of ``label`` and the null's draws for it."""
     observed, layout, pool, _ = label_group(meta, feats, label, spec)
     out = np.empty(null_size)
-    count, identity, draws = permutation.label_permutation_null(
+    count, identity, draws = permutation._label_permutation_null(
         *layout, pool, null_size, seed, out=out
     )
     assert draws == null_size
@@ -713,7 +713,7 @@ def test_label_vectorized_matches_scalar_draws(
     assert pool.ranked == (tables == "ranked")
     assert len(comps) == (2 if design == "plates" else 1)
     layout = permutation._LabelLayout(members, edges, lone, block_of, pool)
-    k0, k1 = permutation.group_key(3, members, key)
+    k0, k1 = permutation._label_key(3, members, key)
     start = 2**32 - 50  # draws on both sides of the counter's word boundary
     pm, maps = scalar_label_draws(layout, start, 300, k0, k1)
     got_pm = permutation._draws_pool_np(layout, start, 300, k0, k1)
@@ -869,7 +869,9 @@ def test_labels_with_one_holder_set_draw_independently():
     assert not np.array_equal(a, b)
     members = [2, 0, 1]
     assert permutation.group_key(5, members) == stream_key(5, (0, 1, 2))
-    assert permutation.group_key(5, members, 0) != permutation.group_key(5, members, 1)
+    assert permutation._label_key(5, members, 0) != permutation._label_key(
+        5, members, 1
+    )
 
 
 def test_label_pools_are_shared_and_workers_do_not_matter(monkeypatch):
@@ -911,7 +913,7 @@ def test_label_pools_are_shared_and_workers_do_not_matter(monkeypatch):
 def label_pool_args(meta, feats):
     """``(comp_profiles, nbr_ptr, nbr, similarity)`` of PLATE_SPEC's label pools."""
     ap, pairs = multilabel_ap(meta, feats, PLATE_SPEC, return_pairs=True)
-    _, comp_profiles, (nbr_ptr, nbr) = permutation.label_layouts(
+    _, comp_profiles, (nbr_ptr, nbr) = permutation._label_layouts(
         [], ap.index.to_numpy(), np.zeros(0), np.zeros(0), pairs
     )
     return comp_profiles, nbr_ptr, nbr, pairs.similarity
@@ -942,7 +944,7 @@ def test_stop_after_follows_the_draw_sequence(stop_after, monkeypatch):
     count, _, _, draws = permutation.permutation_null(
         *layout, pairs.similarity, null_size, 0, out=out, stop_after=stop_after
     )
-    got = permutation.sequential_pvalue(count, draws, null_size, stop_after)
+    got = permutation._sequential_pvalue(count, draws, null_size, stop_after)
     assert got == sequential_expected(full, identity, null_size, stop_after)
     np.testing.assert_array_equal(out[:draws], full[:draws])
     if stop_after == 400:  # stops past the first round

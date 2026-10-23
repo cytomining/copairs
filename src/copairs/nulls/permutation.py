@@ -22,8 +22,8 @@ additions in a fixed order. :func:`_draws_np` and :func:`_group_maps_np`
 perform the same operations vectorized over draws and give identical mAPs.
 
 With ``stop_after``, a group's draws stop at its ``stop_after``-th draw that
-reaches its mAP (:func:`sequential_pvalue`); draw ``j`` stays the same, so
-a stopped run is a prefix of the full one.
+reaches its mAP (Besag and Clifford's sequential p-value); draw ``j``
+stays the same, so a stopped run is a prefix of the full one.
 
 A multilabel group (:func:`label_permutation_pvalues`) holds one label of a
 multilabel column, and its pools are whole components of the graph of
@@ -916,15 +916,18 @@ def check_pos_diffby(layouts, codes):
         )
 
 
-def group_key(seed: int, members, label=None) -> tuple[np.uint64, np.uint64]:
-    """Philox key of a group's draws: a pure function of ``(seed, members, label)``.
+def group_key(seed: int, members) -> tuple[np.uint64, np.uint64]:
+    """Philox key of a group's draws: a pure function of ``(seed, members)``."""
+    return stream_key(seed, tuple(sorted(int(m) for m in members)))
 
-    ``label``, the index of a multilabel group's label, gives groups of the
-    same profiles but different labels independent draws.
+
+def _label_key(seed: int, members, label) -> tuple[np.uint64, np.uint64]:
+    """Philox key of a multilabel group's draws: a pure function of ``(seed, members, label)``.
+
+    ``label``, the index of the group's label, gives groups of the same
+    profiles but different labels independent draws.
     """
     members = tuple(sorted(int(m) for m in members))
-    if label is None:
-        return stream_key(seed, members)
     text = f"{(int(seed), members)!r}/{int(label)}"
     digest = hashlib.blake2b(text.encode(), digest_size=8)
     word = int.from_bytes(digest.digest(), "little")
@@ -942,7 +945,7 @@ def permutation_null(
     :func:`~copairs.nulls.common.tie_thresholds`' tolerance), that mAP, the
     reference pool, reusable by groups ranking the same references, and the
     draws run, fewer than ``null_size`` when ``stop_after`` hits came first
-    (:func:`sequential_pvalue`). ``out`` receives the mAPs of the draws run
+    (:func:`_sequential_pvalue`). ``out`` receives the mAPs of the draws run
     (whole rounds, see :func:`_count_hits`) if given.
     """
     if pool is None or not pool.matches(blocks):
@@ -993,8 +996,8 @@ def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
     return count, null_size
 
 
-def sequential_pvalue(count, draws, null_size, stop_after=None) -> float:
-    """P-value of a run of :func:`permutation_null` or :func:`label_permutation_null`.
+def _sequential_pvalue(count, draws, null_size, stop_after=None) -> float:
+    """P-value of a run of :func:`permutation_null` or :func:`_label_permutation_null`.
 
     ``(count + 1) / (null_size + 1)`` after all draws, and ``count / draws``
     when the run stopped at its ``stop_after``-th hit (Besag and Clifford,
@@ -1143,8 +1146,8 @@ def permutation_pvalues(
         that rule raise (:func:`check_pos_diffby`). Not checked when omitted.
     stop_after : int, optional
         Stop a group's draws at its ``stop_after``-th draw that reaches its
-        mAP, with ``p = stop_after / draws`` (:func:`sequential_pvalue`).
-        Default: run all draws.
+        mAP, with ``p = stop_after / draws`` (Besag and Clifford's
+        sequential p-value). Default: run all draws.
 
     Returns
     -------
@@ -1171,7 +1174,7 @@ def permutation_pvalues(
         finally:
             pools.release(g)
         _check_identity(g, identity, observed)
-        return sequential_pvalue(count, draws, null_size, stop_after)
+        return _sequential_pvalue(count, draws, null_size, stop_after)
 
     pvals = np.empty(len(groups), dtype=np.float64)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -1507,7 +1510,7 @@ def _segments(key, n_keys):
     return order, np.searchsorted(key[order], np.arange(n_keys + 1))
 
 
-def label_layouts(groups, rows, num_pos, num_neg, pairs):
+def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     """Members, edges, lone pairs and components of each multilabel group.
 
     Parameters
@@ -1632,7 +1635,7 @@ def label_layouts(groups, rows, num_pos, num_neg, pairs):
     return layouts, comp_profiles, (nbr_ptr, nbr)
 
 
-def label_permutation_null(
+def _label_permutation_null(
     members, edges, lone, comps, block_of, key, pool, null_size, seed, out=None,
     stop_after=None,
 ):  # fmt: skip
@@ -1642,7 +1645,7 @@ def label_permutation_null(
     identity, draws)`` as :func:`permutation_null`.
     """
     layout = _LabelLayout(members, edges, lone, block_of, pool)
-    k0, k1 = group_key(seed, members, key)
+    k0, k1 = _label_key(seed, members, key)
     identity = float(_label_maps_np(layout, layout.member_code[None])[0])
     thr = float(tie_thresholds(identity))
 
@@ -1693,7 +1696,7 @@ def label_permutation_pvalues(
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
-    layouts, comp_profiles, (nbr_ptr, nbr) = label_layouts(
+    layouts, comp_profiles, (nbr_ptr, nbr) = _label_layouts(
         groups, np.asarray(rows, dtype=np.int64), num_pos, num_neg, pairs
     )
     if pairs.pos_diffby is not None and np.shape(pairs.pos_diffby)[1]:
@@ -1718,13 +1721,13 @@ def label_permutation_pvalues(
     def pvalue(g):
         try:
             pool = pools.acquire(g)
-            count, identity, draws = label_permutation_null(
+            count, identity, draws = _label_permutation_null(
                 *layouts[g], pool, null_size, seed, stop_after=stop_after
             )
         finally:
             pools.release(g)
         _check_identity(g, identity, observed)
-        return sequential_pvalue(count, draws, null_size, stop_after)
+        return _sequential_pvalue(count, draws, null_size, stop_after)
 
     pvals = np.empty(len(groups), dtype=np.float64)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
