@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.matching import UnpairedException, _unique_pairs, find_pairs_multilabel
+from copairs.matching import UnpairedException, _unique_pairs, _multilabel_matcher
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
@@ -111,25 +111,16 @@ def average_precision(
 
     logger.info("Indexing metadata...")
 
+    # One label index, under Numba, for both positive and negative pairs
+    find_pairs = _multilabel_matcher(meta, multilabel_col, fastap)
+
     logger.info("Finding positive pairs...")
-    pos_pairs, keys, pos_counts = find_pairs_multilabel(
-        meta,
-        sameby=pos_sameby,
-        diffby=pos_diffby,
-        multilabel_col=multilabel_col,
-        backend=backend,
-    )
+    pos_pairs, keys, pos_counts = find_pairs(pos_sameby, pos_diffby)
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 
     logger.info("Finding negative pairs...")
-    neg_pairs = find_pairs_multilabel(
-        meta,
-        sameby=neg_sameby,
-        diffby=neg_diffby,
-        multilabel_col=multilabel_col,
-        backend=backend,
-    )
+    neg_pairs = find_pairs(neg_sameby, neg_diffby)
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find any negative pairs.")
 

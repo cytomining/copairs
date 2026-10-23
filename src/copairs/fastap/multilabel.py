@@ -131,16 +131,27 @@ def _monolabel_mask(dframe, sameby, diffby, multilabel_col, pairs):
     return keep
 
 
-def shared_label_pairs(dframe, sameby, diffby, multilabel_col):
-    """``(pairs, keys, counts)`` of rows sharing a label, or None.
+def indexed_pairs(dframe, sameby, diffby, multilabel_col, found):
+    """:func:`copairs.matching.find_pairs_multilabel` through a label index.
 
-    ``sameby`` excludes ``multilabel_col``; ``diffby`` may hold it, so that
-    paired rows' label lists differ. Returns the same pairs as the SQL
-    implementation, grouped by label.
+    ``found`` is ``multilabel_pairs(dframe, multilabel_col)``, not None.
     """
-    found = multilabel_pairs(dframe, multilabel_col)
-    if found is None:
-        return None
+    rest_same = [c for c in sameby if c != multilabel_col]
+    if multilabel_col in sameby:
+        # Also in diffby, as in SQL, the label lists must differ as a whole.
+        return shared_label_pairs(dframe, rest_same, diffby, multilabel_col, found)
+    rest_diff = [c for c in diffby if c != multilabel_col]
+    return disjoint_label_pairs(dframe, rest_same, rest_diff, multilabel_col, found)
+
+
+def shared_label_pairs(dframe, sameby, diffby, multilabel_col, found):
+    """``(pairs, keys, counts)`` of rows sharing a label.
+
+    ``found`` is ``multilabel_pairs(dframe, multilabel_col)``. ``sameby``
+    excludes ``multilabel_col``; ``diffby`` may hold it, so that paired rows'
+    label lists differ. Returns the same pairs as the SQL implementation,
+    grouped by label.
+    """
     keys, pairs, label = found
     if len(sameby) or len(diffby):
         keep = _monolabel_mask(dframe, sameby, diffby, multilabel_col, pairs)
@@ -173,11 +184,11 @@ def _all_pairs_except(n, shared_ptr, shared_j, offsets):
     return out
 
 
-def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col):
-    """Sorted unique pairs ``(i < j)`` of rows sharing no label, or None."""
-    found = multilabel_pairs(dframe, multilabel_col)
-    if found is None:
-        return None
+def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col, found):
+    """Sorted unique pairs ``(i < j)`` of rows sharing no label.
+
+    ``found`` is ``multilabel_pairs(dframe, multilabel_col)``.
+    """
     _, pairs, _ = found
     shared = np.unique(_pair_keys(pairs))
     if not (len(sameby) or len(diffby)):

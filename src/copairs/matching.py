@@ -580,25 +580,44 @@ def find_pairs_multilabel(
     -----
     The function asserts that `multilabel_col` is present in either `sameby` or `diffby`.
     """
-    sameby, diffby = _validate(sameby, diffby)
-    sameby = list(sameby)
-    diffby = list(diffby)
-
-    assert (multilabel_col in sameby) or (multilabel_col in diffby), (
-        f"Missing {multilabel_col} in sameby and diffby"
-    )
-
     # Imported here: copairs.compute loads SciPy, which `import copairs` skips.
     from copairs.compute import _backend_module
 
-    fastap = _backend_module(backend)
-    if fastap is not None:
-        fast = _find_pairs_multilabel_numba(
-            fastap, dframe, sameby, diffby, multilabel_col
-        )
-        if fast is not None:
-            return fast
+    find = _multilabel_matcher(dframe, multilabel_col, _backend_module(backend))
+    return find(sameby, diffby)
 
+
+def _multilabel_matcher(dframe, multilabel_col: str, fastap=None):
+    """Return ``find(sameby, diffby)``, :func:`find_pairs_multilabel` on ``dframe``.
+
+    Given ``fastap`` (the Numba backend), every call takes its pairs from one
+    inverted label index built here, where the input allows it (see
+    :func:`find_pairs_multilabel`), and uses SQL otherwise.
+    """
+    found = None
+    if fastap is not None and isinstance(dframe, pd.DataFrame):
+        labels = _as_label_lists(dframe[multilabel_col])
+        dframe = dframe.assign(**{multilabel_col: labels})
+        found = fastap.multilabel.multilabel_pairs(dframe, multilabel_col)
+
+    def find(sameby, diffby):
+        sameby, diffby = _validate(sameby, diffby)
+        sameby = list(sameby)
+        diffby = list(diffby)
+        assert (multilabel_col in sameby) or (multilabel_col in diffby), (
+            f"Missing {multilabel_col} in sameby and diffby"
+        )
+        if found is None:
+            return _find_pairs_multilabel_sql(dframe, sameby, diffby, multilabel_col)
+        return fastap.multilabel.indexed_pairs(
+            dframe, sameby, diffby, multilabel_col, found
+        )
+
+    return find
+
+
+def _find_pairs_multilabel_sql(dframe, sameby, diffby, multilabel_col):
+    """:func:`find_pairs_multilabel` in DuckDB SQL."""
     df = dframe.reset_index()
     df[multilabel_col] = _as_label_lists(df[multilabel_col])
 
@@ -686,20 +705,6 @@ def _as_label_lists(labels: pd.Series) -> pd.Series:
             else labels
         )
     )
-
-
-def _find_pairs_multilabel_numba(fastap, dframe, sameby, diffby, multilabel_col):
-    """Inverted-index :func:`find_pairs_multilabel`, or None when unsupported."""
-    fast = fastap.multilabel
-    if not isinstance(dframe, pd.DataFrame):
-        return None
-    dframe = dframe.assign(**{multilabel_col: _as_label_lists(dframe[multilabel_col])})
-    rest_same = [c for c in sameby if c != multilabel_col]
-    if multilabel_col in sameby:
-        # Also in diffby, as in SQL, the label lists must differ as a whole.
-        return fast.shared_label_pairs(dframe, rest_same, diffby, multilabel_col)
-    rest_diff = [c for c in diffby if c != multilabel_col]
-    return fast.disjoint_label_pairs(dframe, rest_same, rest_diff, multilabel_col)
 
 
 def _pair_keys(pairs: np.ndarray) -> np.ndarray:

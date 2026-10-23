@@ -42,6 +42,11 @@ def index_pairs(*args):
     return matching.find_pairs_multilabel(*args, backend="numba")
 
 
+def indexed(dframe):
+    """Whether the inverted label index can represent ``dframe``'s labels."""
+    return fastap.multilabel.multilabel_pairs(dframe, "labels") is not None
+
+
 def as_set(pairs):
     """Unordered pair set."""
     return set(map(tuple, np.sort(np.asarray(pairs, dtype=np.int64), axis=1)))
@@ -60,7 +65,7 @@ def test_shared_label_pairs_match_sql(sameby, diffby):
     """Pairs sharing a label, and per-label counts, equal the SQL result."""
     dframe = label_frame()
     args = (dframe, sameby, diffby, "labels")
-    assert matching._find_pairs_multilabel_numba(fastap, *args) is not None
+    assert indexed(dframe)
     pairs, keys, counts = index_pairs(*args)
     sql_pairs_, sql_keys, sql_counts = sql_pairs(*args)
     np.testing.assert_array_equal(keys, sql_keys)
@@ -82,7 +87,7 @@ def test_disjoint_label_pairs_match_sql(sameby, diffby):
     """Pairs sharing no label equal the SQL result, sorted and unique."""
     dframe = label_frame(1)
     args = (dframe, sameby, diffby, "labels")
-    assert matching._find_pairs_multilabel_numba(fastap, *args) is not None
+    assert indexed(dframe)
     pairs = index_pairs(*args)
     assert as_set(pairs) == as_set(sql_pairs(*args))
     keys = pairs[:, 0].astype(np.int64) * len(dframe) + pairs[:, 1]
@@ -116,13 +121,14 @@ def test_array_label_cells_with_other_columns():
     """NumPy array cells work with other columns; only those reach DuckDB."""
     dframe = label_frame(3)
     arrays = dframe.assign(labels=dframe["labels"].map(np.array))
+    assert indexed(arrays)
     args = (["labels"], ["plate"], "labels")
-    got = matching._find_pairs_multilabel_numba(fastap, arrays, *args)
-    for g, e in zip(got, index_pairs(dframe, *args)):
+    for g, e in zip(index_pairs(arrays, *args), index_pairs(dframe, *args)):
         np.testing.assert_array_equal(g, e)
     args = (["plate"], ["labels"], "labels")
-    got = matching._find_pairs_multilabel_numba(fastap, arrays, *args)
-    np.testing.assert_array_equal(got, index_pairs(dframe, *args))
+    np.testing.assert_array_equal(
+        index_pairs(arrays, *args), index_pairs(dframe, *args)
+    )
 
 
 @pytest.mark.parametrize(
@@ -137,10 +143,7 @@ def test_array_label_cells_with_other_columns():
 def test_unsupported_labels_fall_back(labels, index):
     """Inputs the inverted index cannot represent exactly use the SQL path."""
     dframe = pd.DataFrame({"labels": labels}, index=index)
-    assert (
-        matching._find_pairs_multilabel_numba(fastap, dframe, ["labels"], [], "labels")
-        is None
-    )
+    assert not indexed(dframe)
 
 
 def consistency_input(seed=2):
@@ -203,10 +206,7 @@ def test_multilabel_ap_with_sql_fallback(distance):
     """Labels the index cannot represent match through SQL, with the same APs."""
     dframe, feats = consistency_input(5)
     dframe.loc[0, "labels"] = dframe.loc[0, "labels"] * 2  # a label twice in a row
-    assert (
-        matching._find_pairs_multilabel_numba(fastap, dframe, [], ["labels"], "labels")
-        is None
-    )
+    assert not indexed(dframe)
     kwargs = dict(
         CONSISTENCY,
         neg_sameby=["plate"],
@@ -222,3 +222,25 @@ def test_multilabel_ap_with_sql_fallback(distance):
     )
     for col in ap_columns:
         np.testing.assert_allclose(fast[col], numpy[col], rtol=1e-6, atol=1e-6)
+
+
+def test_multilabel_ap_builds_label_index_once(monkeypatch):
+    """Positive and negative pairs come from one label index per call."""
+    calls = []
+    build = fastap.multilabel.multilabel_pairs
+
+    def counted(*args):
+        calls.append(args)
+        return build(*args)
+
+    monkeypatch.setattr(fastap.multilabel, "multilabel_pairs", counted)
+    dframe, feats = consistency_input()
+    multilabel.average_precision(
+        dframe,
+        feats,
+        **CONSISTENCY,
+        multilabel_col="labels",
+        progress_bar=False,
+        backend="numba",
+    )
+    assert len(calls) == 1
