@@ -12,6 +12,7 @@ computations, so a null rank list identical to the observed one is counted as
 a tie, as in the paper's ``>=`` definition.
 """
 
+from typing import Callable, NamedTuple
 from functools import partial
 
 import numpy as np
@@ -49,8 +50,25 @@ def _check_max_workers(max_workers: int | None) -> None:
         raise ValueError(f"max_workers must be a positive integer, got {max_workers}")
 
 
-def _prepare(scores, conf_ix, confs, null_size, seed, backend, max_workers):
-    """Thresholds, checked inputs and the null plan shared by the p-value functions.
+class _Steps(NamedTuple):
+    """A resolved backend's steps of the p-value functions.
+
+    ``sample(plan_rows, size, start)`` returns float64 null samples where the
+    counts read them (on the GPU for CUDA), and ``count_ge`` and
+    ``group_ge`` take the arguments of :func:`_count_ge_host` and
+    :func:`_group_ge_host`.
+    """
+
+    plan: tuple  # the null plan, where sample reads it
+    sample: Callable
+    count_ge: Callable
+    group_ge: Callable
+
+
+def _prepare(
+    scores, conf_ix, confs, null_size, seed, backend, budget_bytes, max_workers
+):
+    """Thresholds, checked inputs and the backend's steps for the p-value functions.
 
     For the CUDA backend the plan is copied to the GPU once.
     """
@@ -62,9 +80,20 @@ def _prepare(scores, conf_ix, confs, null_size, seed, backend, max_workers):
     _check_max_workers(max_workers)
     backend = resolve_backend(backend, gpu=True)
     plan = null_plan(confs, resolve_seed(seed))
+    sample = partial(
+        _ap_nulls, backend=backend, dtype=np.float64, budget_bytes=budget_bytes,
+        max_workers=max_workers,
+    )  # fmt: skip
     if backend == "cuda":
-        plan = _import_cuda_backend().plan_on_device(plan)
-    return thr, conf_ix, null_size, backend, plan
+        cuda = _import_cuda_backend()
+        count_ge = partial(cuda.count_ge, budget_bytes=budget_bytes)
+        steps = _Steps(cuda.plan_on_device(plan), sample, count_ge, cuda.group_ge)
+    elif backend == "numba":
+        kernels = _import_numba_backend()
+        steps = _Steps(plan, sample, kernels.count_ge, kernels.group_ge)
+    else:
+        steps = _Steps(plan, sample, _count_ge_host, _group_ge_host)
+    return thr, conf_ix, null_size, steps
 
 
 def ap_pvalues(
@@ -109,8 +138,8 @@ def ap_pvalues(
     """
     if len(conf_ix) != len(scores):
         raise ValueError(f"{len(scores)} scores but {len(conf_ix)} conf_ix")
-    thr, conf_ix, null_size, backend, plan = _prepare(
-        scores, conf_ix, confs, null_size, seed, backend, max_workers
+    thr, conf_ix, null_size, steps = _prepare(
+        scores, conf_ix, confs, null_size, seed, backend, budget_bytes, max_workers
     )
     order = np.lexsort((thr, conf_ix))
     thr = thr[order]
@@ -123,21 +152,11 @@ def ap_pvalues(
         (b, start, size) for b in batches for start, size in chunks(null_size, chunk)
     )
     n_work = len(batches) * len(range(0, null_size, chunk))
-    if backend == "cuda":
-        cuda = _import_cuda_backend()
-        count_ge = partial(cuda.count_ge, budget_bytes=budget_bytes)
-    else:
-        count_ge = (
-            _import_numba_backend().count_ge if backend == "numba" else _count_ge_host
-        )
     counts = np.zeros(len(thr), dtype=np.int64)
     for b, start, size in progress(work, n_work, progress_bar, "AP null"):
         sl = slice(b, min(b + batch, len(confs)))
-        part = tuple(a[sl] for a in plan)
-        null = _ap_nulls(
-            part, size, start, backend, np.float64, budget_bytes, max_workers
-        )
-        count_ge(null, thr, ptr[sl.start : sl.stop + 1], counts)
+        null = steps.sample(tuple(a[sl] for a in steps.plan), size, start)
+        steps.count_ge(null, thr, ptr[sl.start : sl.stop + 1], counts)
         del null  # free this chunk before sampling the next
     pvals = np.empty(len(thr), dtype=np.float64)
     pvals[order] = (counts + 1) / (null_size + 1)
@@ -206,17 +225,11 @@ def map_pvalues(
         raise ValueError(
             f"{len(map_scores)} mAP scores but {len(ptr) - 1} groups in ptr"
         )
-    thr, conf_ix, null_size, backend, plan = _prepare(
-        map_scores, conf_ix, confs, null_size, seed, backend, max_workers
+    thr, conf_ix, null_size, steps = _prepare(
+        map_scores, conf_ix, confs, null_size, seed, backend, budget_bytes, max_workers
     )
     if len(thr) == 0:
         return np.zeros(0, dtype=np.float64)
-    if backend == "cuda":
-        group_ge = _import_cuda_backend().group_ge
-    else:
-        group_ge = (
-            _import_numba_backend().group_ge if backend == "numba" else _group_ge_host
-        )
     counts = np.zeros(len(thr), dtype=np.int64)
     # The chunk and the counts' workspace rows share the budget.
     chunk = chunk_size(null_size, len(confs) + _GROUP_WORK_ROWS, budget_bytes)
@@ -224,9 +237,7 @@ def map_pvalues(
     for start, size in progress(
         chunks(null_size, chunk), n_work, progress_bar, "mAP null"
     ):
-        null = _ap_nulls(
-            plan, size, start, backend, np.float64, budget_bytes, max_workers
-        )
-        group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
+        null = steps.sample(steps.plan, size, start)
+        steps.group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
         del null  # free this chunk before sampling the next
     return (counts + 1) / (null_size + 1)
