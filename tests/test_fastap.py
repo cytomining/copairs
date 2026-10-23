@@ -291,11 +291,16 @@ def test_draw_average_precisions_nonfinite_normalized():
 
 
 def test_fastap_does_not_import_nulls():
-    """The AP kernels stand alone: importing them leaves copairs.nulls unloaded."""
+    """The AP kernels stand alone: copairs.nulls and copairs.map stay unloaded.
+
+    copairs.map loads statsmodels.
+    """
     code = (
         "import sys\n"
         "import copairs.fastap\n"
-        "assert not any(m.startswith('copairs.nulls') for m in sys.modules)\n"
+        "for name in ('copairs.nulls', 'copairs.map', 'statsmodels'):\n"
+        "    assert not any(m == name or m.startswith(name + '.')\n"
+        "                   for m in sys.modules), name\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=False

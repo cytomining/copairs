@@ -128,18 +128,15 @@ def normalize_ap(
             f"Array lengths must match: ap={len(ap)}, M={len(M)}, N={len(N)}"
         )
 
-    # Compute expected AP for each configuration
+    # Compute expected AP for each configuration, one per row of ap
+    M = np.broadcast_to(M, len(ap))
+    N = np.broadcast_to(N, len(ap))
     if fastap is not None:
-        M = M if len(M) > 1 else np.repeat(M[:1], len(ap))
-        N = N if len(N) > 1 else np.repeat(N[:1], len(ap))
-        # One configuration per row of ap, as the loop below fills mu0
         mu0 = fastap.expected_ap_array(M, N).reshape((-1,) + (1,) * (ap.ndim - 1))
     else:
         mu0 = np.zeros_like(ap, dtype=float)
         for i in range(len(ap)):
-            M_i = M[i] if len(M) > 1 else M[0]
-            N_i = N[i] if len(N) > 1 else N[0]
-            mu0[i] = expected_ap(int(M_i), int(N_i))
+            mu0[i] = expected_ap(int(M[i]), int(N[i]))
 
     # Normalize: (AP - μ₀) / (1 - μ₀)
     # Use eps to avoid division by zero when μ₀ ≈ 1

@@ -5,8 +5,6 @@ import sys
 import numba
 import numpy as np
 
-from copairs.map.normalization import harmonic_number
-
 # Largest rank-list length whose harmonic numbers are tabulated at once.
 _MAX_TABLE = 2**24
 
@@ -51,11 +49,22 @@ def expected_ap_array(M: np.ndarray, N: np.ndarray) -> np.ndarray:
         raise ValueError(f"Invalid inputs: M={M[i]}, N={N[i]}")
     if not len(L):
         return np.zeros(0)
-    (Mu, Lu), inv = np.unique(np.stack([M, L]), axis=1, return_inverse=True)
+    # Distinct (M, L) through one 1-D key M * width + L; M <= L < width.
+    width = int(L.max()) + 1
+    if width > 2**32:  # width**2 must fit in uint64
+        raise ValueError(f"rank lists of up to 2**32 - 1 items, got {width - 1}")
+    width = np.uint64(width)
+    keys, inv = np.unique(
+        M.astype(np.uint64) * width + L.astype(np.uint64), return_inverse=True
+    )
+    Mu, Lu = (keys // width).astype(np.int64), (keys % width).astype(np.int64)
     if Lu.max() <= _MAX_TABLE:
         table = _harmonic_table(int(Lu.max()), sys.version_info >= (3, 12))
         H = table[Lu - 1]
     else:
+        # Imported here: the copairs.map package loads statsmodels and DuckDB.
+        from copairs.map.normalization import harmonic_number
+
         H = np.array([harmonic_number(int(n)) for n in Lu])
     with np.errstate(divide="ignore", invalid="ignore"):
         mu0 = (1.0 / Lu) * (((Mu - 1.0) / (Lu - 1.0)) * (Lu - H) + H)

@@ -164,6 +164,8 @@ def test_expected_ap_array_bitwise():
     )
     with pytest.raises(ValueError):
         fastap.expected_ap_array(np.array([-1]), np.array([3]))
+    with pytest.raises(ValueError, match="2\\*\\*32"):  # beyond the packed (M, L) keys
+        fastap.expected_ap_array(np.array([1]), np.array([2**32]))
 
 
 @pytest.mark.parametrize(
