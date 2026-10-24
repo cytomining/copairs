@@ -115,7 +115,10 @@ cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
   through it in chunks of bounded memory, and runs multilabel matching,
   per-label AP and normalized AP on Numba. Given the same similarities, its APs
   equal `"numba"`'s bit for bit; its similarities sum in another order, so
-  they match to float32 rounding. `draw_average_precisions(...,
+  they match to float32 rounding. The permutation null re-ranks by the AP
+  stage's similarities, so after a `"cuda"` AP stage it recomputes them on
+  the GPU, whatever its own `backend`, and needs the GPU.
+  `draw_average_precisions(...,
   backend="cuda")` scores draws of up to 6144 queries on the GPU and larger
   ones on Numba.
 - Without CuPy or a usable GPU, `backend="cuda"` raises an error that names
@@ -189,6 +192,11 @@ an mAP equal to an atom of the null (e.g. perfect retrieval) counts the atom.
   or `"copied"` for it. The null recomputes similarities from the features,
   so distances that estimate their scale from each batch of pairs
   (`seuclidean`, `mahalanobis`) raise under it; use `"joint"` or `"copied"`.
+  It recomputes them as the AP function did, whatever its own `backend`:
+  with the AP stage's kernel after `backend="numba"` or `"cuda"` (on the GPU
+  after `"cuda"`, so the null needs the GPU too), else in NumPy batches,
+  which take 7-13 times as long (1.5-2.5 million pairs on 16 CPUs). Pass
+  `backend="numba"` to the AP function when the null's time matters.
   Relabelled profiles keep the group's positive pairs, so with `pos_diffby`
   the references must not change them (e.g. one plate per block of
   references when `pos_diffby=["plate"]`); layouts where they could raise.
