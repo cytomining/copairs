@@ -230,10 +230,6 @@ def _chunk_sims(sims, start: int, device_pairs):
     return cp.asarray(sims[start : start + len(device_pairs)])
 
 
-def _host_sims(sims) -> np.ndarray:
-    return sims.get() if isinstance(sims, DeviceSims) else _cuda.host(sims)
-
-
 def ap_from_pairs(
     pos_pairs: np.ndarray,
     neg_pairs: np.ndarray,
@@ -260,8 +256,8 @@ def ap_from_pairs(
         return ranking.ap_from_pairs(
             pos_pairs,
             neg_pairs,
-            _host_sims(pos_sims),
-            _host_sims(neg_sims),
+            _cuda.host(pos_sims),  # DeviceSims too, through __array__
+            _cuda.host(neg_sims),
             budget_bytes,
             n,
         )
