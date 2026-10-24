@@ -139,6 +139,20 @@ class _FeatureSimilarity:
         self._kernel = None
 
 
+def similarity_fns(fastap, backend, feats, distance, batch_size, progress_bar):
+    """Return an AP stage's similarity function and the nulls' recompute of it.
+
+    The function is ``fastap``'s kernel for ``distance`` where ``fastap``
+    (the AP stage's kernels for ``backend``, None for NumPy) has one, else
+    :func:`copairs.compute.get_similarity_fn`'s; the recompute is the
+    :class:`_FeatureSimilarity` that gives the same similarities.
+    """
+    generic = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    fn = generic if fastap is None else fastap.similarity_fn(feats, distance, generic)
+    kernel_backend = None if fn is generic else backend
+    return fn, _FeatureSimilarity(feats, distance, batch_size, kernel_backend)
+
+
 def release_kernel(similarity) -> None:
     """Drop the kernel a null built in ``similarity`` (a :class:`_FeatureSimilarity`)."""
     if isinstance(similarity, _FeatureSimilarity):
@@ -435,13 +449,9 @@ def average_precision(
     validate_pipeline_input(meta, feats, columns)
 
     # Get the distance function for similarity calculations (e.g., cosine)
-    similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
-    kernel_backend = None  # the backend whose kernel computes the similarities
-    if fastap is not None:
-        generic = similarity_fn
-        similarity_fn = fastap.similarity_fn(feats, distance, generic)
-        if similarity_fn is not generic:
-            kernel_backend = backend
+    similarity_fn, similarity = similarity_fns(
+        fastap, backend, feats, distance, batch_size, progress_bar
+    )
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
@@ -507,7 +517,7 @@ def average_precision(
     pairs = RankPairs(
         pos_pairs,
         neg_pairs,
-        _FeatureSimilarity(feats, distance, batch_size, kernel_backend),
+        similarity,
         _diffby_codes(meta, pos_diffby),
     )
     attach_pairs(meta, pairs)
