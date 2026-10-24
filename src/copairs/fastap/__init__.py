@@ -23,6 +23,7 @@ __all__ = [
     "FAST_METRICS",
     "PairSimilarity",
     "ap_from_pairs",
+    "draw_aps",  # draw_average_precisions calls it as backend_module("numba").draw_aps
     "draw_average_precisions",
     "expected_ap_array",
     "multilabel",

@@ -118,9 +118,9 @@ cuBLAS for `draw_average_precisions`): from a CUDA 12 Toolkit, or with
   they match to float32 rounding. The permutation null re-ranks by the AP
   stage's similarities, so after a `"cuda"` AP stage it recomputes them on
   the GPU, whatever its own `backend`, and needs the GPU.
-  `draw_average_precisions(...,
-  backend="cuda")` scores draws of up to 6144 queries on the GPU and larger
-  ones on Numba.
+  `draw_average_precisions(..., backend="cuda")` scores draws on the GPU
+  while their queries' keys and bins (8 bytes per query) fit the 48 KiB of
+  shared memory a kernel gets, and larger draws on Numba.
 - Without CuPy or a usable GPU, `backend="cuda"` raises an error that names
   the extra and the reason, and `copairs.nulls.available_backends()` leaves
   `"cuda"` out (warning only when a GPU is visible but kernels fail to

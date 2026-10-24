@@ -115,8 +115,9 @@ def draw_average_precisions(
         GPU memory on the CUDA backend).
     backend : {"numba", "cuda"}
         ``"cuda"`` (``pip install 'copairs[gpu]'``) computes similarities and
-        APs on the GPU, except for draws of more than 6144 queries, whose keys
-        do not fit its kernel's shared memory: those run on Numba. Its batched
+        APs on the GPU, except for draws whose queries' keys and bins (8 bytes
+        per query) exceed the 48 KiB of shared memory its kernel gets: those
+        run on Numba. Its batched
         similarities sum in another order, so they match Numba's to float32
         rounding and near-ties can rank differently.
 
