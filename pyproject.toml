@@ -19,6 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+numba = ["numba>=0.60"]
+# CuPy publishes CUDA 12 wheels for these platforms only. The CUDA AP stage
+# also runs Numba kernels.
+gpu = [
+    "numba>=0.60",
+    "cupy-cuda12x>=14; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'win32' and platform_machine == 'AMD64')",
+]
 dev = [
     "jupyter>=1.1.1",
     "pytest>=8.3.4",

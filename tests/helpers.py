@@ -1,14 +1,188 @@
 """Helper functions for testing."""
 
+import os
+import sys
+import json
+import shutil
+import subprocess
+import importlib.util
 from typing import Dict
+from pathlib import Path
 from itertools import product
 
 import numpy as np
 import pandas as pd
 
+from copairs import nulls
 from copairs.matching import ColumnList
 
 SEED = 0
+PROJECT_ROOT = Path(__file__).parents[1]
+
+
+def run_isolated(code: str) -> subprocess.CompletedProcess:
+    """Run ``code`` in a fresh interpreter on this checkout's sources.
+
+    Keeps a crash in compiled code, or a module loaded by the code, out of
+    the test process.
+    """
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(PROJECT_ROOT / "src"), env.get("PYTHONPATH", "")]
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=PROJECT_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def copy_copairs(root: Path) -> None:
+    """Copy the copairs package under test, without bytecode, to ``root / "copairs"``."""
+    shutil.copytree(
+        Path(nulls.__file__).parents[1],
+        root / "copairs",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+
+
+def run_on_copy(root: Path, probe: str, *args: str, cache="numba_cache", **env) -> dict:
+    """Run ``probe`` on the copy of copairs in ``root`` and return its JSON output.
+
+    The probe runs in ``root``, so it imports the copy, with ``root`` as
+    ``sys.argv[1]`` and ``args`` after it, Numba's cache in ``root / cache``
+    and ``env`` added to the environment.
+    """
+    done = subprocess.run(
+        [sys.executable, "-c", probe, str(root), *args],
+        cwd=root,
+        env={**os.environ, "NUMBA_CACHE_DIR": str(root / cache), **env},
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+_WITHOUT_MODULES = """
+import sys
+import importlib.util
+from importlib.abc import MetaPathFinder
+
+BLOCKED = {names!r}
+
+
+class Block(MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in BLOCKED:
+            raise ModuleNotFoundError(f"No module named {{name!r}}", name=name)
+
+
+_find_spec = importlib.util.find_spec
+importlib.util.find_spec = lambda name, *args: (
+    None if name.split(".")[0] in BLOCKED else _find_spec(name, *args)
+)
+sys.meta_path.insert(0, Block())
+"""
+
+
+def without_modules(*names: str) -> str:
+    """Code that makes ``names`` unimportable in a child, as if not installed.
+
+    Their imports raise ModuleNotFoundError and ``importlib.util.find_spec``
+    returns None for them.
+    """
+    return _WITHOUT_MODULES.format(names=names)
+
+
+class DeviceArray(np.ndarray):
+    """A NumPy array standing in for a CuPy one: ``get()`` copies it to the host."""
+
+    def get(self, out=None):
+        """Copy to a new host array, or into ``out``, as CuPy checks it."""
+        host = np.array(self.view(np.ndarray))
+        if out is None:
+            return host
+        assert isinstance(out, np.ndarray) and not isinstance(out, DeviceArray)
+        assert out.dtype == self.dtype and out.shape == self.shape
+        assert out.flags.c_contiguous or out.flags.f_contiguous
+        out[...] = host
+        return out
+
+
+class FakeCuPy:
+    """NumPy posing as CuPy: functions return DeviceArray and record its bytes."""
+
+    ndarray = DeviceArray
+
+    def __init__(self):
+        self.allocated = []
+
+    def __getattr__(self, name):
+        """NumPy's ``name``, wrapped to return DeviceArray when it is a function."""
+        func = getattr(np, name)
+        if not callable(func) or isinstance(func, type):
+            return func
+
+        def wrapped(*args, **kwargs):
+            result = func(*args, **kwargs)
+            if isinstance(result, np.ndarray):
+                result = result.view(DeviceArray)
+                self.allocated.append(result.nbytes)
+            return result
+
+        return wrapped
+
+
+def fake_gpu(monkeypatch, kernels=None):
+    """Run copairs' CUDA host code on the CPU, with a usable fake GPU.
+
+    CuPy is replaced by :class:`FakeCuPy`, and each kernel launch appends
+    ``(name, args)`` to the returned list, then runs ``kernels[name](*args)``
+    when given (kernels default to doing nothing). Needs CuPy installed, for
+    the modules to import; no GPU.
+    """
+    from copairs import _cuda
+    from copairs.nulls import cuda as nulls_cuda
+
+    cp, launches = FakeCuPy(), []
+    kernels = kernels or {}
+
+    def kernel(source, name):
+        def launch(grid, block, args, shared_mem=0):
+            launches.append((name, args))
+            if name in kernels:
+                kernels[name](*args)
+
+        return launch
+
+    def host(x):
+        return x.get() if isinstance(x, DeviceArray) else np.asarray(x)
+
+    for name, value in (
+        ("cp", cp),
+        ("kernel", kernel),
+        ("grid", lambda *args, **kwargs: (1,)),
+        ("is_device_array", lambda x: isinstance(x, DeviceArray)),
+        ("host", host),
+        ("usable", lambda: True),
+        ("require", lambda: None),
+    ):
+        monkeypatch.setattr(_cuda, name, value)
+    modules = [nulls_cuda]
+    if importlib.util.find_spec("numba") is not None:
+        from copairs.fastap import cuda as fastap_cuda
+
+        modules.append(fastap_cuda)
+    for module in modules:
+        monkeypatch.setattr(module, "cp", cp)
+        if hasattr(module, "host"):
+            monkeypatch.setattr(module, "host", host)
+    return cp, launches
 
 
 def simulate_plates(n_compounds, n_replicates, plate_size):
@@ -77,3 +251,84 @@ def create_dframe(n_options, n_rows):
     dframe = pd.DataFrame((product(colc, colp, colw)), columns=list("cpw"))
     dframe = dframe.sample(n_rows, random_state=SEED).reset_index(drop=True)
     return dframe
+
+
+def ap_frame(rows):
+    """Build an ``ap_scores`` frame from (group, ap, n_pos_pairs, n_total_pairs) rows."""
+    frame = pd.DataFrame(
+        rows, columns=["g", "average_precision", "n_pos_pairs", "n_total_pairs"]
+    )
+    frame["normalized_average_precision"] = 0.0
+    return frame
+
+
+def query_meta(others: int = 0) -> pd.DataFrame:
+    """Four replicates of group "query" among 30 one-profile controls.
+
+    ``others`` profiles of group "other" follow the controls.
+    """
+    groups = ["query"] * 4 + [f"control{i}" for i in range(30)] + ["other"] * others
+    return pd.DataFrame({"g": groups})
+
+
+def brute_ap_pvalues(scores, conf_ix, confs, null_size, seed):
+    """Count null values >= each score over the materialized nulls."""
+    null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
+    num = (null[conf_ix] >= nulls.tie_thresholds(scores)[:, None]).sum(axis=1)
+    return (num + 1) / (null_size + 1)
+
+
+def brute_group_nulls(ptr, conf_ix, conf_cnt, confs, null_size, seed):
+    """Materialized mAP nulls: each group's mean of its members' AP nulls.
+
+    Group ``g`` has ``conf_cnt[e]`` members with configuration
+    ``confs[conf_ix[e]]`` for ``e`` in ``ptr[g]:ptr[g + 1]``; members sharing a
+    configuration share null samples.
+    """
+    null = nulls.ap_nulls(confs, null_size, seed, dtype=np.float64)
+    group_null = np.empty((len(ptr) - 1, null_size))
+    for g in range(len(ptr) - 1):
+        acc = np.zeros(null_size)
+        for e in range(ptr[g], ptr[g + 1]):
+            acc += conf_cnt[e] * null[conf_ix[e]]
+        group_null[g] = acc / np.sum(conf_cnt[ptr[g] : ptr[g + 1]])
+    return group_null
+
+
+def brute_map_pvalues(map_scores, ptr, conf_ix, conf_cnt, confs, null_size, seed):
+    """Count group null values >= each mAP over :func:`brute_group_nulls`."""
+    group_null = brute_group_nulls(ptr, conf_ix, conf_cnt, confs, null_size, seed)
+    num = (group_null >= nulls.tie_thresholds(map_scores)[:, None]).sum(axis=1)
+    return (num + 1) / (null_size + 1)
+
+
+# Multilabel APs' usual rules: positives share a label, negatives share none.
+ML_SPEC = dict(
+    pos_sameby=["target"], pos_diffby=[], neg_sameby=[], neg_diffby=["target"]
+)
+
+
+def random_targets(has: np.ndarray) -> list[list[str]]:
+    """Targets ``L<j>`` for each true ``has[i, j]`` of row ``i``, plus ``own<i>``.
+
+    The label of its own makes no pairs; it keeps every profile labelled.
+    """
+    return [
+        [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"] for i, h in enumerate(has)
+    ]
+
+
+def shared_labels(ap: pd.DataFrame) -> pd.DataFrame:
+    """Return the rows of ``ap`` for :func:`random_targets`' shared ``L`` labels."""
+    return ap[ap["target"].str.startswith("L")]
+
+
+def label_meta() -> pd.DataFrame:
+    """Compounds with overlapping targets; c1 and c8 share two of them.
+
+    Each compound also has a label of its own, so none is left without one
+    when a label moves away; such labels make no pairs.
+    """
+    targets = [["A"], ["A", "B"], ["B"], ["A", "C"], ["C"], ["B", "C"], ["D"]]
+    targets += [["D", "A"], ["A", "B"]]
+    return pd.DataFrame({"target": [t + [f"own{i}"] for i, t in enumerate(targets)]})
