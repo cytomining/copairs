@@ -4,14 +4,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-numba = pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
 from copairs import compute
 from copairs.map import multilabel, average_precision, mean_average_precision
-from copairs.nulls import _numba
 from tests.markers import AP_BACKENDS, needs_gpu
+from copairs.fastap import similarity
 from copairs._backend import backend_module
-from copairs.map.average_precision import attached_pairs
+from copairs.map.average_precision import attached_pairs, _FeatureSimilarity
 
 NULL = dict(
     null_size=2000, threshold=0.05, seed=3, progress_bar=False, null="permutation"
@@ -137,40 +137,38 @@ def test_kernel_ap_stages_give_numpy_pvalues(backend):
 
 
 @pytest.mark.parametrize("null_backend", ["numba", "numpy"])
-def test_null_threads_compute_similarities_on_the_callers_numba_threads(
-    null_backend, monkeypatch
-):
-    """The permutation null's threads launch a Numba AP stage's kernel as the caller set them.
+def test_null_threads_compute_similarities_serially(null_backend, monkeypatch):
+    """The permutation null's threads run a Numba AP stage's kernel serially.
 
-    Numba's thread count is per thread, and the null's pool threads
-    recompute similarities with the kernel of a Numba AP stage, under the
-    NumPy null too, whose draws run no Numba.
+    A parallel launch from a pool thread would run on that thread's Numba
+    threads (the count is per thread, so not the caller's), under the NumPy
+    null too, whose draws run no Numba, and many small launches from
+    several threads cost more than they gain.
     """
-    if numba.config.NUMBA_NUM_THREADS < 2:
-        pytest.skip("needs 2 Numba threads to tell the caller's 1 from the default")
     feats = np.random.default_rng(5).standard_normal((96, 8))
     frames = (
         (plate_ap(feats, "numba"), "g"),
         (shared_labels(label_ap(feats, "numba")), "target"),
     )
-    launches = []
-    launch = _numba._launch
+    sims, parallel = [], []
+    call = _FeatureSimilarity.__call__
 
-    def recorded(kernel, *args):
-        launches.append((kernel.__name__, numba.get_num_threads()))
-        return launch(kernel, *args)
+    def counted(self, pairs):
+        sims.append(len(pairs))
+        return call(self, pairs)
 
-    monkeypatch.setattr(_numba, "_launch", recorded)
-    before = numba.get_num_threads()
-    numba.set_num_threads(1)
-    try:
-        for ap, sameby in frames:
-            mean_average_precision(ap, [sameby], backend=null_backend, **NULL)
-    finally:
-        numba.set_num_threads(before)
-    sims = [threads for name, threads in launches if name == "_kernel_sims"]
-    assert sims, launches
-    assert {threads for _, threads in launches} == {1}
+    monkeypatch.setattr(_FeatureSimilarity, "__call__", counted)
+    for name in ("_dot_pairs", "_minkowski_pairs"):
+        kernel = getattr(similarity, name)
+
+        def recorded(*args, kernel=kernel, name=name):
+            parallel.append(name)
+            return kernel(*args)
+
+        monkeypatch.setattr(similarity, name, recorded)
+    for ap, sameby in frames:
+        mean_average_precision(ap, [sameby], backend=null_backend, **NULL)
+    assert sims and not parallel
 
 
 @needs_gpu

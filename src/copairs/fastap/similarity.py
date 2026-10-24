@@ -53,36 +53,60 @@ def _unit_rows(
     return out
 
 
-@numba.njit(parallel=True, fastmath={"reassoc", "contract"}, cache=True)
+# One pair's similarity, shared by the parallel and serial kernels, which
+# therefore give the same bits.
+@numba.njit(fastmath={"reassoc", "contract"}, cache=True)
+def _dot(a, b):
+    acc = 0.0
+    for t in range(len(a)):
+        acc += np.float64(a[t]) * b[t]
+    return acc
+
+
+@numba.njit(fastmath={"reassoc", "contract"}, cache=True)
+def _minkowski(a, b, kind):
+    """``1 / (1 + distance)`` for kind 0 = euclidean, 1 = manhattan, 2 = chebyshev."""
+    acc = 0.0
+    for t in range(len(a)):
+        diff = abs(np.float64(a[t]) - b[t])
+        if kind == 0:
+            acc += diff * diff
+        elif kind == 1:
+            acc += diff
+        elif diff > acc or np.isnan(diff):  # NaN propagates, as in np.max
+            acc = diff
+    if kind == 0:
+        acc = np.sqrt(acc)
+    return 1.0 / (1.0 + acc)
+
+
+@numba.njit(parallel=True, cache=True)
 def _dot_pairs(x, pairs, out):
     for p in numba.prange(len(pairs)):
-        a, b = x[pairs[p, 0]], x[pairs[p, 1]]
-        acc = 0.0
-        for t in range(len(a)):
-            acc += np.float64(a[t]) * b[t]
-        out[p] = acc
+        out[p] = _dot(x[pairs[p, 0]], x[pairs[p, 1]])
 
 
-@numba.njit(parallel=True, fastmath={"reassoc", "contract"}, cache=True)
+@numba.njit(parallel=True, cache=True)
 def _minkowski_pairs(x, pairs, kind, out):
-    """``1 / (1 + distance)`` for kind 0 = euclidean, 1 = manhattan, 2 = chebyshev."""
     for p in numba.prange(len(pairs)):
-        a, b = x[pairs[p, 0]], x[pairs[p, 1]]
-        acc = 0.0
-        for t in range(len(a)):
-            diff = abs(np.float64(a[t]) - b[t])
-            if kind == 0:
-                acc += diff * diff
-            elif kind == 1:
-                acc += diff
-            elif diff > acc or np.isnan(diff):  # NaN propagates, as in np.max
-                acc = diff
-        if kind == 0:
-            acc = np.sqrt(acc)
-        out[p] = 1.0 / (1.0 + acc)
+        out[p] = _minkowski(x[pairs[p, 0]], x[pairs[p, 1]], kind)
 
 
-def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
+@numba.njit(nogil=True, cache=True)
+def _dot_pairs_serial(x, pairs, out):
+    for p in range(len(pairs)):
+        out[p] = _dot(x[pairs[p, 0]], x[pairs[p, 1]])
+
+
+@numba.njit(nogil=True, cache=True)
+def _minkowski_pairs_serial(x, pairs, kind, out):
+    for p in range(len(pairs)):
+        out[p] = _minkowski(x[pairs[p, 0]], x[pairs[p, 1]], kind)
+
+
+def pair_similarity(
+    feats: np.ndarray, metric, parallel: bool = True
+) -> Callable | None:
     """Return a ``pairs -> float32 similarities`` kernel, or None without one.
 
     Parameters
@@ -91,6 +115,10 @@ def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
         ``(n, d)`` profiles; the kernel uses them as given here.
     metric : str or callable
         A distance name; only :data:`FAST_METRICS` have a kernel.
+    parallel : bool
+        Run on Numba's threads (default), or serially on the calling
+        thread, releasing the GIL, for many small calls from several
+        threads. Both give the same bits.
 
     Returns
     -------
@@ -110,9 +138,10 @@ def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
         pairs = index_pairs(pairs, len(x))
         out = np.empty(len(pairs), dtype=np.float32)
         if kind < 0:
-            _dot_pairs(x, pairs, out)
+            (_dot_pairs if parallel else _dot_pairs_serial)(x, pairs, out)
         else:
-            _minkowski_pairs(x, pairs, kind, out)
+            kernel = _minkowski_pairs if parallel else _minkowski_pairs_serial
+            kernel(x, pairs, kind, out)
         if metric == "abs_cosine":
             np.abs(out, out=out)
         return out

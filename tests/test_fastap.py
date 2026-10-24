@@ -179,6 +179,23 @@ def test_pair_similarity_matches_generic(backend, metric, dtype):
     np.testing.assert_array_equal(kernel(pairs.astype(np.uint32)), got)
 
 
+@pytest.mark.parametrize("metric", METRICS)
+@pytest.mark.parametrize("dtype", [np.float32, np.float64, np.int64])
+def test_serial_pair_similarity_gives_the_parallel_bits(metric, dtype):
+    """The serial kernel (the nulls' threads') gives the parallel kernel's bits.
+
+    The permutation null re-ranks profiles by them and must reproduce the
+    AP stage's APs.
+    """
+    rng = np.random.default_rng(4)
+    for d in (1, 7, 37, 300):
+        feats = (rng.normal(size=(200, d)) * 3).astype(dtype)
+        pairs = rng.integers(200, size=(5000, 2))
+        serial = fastap.pair_similarity(feats, metric, parallel=False)(pairs)
+        parallel = fastap.pair_similarity(feats, metric)(pairs)
+        np.testing.assert_array_equal(serial.view(np.uint32), parallel.view(np.uint32))
+
+
 def test_pair_similarity_without_kernel():
     """Metrics without a kernel and callables fall back to the generic path."""
     feats = np.ones((3, 2))

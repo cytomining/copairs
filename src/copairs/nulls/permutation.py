@@ -1358,19 +1358,15 @@ def _run_groups(
     ``parallel``.
     """
     pool = {}
-    # The pool threads launch Numba kernels on the caller's Numba threads (the
-    # count is per thread): the null's, and those of a similarity from a Numba
-    # AP stage (kernel_backend, see copairs.map.average_precision), which they
-    # call under either backend.
-    if backend == "numba" or getattr(similarity, "kernel_backend", None) == "numba":
+    if backend == "numba":
         numba_backend = _import_numba_backend()
         threads = numba_backend.threads()
-        pool = dict(initializer=numba_backend.set_threads, initargs=(threads,))
-    if backend == "numba":
         # A thread per Numba thread. Groups' draws run on their pool threads
-        # when those keep Numba's threads busy, else on Numba's threads.
+        # when those keep Numba's threads busy, else on Numba's threads,
+        # which the pool threads set as the caller has (it is per thread).
         workers = threads if max_workers is None else max_workers
         parallel = min(len(keys), workers) < threads
+        pool = dict(initializer=numba_backend.set_threads, initargs=(threads,))
     else:
         # A thread per CPU; at most 32, since each holds a chunk's draws.
         workers = min(32, _numpy_workers()) if max_workers is None else max_workers

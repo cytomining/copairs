@@ -1,6 +1,7 @@
 """Functions to compute average precision."""
 
 import logging
+import threading
 from typing import List, Literal, Callable
 from dataclasses import field, dataclass
 
@@ -65,6 +66,10 @@ def attached_pairs(frame: pd.DataFrame):
     return handle.pairs if isinstance(handle, _AttachedPairs) else None
 
 
+# Held while a null's thread builds a similarity kernel, so that the null's
+# other threads wait for it instead of building their own copies.
+_BUILD = threading.Lock()
+
 # SciPy metrics whose cdist estimates a scale (variances, covariance) from
 # each batch of pairs, so a pair's similarity depends on the batch it is in.
 BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
@@ -78,9 +83,11 @@ class _FeatureSimilarity:
     first use, with its own copy of the features (on the GPU under
     ``"cuda"``), and kept until :meth:`release`, which
     :func:`copairs.map.get_map_pvalue` calls when its null returns. The
-    nulls call it from their worker threads, so its launches run one at a
-    time, as their parallel kernels' do
-    (:func:`copairs.nulls._numba._launch`). Otherwise batches
+    nulls call it from their worker threads: under ``"numba"`` it runs the
+    kernel's serial form on the calling thread (the same bits; many small
+    parallel launches from several threads cost more than they gain), and
+    under ``"cuda"`` its launches run one at a time, as the nulls' parallel
+    kernels' do (:func:`copairs.nulls._numba._launch`). Otherwise batches
     of ``batch_size`` pairs go through the same pairwise function as in
     :func:`copairs.compute.get_similarity_fn`, one after another in the
     calling thread.
@@ -95,7 +102,9 @@ class _FeatureSimilarity:
         self._kernel = None
 
     def __call__(self, pairs):
-        if self.kernel_backend is not None:
+        if self.kernel_backend == "numba":
+            return self._kernel_sims(pairs)
+        if self.kernel_backend == "cuda":
             nulls = import_backend("copairs.nulls._numba", self.kernel_backend)
             return nulls._launch(self._kernel_sims, pairs)
         pairs = np.asarray(pairs)
@@ -114,8 +123,16 @@ class _FeatureSimilarity:
         kernels = backend_module(self.kernel_backend)
         kernel = self._kernel  # one read: release() may clear it meanwhile
         if kernel is None:
-            kernel = self._kernel = kernels.pair_similarity(self.feats, self.distance)
+            with _BUILD:  # one build (one copy of the features) at a time
+                kernel = self._kernel
+                if kernel is None:
+                    kernel = self._kernel = self._build(kernels)
         return kernel(pairs)
+
+    def _build(self, kernels):
+        if self.kernel_backend == "numba":
+            return kernels.pair_similarity(self.feats, self.distance, parallel=False)
+        return kernels.pair_similarity(self.feats, self.distance)
 
     def release(self) -> None:
         """Drop the kernel and its copy of the features; a later call rebuilds them."""
