@@ -14,7 +14,7 @@ import numpy as np
 
 from copairs.fastap import ranking
 from copairs._backend import backend_module
-from copairs._numba_cache import cached_njit
+from copairs._numba_cache import launch, cached_njit
 from copairs.fastap.ranking import _rank_key, upper_bound, ap_from_counts
 from copairs.fastap.similarity import _ROW_BLOCK, _unit_rows
 
@@ -160,6 +160,6 @@ def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.nd
         sims = np.matmul(rows[:, :k], rows.transpose(0, 2, 1))  # (b, k, k + m)
         sims = sims.reshape(-1, k + m)
         n_tasks = max(1, min(len(sims), 4 * numba.get_num_threads()))
-        _row_ap(sims, k, out[sl].reshape(-1), n_tasks)
+        launch(_row_ap, sims, k, out[sl].reshape(-1), n_tasks)
         del rows, sims  # free this chunk before gathering the next one
     return out

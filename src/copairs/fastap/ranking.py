@@ -15,7 +15,7 @@ import numpy as np
 
 from copairs import _search
 from copairs._search import upper_bound
-from copairs._numba_cache import cached_njit
+from copairs._numba_cache import launch, cached_njit
 
 # Files a kernel compiles when it calls this module's device functions, for
 # copairs._numba_cache.cached_njit: Numba's cache sees only the kernel's file.
@@ -206,7 +206,7 @@ def ap_from_pairs(
     pos_pairs, neg_pairs, n = checked_pairs(pos_pairs, neg_pairs, n)
     pos_sims, neg_sims = pair_sims(pos_sims, pos_pairs), pair_sims(neg_sims, neg_pairs)
     ptr, vals = pair_csr(pos_pairs, pos_sims, n)
-    _sort_segments(ptr, vals)
+    launch(_sort_segments, ptr, vals)
     bins = int(ptr[n]) + n
     # A bin or count of one chunk is at most 2 per negative pair (a self-pair).
     dtype = np.int32 if 2 * len(neg_pairs) <= np.iinfo(np.int32).max else np.int64
@@ -215,10 +215,11 @@ def ap_from_pairs(
     n_chunks = max(1, min(numba.get_num_threads(), n_chunks))
     hist = np.zeros((n_chunks, bins), dtype=dtype)
     n_neg = np.zeros((n_chunks, n), dtype=dtype)
-    _negative_hist(neg_pairs, neg_sims, ptr, vals, hist, n_neg)
+    launch(_negative_hist, neg_pairs, neg_sims, ptr, vals, hist, n_neg)
     # Summed in int64
     hist, n_neg = hist.sum(axis=0, dtype=np.int64), n_neg.sum(axis=0, dtype=np.int64)
-    return paired_results(_ap_from_hist(ptr, hist, n), np.diff(ptr), n_neg)
+    ap = launch(_ap_from_hist, ptr, hist, n)
+    return paired_results(ap, np.diff(ptr), n_neg)
 
 
 def checked_pairs(pos_pairs, neg_pairs, n: int | None):

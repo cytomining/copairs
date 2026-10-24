@@ -15,7 +15,7 @@ import pandas as pd
 
 from copairs.fastap import ranking
 from copairs.matching import _key_pairs, _pair_keys, find_pairs
-from copairs._numba_cache import cached_njit
+from copairs._numba_cache import launch, cached_njit
 from copairs.fastap.ranking import (
     pair_csr,
     pair_sims,
@@ -203,7 +203,7 @@ def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col, found):
         )
         offsets = np.zeros(n + 1, dtype=np.int64)
         np.cumsum((n - 1 - np.arange(n)) - np.diff(ptr), out=offsets[1:])
-        return _all_pairs_except(n, ptr, _key_pairs(shared)[:, 1], offsets)
+        return launch(_all_pairs_except, n, ptr, _key_pairs(shared)[:, 1], offsets)
     mono = _monolabel_keys(dframe, sameby, diffby)
     return _key_pairs(mono[~_in_sorted(mono, shared)])
 
@@ -286,5 +286,6 @@ def multilabel_ap(pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, n):
     num_pos = np.diff(pos_ptr)
     max_pos = int(num_pos.max()) if len(num_pos) else 0
     n_tasks = max(1, min(len(rows), 4 * numba.get_num_threads()))
-    ap = _rows_ap(pos_ptr, end_keys, profile, neg_ptr, neg_vals, max_pos, n_tasks)
+    args = (pos_ptr, end_keys, profile, neg_ptr, neg_vals, max_pos, n_tasks)
+    ap = launch(_rows_ap, *args)
     return rows // n, profile, ap, num_pos, num_pos + np.diff(neg_ptr)[profile]

@@ -18,11 +18,15 @@ import pytest
 
 pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
+from numba.core.dispatcher import Dispatcher
+
 import copairs
-from copairs import fastap, compute
-from copairs.map import average_precision
+from copairs import fastap, compute, matching, _numba_cache
+from copairs.map import multilabel, average_precision
 from tests.helpers import fake_gpu, run_isolated, simulate_random_dframe
 from tests.markers import AP_BACKENDS, needs_gpu, needs_cupy
+from copairs.fastap import draws, ranking, similarity
+from copairs.fastap import multilabel as fast_multilabel
 from copairs._backend import backend_module
 from copairs.map.average_precision import build_rank_lists
 
@@ -826,3 +830,41 @@ def test_numba_cache_follows_edits_to_upper_bound(tmp_path):
     after, fresh = run("cache"), run("empty_cache")
     for key in ("pairs", "draws", "multilabel"):
         assert after[key] == fresh[key] != before[key], key
+
+
+def test_ap_stage_kernels_launch_under_the_launch_lock(monkeypatch):
+    """Every parallel kernel of the AP stage runs under the nulls' launch lock.
+
+    Numba's workqueue layer aborts the process on two parallel launches at
+    once, e.g. a user thread's average_precision next to a permutation
+    null's draws, and the OpenMP layer starts a team per launching thread.
+    """
+    held, patched = {}, []
+    for module in (similarity, ranking, fast_multilabel, draws):
+        for name, kernel in list(vars(module).items()):
+            if isinstance(kernel, Dispatcher) and kernel.targetoptions.get("parallel"):
+
+                def spy(*args, kernel=kernel, name=name):
+                    held.setdefault(name, set()).add(_numba_cache._LAUNCH.locked())
+                    return kernel(*args)
+
+                monkeypatch.setattr(module, name, spy)
+                patched.append(name)
+    rng = np.random.default_rng(9)
+    meta = pd.DataFrame({"g": np.repeat(np.arange(6), 4), "plate": np.arange(24) % 2})
+    meta["labels"] = [[f"L{g}", f"L{g + 1}"] for g in meta["g"]]
+    feats = rng.normal(size=(24, 5))
+    for distance in ("cosine", "euclidean"):
+        average_precision(
+            meta, feats, ["g"], [], [], ["g"], progress_bar=False,
+            backend="numba", distance=distance,
+        )  # fmt: skip
+    multilabel.average_precision(
+        meta, feats, ["labels"], [], [], ["labels"], multilabel_col="labels",
+        progress_bar=False, backend="numba",
+    )  # fmt: skip
+    matching.find_pairs_multilabel(meta, [], ["labels"], "labels", backend="numba")
+    fastap.draw_average_precisions(
+        feats, [[0, 1], [2, 3]], [[4, 5, 6], [7, 8, 9]], backend="numba"
+    )
+    assert len(patched) == 8 and held == {name: {True} for name in patched}

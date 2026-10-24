@@ -1,8 +1,11 @@
 """Numba kernels of the nulls and their p-value counts (optional dependency).
 
-Imported only through :func:`copairs.nulls.backend._import_numba_backend`. The
-AP null sampler, the joint mAP null and the label-permutation mAP null (of
-single-label and multilabel groups) compile the scalar reference functions of
+Imported by :mod:`copairs._backend` only: through
+:func:`copairs._backend.kernels` for the nulls, and by the check of whether
+Numba imports (:func:`copairs._backend.available_backends`); the AP stage
+does not import it. The AP null sampler, the joint mAP null and the
+label-permutation mAP null (of single-label and multilabel groups) compile
+the scalar reference functions of
 :mod:`copairs.nulls.sampler`, :mod:`copairs.nulls.joint` and
 :mod:`copairs.nulls.permutation` unchanged, so their samples are bitwise
 identical to the NumPy backend's. The p-value counts' binary search,
@@ -10,12 +13,12 @@ identical to the NumPy backend's. The p-value counts' binary search,
 :mod:`copairs.fastap`, so the nulls do not import the AP kernels.
 
 Callers may run these kernels from several threads (user threads, the
-permutation null's pool of groups). Parallel kernels launch one at a time
-(:func:`_launch`); the permutation null also has serial kernels that run on
-the calling thread without the GIL, so threads can run groups at once.
+permutation null's pool of groups). Parallel kernels launch one at a time,
+as the AP stage's do (:func:`copairs._numba_cache.launch`); the permutation
+null also has serial kernels that run on the calling thread without the
+GIL, so threads can run groups at once.
 """
 
-import threading
 from pathlib import Path
 
 import numba
@@ -24,6 +27,7 @@ import numpy as np
 from copairs import _search
 from copairs.nulls import joint, permutation
 from copairs._search import upper_bound
+from copairs._numba_cache import launch as _launch
 from copairs._numba_cache import cached_njit
 from copairs.nulls.common import split_segments, segment_batches
 from copairs.nulls.philox import uniform53, philox4x32
@@ -61,20 +65,6 @@ _draw_pool_nb, _label_group_map_nb = permutation._make_label_kernels(
 # Samples or draws per parallel task; each task allocates its scratch once.
 _JOINT_TASK = 256
 _PERMUTATION_TASK = 128
-# Held while a parallel kernel runs (see _launch).
-_LAUNCH = threading.Lock()
-
-
-def _launch(kernel, *args):
-    """Run the parallel ``kernel`` on Numba's threads, one launch at a time.
-
-    Callers may launch from several threads. Numba's workqueue threading
-    layer, its fallback without TBB or OpenMP, aborts the process on
-    concurrent launches, and the OpenMP layer would start a team of threads
-    per launching thread. Returns what ``kernel`` returns.
-    """
-    with _LAUNCH:
-        return kernel(*args)
 
 
 def threads() -> int:

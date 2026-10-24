@@ -269,8 +269,9 @@ and up) get their actual similarity instead of 0 or NaN.
 
 For Numba's threads, CPU quotas and `fork`, see
 [Null distributions and the optional Numba backend](#null-distributions-and-the-optional-numba-backend).
-Its `workqueue` threading layer stops the process if AP-stage kernels are
-called from several threads at once (the nulls launch theirs one at a time).
+copairs launches its parallel kernels (the AP stage's and the nulls') one at
+a time, so threads may call it at once under any threading layer, including
+`workqueue`, which stops the process on concurrent launches.
 
 ## Citation
 If you find this work useful for your research, please cite our [paper](https://doi.org/10.1038/s41467-025-60306-2):

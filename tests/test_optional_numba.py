@@ -176,6 +176,28 @@ def test_numba_nulls_do_not_import_fastap():
     assert result.returncode == 0, result.stderr
 
 
+def test_ap_stage_does_not_import_numba_nulls():
+    """A Numba AP stage and its NumPy permutation null load no Numba null kernels.
+
+    The null recomputes similarities with the AP stage's kernel, and only
+    the nulls' own Numba backend needs their kernels (seconds to load).
+    """
+    pytest.importorskip("numba", reason="Numba optional extra is unavailable")
+    result = run_isolated(
+        "import sys\n"
+        "import numpy as np, pandas as pd\n"
+        "from copairs.map import average_precision, mean_average_precision\n"
+        "meta = pd.DataFrame({'g': np.repeat(np.arange(6), 4)})\n"
+        "feats = np.random.default_rng(0).normal(size=(24, 5))\n"
+        "ap = average_precision(meta, feats, ['g'], [], [], ['g'],\n"
+        "                       progress_bar=False, backend='numba')\n"
+        "mean_average_precision(ap, ['g'], 200, 0.05, 0, progress_bar=False,\n"
+        "                       backend='numpy')\n"
+        "assert 'copairs.nulls._numba' not in sys.modules\n"
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("backend", ["auto", "gpu", "Numba", "CUDA", None])
 def test_unknown_backend_raises(backend):
     """Unknown backends raise before any work.

@@ -9,8 +9,9 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs._backend import backend_module, import_backend
+from copairs._backend import backend_module
 from copairs.matching import UnpairedException, find_pairs
+from copairs._numba_cache import launch
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
@@ -86,8 +87,8 @@ class _FeatureSimilarity:
     nulls call it from their worker threads: under ``"numba"`` it runs the
     kernel's serial form on the calling thread (the same bits; many small
     parallel launches from several threads cost more than they gain), and
-    under ``"cuda"`` its launches run one at a time, as the nulls' parallel
-    kernels' do (:func:`copairs.nulls._numba._launch`). Otherwise batches
+    under ``"cuda"`` its launches run one at a time, as parallel kernels'
+    do (:func:`copairs._numba_cache.launch`). Otherwise batches
     of ``batch_size`` pairs go through the same pairwise function as in
     :func:`copairs.compute.get_similarity_fn`, one after another in the
     calling thread.
@@ -105,8 +106,7 @@ class _FeatureSimilarity:
         if self.kernel_backend == "numba":
             return self._kernel_sims(pairs)
         if self.kernel_backend == "cuda":
-            nulls = import_backend("copairs.nulls._numba", self.kernel_backend)
-            return nulls._launch(self._kernel_sims, pairs)
+            return launch(self._kernel_sims, pairs)
         pairs = np.asarray(pairs)
         out = np.empty(len(pairs), dtype=np.float32)
         for lo in range(0, len(pairs), self.batch_size):
