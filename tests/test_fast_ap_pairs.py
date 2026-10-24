@@ -8,6 +8,7 @@ pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
 from copairs import compute
 from copairs.map import multilabel, average_precision, mean_average_precision
+from tests.helpers import shared_labels, random_targets
 from tests.markers import AP_BACKENDS, needs_gpu
 from copairs.fastap import similarity
 from copairs._backend import backend_module
@@ -34,10 +35,7 @@ def label_meta(n, labels=5, seed=0):
     has = np.random.default_rng(seed).random((n, labels)) < 0.3
     return pd.DataFrame(
         {
-            "target": [
-                [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"]
-                for i, h in enumerate(has)
-            ],
+            "target": random_targets(has),
             "plate": np.arange(n) % 3,
         }
     )
@@ -57,11 +55,6 @@ def label_ap(feats, backend, **kwargs):
         label_meta(len(feats)), feats, ["target"], [], ["plate"], ["target"],
         multilabel_col="target", progress_bar=False, backend=backend, **kwargs,
     )  # fmt: skip
-
-
-def shared_labels(ap):
-    """Return the rows of ``ap`` whose target other profiles share."""
-    return ap[ap["target"].str.startswith("L")]
 
 
 @pytest.mark.parametrize("backend", AP_BACKENDS)

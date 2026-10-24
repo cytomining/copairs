@@ -308,6 +308,21 @@ ML_SPEC = dict(
 )
 
 
+def random_targets(has: np.ndarray) -> list[list[str]]:
+    """Targets ``L<j>`` for each true ``has[i, j]`` of row ``i``, plus ``own<i>``.
+
+    The label of its own makes no pairs; it keeps every profile labelled.
+    """
+    return [
+        [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"] for i, h in enumerate(has)
+    ]
+
+
+def shared_labels(ap: pd.DataFrame) -> pd.DataFrame:
+    """Return the rows of ``ap`` for :func:`random_targets`' shared ``L`` labels."""
+    return ap[ap["target"].str.startswith("L")]
+
+
 def label_meta() -> pd.DataFrame:
     """Compounds with overlapping targets; c1 and c8 share two of them.
 

@@ -18,7 +18,15 @@ from copairs.map import (
     mean_average_precision,
     mean_average_precision_hierarchical,
 )
-from tests.helpers import ML_SPEC, ap_frame, query_meta, run_on_copy, copy_copairs
+from tests.helpers import (
+    ML_SPEC,
+    ap_frame,
+    query_meta,
+    run_on_copy,
+    copy_copairs,
+    shared_labels,
+    random_targets,
+)
 from copairs.methods import NULLS
 from tests.test_nulls import run_python
 
@@ -241,10 +249,7 @@ def plate_label_aps(compounds=20, labels=6, plates=3, seed=0):
     has = rng.random((compounds * plates, labels)) < 0.15
     meta = pd.DataFrame(
         {
-            "target": [
-                [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"]
-                for i, h in enumerate(has)
-            ],
+            "target": random_targets(has),
             "plate": np.repeat(np.arange(plates), compounds),
         }
     )
@@ -254,7 +259,7 @@ def plate_label_aps(compounds=20, labels=6, plates=3, seed=0):
         meta, feats, multilabel_col="target", progress_bar=False,
         **dict(ML_SPEC, neg_sameby=["plate"]),
     )  # fmt: skip
-    return ap[ap["target"].str.startswith("L")]
+    return shared_labels(ap)
 
 
 @pytest.mark.parametrize("null", ["permutation", "joint"])

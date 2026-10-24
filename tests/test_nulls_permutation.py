@@ -17,7 +17,7 @@ from scipy import stats
 from copairs import nulls, compute
 from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import permutation, tie_thresholds
-from tests.helpers import ML_SPEC, label_meta
+from tests.helpers import ML_SPEC, label_meta, shared_labels, random_targets
 from copairs._backend import cpu_backends
 from tests.test_nulls import run_python
 from copairs.nulls.common import stream_key
@@ -1151,17 +1151,10 @@ def test_label_permutation_calibrated():
     rng = np.random.default_rng(9)
     n_cpd, n_labels = 300, 150
     has = rng.random((n_cpd, n_labels)) < 0.03
-    meta = pd.DataFrame(
-        {
-            "target": [
-                [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"]
-                for i, h in enumerate(has)
-            ]
-        }
-    )
+    meta = pd.DataFrame({"target": random_targets(has)})
     feats = rng.standard_normal((n_cpd, 4))
     ap, pairs = multilabel_ap(meta, feats, return_pairs=True)
-    ap = ap[ap["target"].str.startswith("L")]
+    ap = shared_labels(ap)
     res = mean_average_precision(
         ap, ["target"], 999, 0.05, 0, progress_bar=False, null="permutation",
         pairs=pairs,
