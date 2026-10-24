@@ -28,11 +28,14 @@ The counts compare float64 nulls against the same thresholds, and sum a
 group's members in the same order, as the NumPy backend; they are exact.
 """
 
+from contextlib import contextmanager
+
 import numpy as np
 
 from copairs import _cuda
 from copairs.nulls import sampler
 from copairs.nulls.common import split_segments, segment_batches
+from copairs.nulls.pvalues import _GROUP_WORK_ROWS
 
 cp = _cuda.cp
 host = _cuda.host
@@ -311,28 +314,144 @@ extern "C" __global__ void group_ge(const double* null, long long size, long lon
         if ((threadIdx.x & 31) == 0 && hits) atomicAdd(counts + g, hits);
     }
 }
+
+// acc[t] += sum_e conf_cnt[e] * null[conf_ix[e], t], over e in order: one piece of a
+// group's members, added in the order group_ge adds them.
+extern "C" __global__ void member_sum(const double* null, long long size, long long n_entries,
+                                      const long long* conf_ix, const long long* conf_cnt,
+                                      double* acc) {
+    for (long long t = blockIdx.x * (long long)blockDim.x + threadIdx.x; t < size;
+         t += (long long)gridDim.x * blockDim.x) {
+        double a = acc[t];
+        for (long long e = 0; e < n_entries; ++e)
+            a += (double)conf_cnt[e] * null[conf_ix[e] * size + t];
+        acc[t] = a;
+    }
+}
+
+// *hits += #{t : acc[t] / n >= thr}
+extern "C" __global__ void mean_ge(const double* acc, long long size, long long n, double thr,
+                                   unsigned long long* hits) {
+    unsigned long long h = 0;
+    for (long long t = blockIdx.x * (long long)blockDim.x + threadIdx.x; t < size;
+         t += (long long)gridDim.x * blockDim.x)
+        if (acc[t] / (double)n >= thr) h += 1;
+    for (int off = 16; off > 0; off >>= 1) h += __shfl_down_sync(0xffffffffu, h, off);
+    if ((threadIdx.x & 31) == 0 && h) atomicAdd(hits, h);
+}
 """
 
+# GPU bytes of group_counts per group (its offset, member count, threshold and
+# hit count) and per member entry (its configuration and count).
+_GROUP_BYTES = 32
+_ENTRY_BYTES = 16
 
-def group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
-    """GPU counterpart of :func:`copairs.nulls.pvalues._group_ge_host`.
 
-    ``null`` is a ``(n_conf, size)`` chunk on the GPU; the groups (``ptr``,
-    ``conf_ix``, ``conf_cnt``, ``n_group`` and ``thr``) and their int64
-    ``counts`` are on the host, as there. The groups go to the GPU with each
-    chunk: 8 bytes per group and member.
+@contextmanager
+def group_counts(ptr, conf_ix, conf_cnt, n_group, thr, counts, size):
+    """GPU counterpart of counting chunks with :func:`copairs.nulls.pvalues._group_ge_host`.
+
+    Yields ``count(null)``, which counts a ``(n_conf, <= size)`` chunk on the
+    GPU; the groups (``ptr``, ``conf_ix``, ``conf_cnt``, ``n_group`` and
+    ``thr``) and their int64 ``counts`` are on the host, and the counts are
+    complete when the block ends. On the GPU, the groups' arrays and hit
+    counts take at most the ``_GROUP_WORK_ROWS`` float64 rows of ``size``
+    that :func:`copairs.nulls.pvalues.map_pvalues` budgets for the counts,
+    as the CPU counters' temporaries do. Groups that fit go to the GPU once,
+    and their hit counts stay there until the block ends; otherwise batches
+    of groups go with each chunk, and a group too large alone adds its
+    members in pieces to a row of the chunk. Either way a group's sum adds
+    its members in order, so the counts are exact.
     """
-    null = cp.ascontiguousarray(null, dtype=cp.float64)
-    size, n_groups = null.shape[1], len(ptr) - 1
-    groups = (cp.asarray(a, dtype=cp.int64) for a in (ptr, conf_ix, conf_cnt, n_group))
-    thr = cp.asarray(thr, dtype=cp.float64)
-    hits = cp.zeros(n_groups, dtype=cp.uint64)
-    _cuda.kernel(_GROUP_GE, "group_ge")(
-        _cuda.grid(size, blocks_per_sm=8, rows=n_groups),
-        (_cuda.BLOCK,),
-        (null, np.int64(size), np.int64(n_groups), *groups, thr, hits),
+    ptr = np.asarray(ptr, dtype=np.int64)
+    groups = tuple(np.asarray(a, dtype=np.int64) for a in (conf_ix, conf_cnt, n_group))
+    thr = np.asarray(thr, dtype=np.float64)
+    work = _GROUP_WORK_ROWS * 8 * size
+    batches = _group_batches(ptr, work)
+    if len(batches) == 1 and batches[0][2]:
+        on_device = _groups_on_device(ptr, *groups, thr, 0, len(thr))
+        hits = cp.zeros(len(thr), dtype=cp.uint64)
+        yield lambda null: _group_ge(null, on_device, hits)
+        counts += host(hits).astype(np.int64)
+        return
+
+    def count(null):
+        for g0, g1, whole in batches:
+            if whole:
+                hits = cp.zeros(g1 - g0, dtype=cp.uint64)
+                _group_ge(null, _groups_on_device(ptr, *groups, thr, g0, g1), hits)
+                counts[g0:g1] += host(hits).astype(np.int64)
+                del hits
+            else:
+                counts[g0] += _large_group_ge(null, ptr, *groups, thr, g0, work)
+
+    yield count
+
+
+def _group_batches(ptr, work_bytes):
+    """Consecutive groups ``(g0, g1, whole)`` that :func:`group_counts` counts at once.
+
+    A whole batch's arrays and hit counts take at most ``work_bytes`` on the
+    GPU; a group too large for that alone is a batch of its own, not whole.
+    """
+    need = np.zeros(len(ptr), dtype=np.int64)
+    np.cumsum(_GROUP_BYTES + _ENTRY_BYTES * np.diff(ptr), out=need[1:])
+    out, g0 = [], 0
+    while g0 < len(ptr) - 1:
+        # A batch's offsets hold one more entry than its groups.
+        g1 = int(np.searchsorted(need, need[g0] + work_bytes - 8, side="right")) - 1
+        out.append((g0, max(g1, g0 + 1), g1 > g0))
+        g0 = max(g1, g0 + 1)
+    return out
+
+
+def _groups_on_device(ptr, conf_ix, conf_cnt, n_group, thr, g0, g1):
+    """Copy groups ``g0:g1`` to the GPU, as the group_ge kernel takes them."""
+    lo, hi = ptr[g0], ptr[g1]
+    return (
+        cp.asarray(ptr[g0 : g1 + 1] - lo),
+        cp.asarray(conf_ix[lo:hi]),
+        cp.asarray(conf_cnt[lo:hi]),
+        cp.asarray(n_group[g0:g1]),
+        cp.asarray(thr[g0:g1]),
     )
-    counts += host(hits).astype(np.int64)
+
+
+def _group_ge(null, groups, hits):
+    """Add the groups' hits on a chunk on the GPU (:func:`_groups_on_device`) to ``hits``."""
+    null = cp.ascontiguousarray(null, dtype=cp.float64)
+    size = null.shape[1]
+    _cuda.kernel(_GROUP_GE, "group_ge")(
+        _cuda.grid(size, blocks_per_sm=8, rows=len(hits)),
+        (_cuda.BLOCK,),
+        (null, np.int64(size), np.int64(len(hits)), *groups, hits),
+    )
+
+
+def _large_group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, g, work_bytes):
+    """Group ``g``'s hits on a chunk, its members added in pieces within ``work_bytes``."""
+    null = cp.ascontiguousarray(null, dtype=cp.float64)
+    size = null.shape[1]
+    acc = cp.zeros(size, dtype=cp.float64)
+    hits = cp.zeros(1, dtype=cp.uint64)
+    piece = max(1, (work_bytes - 8 * size - 8) // _ENTRY_BYTES)
+    for lo in range(ptr[g], ptr[g + 1], piece):
+        hi = min(lo + piece, ptr[g + 1])
+        args = (
+            np.int64(hi - lo),
+            cp.asarray(conf_ix[lo:hi]),
+            cp.asarray(conf_cnt[lo:hi]),
+        )
+        _cuda.kernel(_GROUP_GE, "member_sum")(
+            _cuda.grid(size), (_cuda.BLOCK,), (null, np.int64(size), *args, acc)
+        )
+        del args
+    _cuda.kernel(_GROUP_GE, "mean_ge")(
+        _cuda.grid(size),
+        (_cuda.BLOCK,),
+        (acc, np.int64(size), np.int64(n_group[g]), np.float64(thr[g]), hits),
+    )
+    return int(host(hits)[0])
 
 
 _COUNT_KERNELS = r"""

@@ -465,8 +465,8 @@ class _HostCuda:
     def count_ge(self, null, thr, ptr, counts, budget_bytes):
         pvalues._count_ge_host(null, thr, ptr, counts)
 
-    def group_ge(self, *args):
-        pvalues._group_ge_host(*args)
+    def group_counts(self, *args):
+        return pvalues._host_group_counts(pvalues._group_ge_host, *args)
 
 
 @pytest.fixture
@@ -672,11 +672,25 @@ def _numpy_group_ge(null, size, n_groups, ptr, conf_ix, conf_cnt, n_group, thr, 
     out += counts.astype(np.uint64)
 
 
+def _numpy_member_sum(null, size, n_entries, conf_ix, conf_cnt, acc):
+    """Run the member_sum kernel in NumPy on the fake GPU's arrays."""
+    null = null.reshape(-1, int(size))
+    for e in range(int(n_entries)):
+        acc += conf_cnt[e] * null[conf_ix[e]]
+
+
+def _numpy_mean_ge(acc, size, n, thr, hits):
+    """Run the mean_ge kernel in NumPy on the fake GPU's arrays."""
+    hits += np.uint64(np.count_nonzero(acc / n >= thr))
+
+
 def _count_kernels():
     return {
         "exceed_hist": _numpy_exceed_hist,
         "suffix_add": _numpy_suffix_add,
         "group_ge": _numpy_group_ge,
+        "member_sum": _numpy_member_sum,
+        "mean_ge": _numpy_mean_ge,
     }
 
 
@@ -724,7 +738,9 @@ def test_cuda_counts_match_host(device, budget):
     expected = np.zeros(2, dtype=np.int64)
     pvalues._group_ge_host(null, gptr, conf_ix, conf_cnt, n_group, gthr, expected)
     counts = np.zeros(2, dtype=np.int64)
-    cuda.group_ge(cuda.cp.asarray(null), gptr, conf_ix, conf_cnt, n_group, gthr, counts)
+    groups = (gptr, conf_ix, conf_cnt, n_group, gthr, counts)
+    with cuda.group_counts(*groups, null.shape[1]) as count:
+        count(cuda.cp.asarray(null))
     np.testing.assert_array_equal(counts, expected)
 
 
@@ -751,6 +767,59 @@ def test_cuda_pvalues_count_within_budget(device, budget):
     for args in counted:  # the arrays a count kernel sees, but the null chunk
         held = [a.nbytes for a in args if isinstance(a, np.ndarray) and a.ndim == 1]
         assert sum(held) <= max(budget, 56), held
+
+
+def _map_groups(case, rng):
+    """``(ptr, conf_ix, conf_cnt, confs)`` of mAP groups: a few small ones, or many and a large one."""
+    n_conf = 20 if case == "few" else 200
+    num_pos = rng.integers(1, 6, n_conf)
+    confs = np.stack([num_pos, num_pos + rng.integers(5, 60, n_conf)], axis=1)
+    sizes = [3, 5, 2, 6] if case == "few" else [1, 2, 3] * 25 + [60] + [1, 2, 3] * 25
+    conf_ix = np.concatenate([rng.choice(n_conf, k, replace=False) for k in sizes])
+    conf_cnt = rng.integers(1, 4, len(conf_ix))
+    return np.concatenate([[0], np.cumsum(sizes)]), conf_ix, conf_cnt, confs
+
+
+@pytest.mark.parametrize("case", ["few", "many"])
+def test_cuda_map_pvalues_count_groups_within_budget(device, case):
+    """On the GPU, mAP p-values keep the groups' arrays in the counts' share of the budget.
+
+    The counts get the _GROUP_WORK_ROWS rows of the chunk that map_pvalues
+    budgets for them, as on the CPU. Groups that fit go to the GPU once for
+    every chunk, with their hit counts kept there; otherwise batches of
+    groups go with each chunk, and a group too large alone sums its members
+    in pieces. The p-values stay NumPy's.
+    """
+    rng = np.random.default_rng(5)
+    ptr, conf_ix, conf_cnt, confs = _map_groups(case, rng)
+    scores = rng.random(len(ptr) - 1) * 0.6
+    args = (scores, ptr, conf_ix, conf_cnt, confs, 1000, 6)
+    budget = 2**14
+    expected = nulls.map_pvalues(*args, backend="numpy", budget_bytes=budget)
+    got = nulls.map_pvalues(*args, backend="cuda", budget_bytes=budget)
+    np.testing.assert_array_equal(got, expected)
+    if device is None:
+        return
+    _, launches = device
+    counted = [
+        (name, a)
+        for name, a in launches
+        if name in ("group_ge", "member_sum", "mean_ge")
+    ]
+    chunk = max(int(a[1]) for _, a in counted)
+    work = pvalues._GROUP_WORK_ROWS * 8 * chunk
+    for name, a in counted:  # the arrays a group kernel sees, but the null chunk
+        held = [x.nbytes for x in a if isinstance(x, np.ndarray) and x.ndim == 1]
+        assert sum(held) <= work, (name, held, work)
+    group = [a for name, a in counted if name == "group_ge"]
+    n_chunks = len(range(0, 1000, chunk))
+    if case == "few":
+        assert len(group) == n_chunks > 1
+        assert len({id(a[3]) for a in group}) == 1, "groups uploaded per chunk"
+        assert len({id(a[-1]) for a in group}) == 1, "hit counts copied per chunk"
+    else:
+        assert len(group) > n_chunks
+        assert any(name == "member_sum" for name, _ in counted)
 
 
 @needs_gpu

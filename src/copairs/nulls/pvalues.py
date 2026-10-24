@@ -14,6 +14,7 @@ a tie, as in the paper's ``>=`` definition.
 
 from typing import Callable, NamedTuple
 from functools import partial
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -54,15 +55,17 @@ class _Steps(NamedTuple):
     """A resolved backend's steps of the p-value functions.
 
     ``sample(plan_rows, size, start)`` returns float64 null samples where the
-    counts read them (on the GPU for CUDA), and ``count_ge`` and
-    ``group_ge`` take the arguments of :func:`_count_ge_host` and
-    :func:`_group_ge_host`.
+    counts read them (on the GPU for CUDA), ``count_ge`` takes the arguments
+    of :func:`_count_ge_host`, and ``group_counts(ptr, conf_ix, conf_cnt,
+    n_group, thr, counts, size)`` is a context manager yielding
+    ``count(null)``, which counts chunks of at most ``size`` samples as
+    :func:`_group_ge_host` does, into ``counts`` by the end of the block.
     """
 
     plan: tuple  # the null plan, where sample reads it
     sample: Callable
     count_ge: Callable
-    group_ge: Callable
+    group_counts: Callable
 
 
 def _prepare(
@@ -87,12 +90,14 @@ def _prepare(
     if backend == "cuda":
         cuda = _import_cuda_backend()
         count_ge = partial(cuda.count_ge, budget_bytes=budget_bytes)
-        steps = _Steps(cuda.plan_on_device(plan), sample, count_ge, cuda.group_ge)
+        steps = _Steps(cuda.plan_on_device(plan), sample, count_ge, cuda.group_counts)
     elif backend == "numba":
         kernels = _import_numba_backend()
-        steps = _Steps(plan, sample, kernels.count_ge, kernels.group_ge)
+        group_counts = partial(_host_group_counts, kernels.group_ge)
+        steps = _Steps(plan, sample, kernels.count_ge, group_counts)
     else:
-        steps = _Steps(plan, sample, _count_ge_host, _group_ge_host)
+        group_counts = partial(_host_group_counts, _group_ge_host)
+        steps = _Steps(plan, sample, _count_ge_host, group_counts)
     return thr, conf_ix, null_size, steps
 
 
@@ -169,6 +174,17 @@ def ap_pvalues(
 _GROUP_WORK_ROWS = 3
 
 
+@contextmanager
+def _host_group_counts(group_ge, ptr, conf_ix, conf_cnt, n_group, thr, counts, size):
+    """``_Steps.group_counts`` of a CPU backend's ``group_ge``, called per chunk.
+
+    ``group_ge`` takes :func:`_group_ge_host`'s arguments and keeps its
+    temporaries within the ``_GROUP_WORK_ROWS`` rows of each chunk, so it
+    needs no ``size``.
+    """
+    yield lambda null: group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
+
+
 def _group_ge_host(null, ptr, conf_ix, conf_cnt, n_group, thr, counts):
     acc = np.empty(null.shape[1])
     term = np.empty(null.shape[1])
@@ -235,10 +251,12 @@ def map_pvalues(
     # The chunk and the counts' workspace rows share the budget.
     chunk = chunk_size(null_size, len(confs) + _GROUP_WORK_ROWS, budget_bytes)
     n_work = len(range(0, null_size, chunk))
-    for start, size in progress(
-        chunks(null_size, chunk), n_work, progress_bar, "mAP null"
-    ):
-        null = steps.sample(steps.plan, size, start)
-        steps.group_ge(null, ptr, conf_ix, conf_cnt, n_group, thr, counts)
-        del null  # free this chunk before sampling the next
+    groups = (ptr, conf_ix, conf_cnt, n_group, thr, counts)
+    with steps.group_counts(*groups, chunk) as count:
+        for start, size in progress(
+            chunks(null_size, chunk), n_work, progress_bar, "mAP null"
+        ):
+            null = steps.sample(steps.plan, size, start)
+            count(null)
+            del null  # free this chunk before sampling the next
     return (counts + 1) / (null_size + 1)
