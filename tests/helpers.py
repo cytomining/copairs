@@ -2,6 +2,8 @@
 
 import os
 import sys
+import json
+import shutil
 import subprocess
 import importlib.util
 from typing import Dict
@@ -36,6 +38,34 @@ def run_isolated(code: str) -> subprocess.CompletedProcess:
         capture_output=True,
         check=False,
     )
+
+
+def copy_copairs(root: Path) -> None:
+    """Copy the copairs package under test, without bytecode, to ``root / "copairs"``."""
+    shutil.copytree(
+        Path(nulls.__file__).parents[1],
+        root / "copairs",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+
+
+def run_on_copy(root: Path, probe: str, *args: str, cache="numba_cache", **env) -> dict:
+    """Run ``probe`` on the copy of copairs in ``root`` and return its JSON output.
+
+    The probe runs in ``root``, so it imports the copy, with ``root`` as
+    ``sys.argv[1]`` and ``args`` after it, Numba's cache in ``root / cache``
+    and ``env`` added to the environment.
+    """
+    done = subprocess.run(
+        [sys.executable, "-c", probe, str(root), *args],
+        cwd=root,
+        env={**os.environ, "NUMBA_CACHE_DIR": str(root / cache), **env},
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
 
 
 _WITHOUT_MODULES = """

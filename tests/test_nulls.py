@@ -1,9 +1,6 @@
 """Tests for the counter-based random stream, the AP null sampler and p-values."""
 
-import os
 import sys
-import json
-import shutil
 import itertools
 import subprocess
 import tracemalloc
@@ -14,10 +11,11 @@ import numpy as np
 import pytest
 from scipy.stats import chisquare
 
-import copairs
 from copairs import nulls, methods
 from copairs.nulls import common, philox, pvalues, sampler
 from tests.helpers import (
+    run_on_copy,
+    copy_copairs,
     without_modules,
     brute_ap_pvalues,
     brute_group_nulls,
@@ -829,8 +827,8 @@ def test_map_pvalues_counts_within_budget(backend, monkeypatch):
     assert peaks and max(peaks) <= budget, max(peaks) / budget
 
 
-# Numba and NumPy nulls, and the cache hits of the Numba kernel, of a copy of
-# copairs in the directory argv[1].
+# Numba and NumPy nulls, Numba p-values, and the cache hits of the sampler and
+# count kernels, of a copy of copairs in the directory argv[1].
 _CACHE_PROBE = """
 import sys, json
 import numpy as np
@@ -842,103 +840,56 @@ assert copairs.__file__.startswith(sys.argv[1]), copairs.__file__
 confs = np.array([[1, 7], [3, 10], [9, 49], [3, 1000]])
 nb = nulls.ap_nulls(confs, 50, 0, backend="numba", dtype=np.float64)
 ref = nulls.ap_nulls(confs, 50, 0, backend="numpy", dtype=np.float64)
-hits = sum(_numba._ap_nulls.stats.cache_hits.values())
-print(json.dumps({"numba": nb.tolist(), "numpy": ref.tolist(), "hits": hits}))
+scores = np.linspace(0.05, 0.95, 12)
+p = nulls.ap_pvalues(scores, np.arange(12) % 4, confs, 200, 0, backend="numba")
+hits = [sum(k.stats.cache_hits.values()) for k in (_numba._ap_nulls, _numba._count_ge_kernel)]
+print(json.dumps({"numba": nb.tolist(), "numpy": ref.tolist(), "pvalues": p.tolist(),
+                  "hits": hits}))
 """
 
 
 @pytest.mark.parametrize(
-    "name,old,new",
+    "path,old,new,changed",
     [
-        ("philox.py", ") * INV_2_53\n", ") * (INV_2_53 * 0.5)\n"),
-        ("sampler.py", "    while quot > u:\n", "    while quot > 0.5 * u:\n"),
+        ("nulls/philox.py", ") * INV_2_53\n", ") * (INV_2_53 * 0.5)\n", "all"),
+        (
+            "nulls/sampler.py",
+            "    while quot > u:\n",
+            "    while quot > 0.5 * u:\n",
+            "numba",
+        ),
+        ("_search.py", "v <= key)", "v <= key + 0.25)", "pvalues"),
     ],
+    ids=["philox", "sampler", "upper_bound"],
 )
-def test_numba_cache_follows_edits_to_compiled_files(tmp_path, name, old, new):
+def test_numba_cache_follows_edits_to_compiled_files(tmp_path, path, old, new, changed):
     """Cached Numba kernels follow edits to the files of the functions they compile.
 
     Numba checks a cached kernel only against its own file. The kernel of
-    ``ap_nulls`` compiles the sampler, which compiles Philox: an edit to
-    either must reach the Numba nulls in the next process, while a process
-    after an unchanged one still loads the kernel from the cache.
+    ``ap_nulls`` compiles the sampler, which compiles Philox, and the count
+    kernel inlines ``upper_bound`` from _search.py. After an edit, the next
+    process gives the values of a process with an empty cache, while a
+    process after an unchanged one loads both kernels from the cache. Philox
+    is the NumPy sampler's too; its gap loop is not, and the counts read the
+    Numba samples.
     """
     pytest.importorskip("numba")
-    shutil.copytree(
-        Path(copairs.__file__).parent,
-        tmp_path / "copairs",
-        ignore=shutil.ignore_patterns("__pycache__"),
-    )
-    env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "numba_cache")}
-
-    def run():
-        return json.loads(
-            run_python(_CACHE_PROBE, str(tmp_path), cwd=tmp_path, env=env)
-        )
-
-    before = run()
-    assert run()["hits"] == 1
-    source = tmp_path / "copairs" / "nulls" / name
+    copy_copairs(tmp_path)
+    before = run_on_copy(tmp_path, _CACHE_PROBE)
+    assert run_on_copy(tmp_path, _CACHE_PROBE)["hits"] == [1, 1]
+    source = tmp_path / "copairs" / path
     text = source.read_text()
     assert text.count(old) == 1
     source.write_text(text.replace(old, new))
-    after = run()
-    assert after["numba"] != before["numba"]
-    if name == "philox.py":  # the NumPy sampler shares Philox, not gap_loop
-        assert after["numba"] == after["numpy"] != before["numpy"]
-
-
-# Numba p-values and the cache hits of the count kernel, for a copy of copairs
-# in the directory argv[1].
-_COUNT_CACHE_PROBE = """
-import sys, json
-import numpy as np
-import copairs
-from copairs import nulls
-from copairs.nulls import _numba
-
-assert copairs.__file__.startswith(sys.argv[1]), copairs.__file__
-confs = np.array([[1, 7], [3, 10], [9, 49], [3, 1000]])
-scores = np.linspace(0.05, 0.95, 12)
-p = nulls.ap_pvalues(scores, np.arange(12) % 4, confs, 200, 0, backend="numba")
-hits = sum(_numba._count_ge_kernel.stats.cache_hits.values())
-print(json.dumps({"pvalues": p.tolist(), "hits": hits}))
-"""
-
-
-def test_numba_count_cache_follows_edits_to_upper_bound(tmp_path):
-    """The Numba counts follow edits to the binary search they compile.
-
-    The count kernel inlines ``upper_bound``, defined in another file. After
-    an edit to it, the next process must count as one with an empty cache
-    does, while a process after an unchanged one loads the kernel from the
-    cache.
-    """
-    pytest.importorskip("numba")
-    from copairs.nulls import _numba
-
-    package = Path(copairs.__file__).parent
-    defined_in = Path(_numba.upper_bound.py_func.__code__.co_filename)
-    shutil.copytree(
-        package, tmp_path / "copairs", ignore=shutil.ignore_patterns("__pycache__")
-    )
-
-    def run(cache):
-        done = subprocess.run(
-            [sys.executable, "-c", _COUNT_CACHE_PROBE, str(tmp_path)],
-            cwd=tmp_path,
-            env={**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / cache)},
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        assert done.returncode == 0, done.stderr
-        return json.loads(done.stdout)
-
-    before = run("cache")
-    assert run("cache")["hits"] == 1
-    source = tmp_path / "copairs" / defined_in.relative_to(package)
-    text = source.read_text()
-    assert text.count("v <= key)") == 1
-    source.write_text(text.replace("v <= key)", "v <= key + 0.25)"))
-    after = run("cache")
-    assert after["pvalues"] == run("empty_cache")["pvalues"] != before["pvalues"]
+    after = run_on_copy(tmp_path, _CACHE_PROBE)
+    fresh = run_on_copy(tmp_path, _CACHE_PROBE, cache="empty_cache")
+    changed = {
+        "all": {"numba", "numpy", "pvalues"},
+        "numba": {"numba", "pvalues"},
+        "pvalues": {"pvalues"},
+    }[changed]
+    for key in ("numba", "numpy", "pvalues"):
+        assert after[key] == fresh[key], key
+        assert (after[key] != before[key]) == (key in changed), key
+    if "numpy" in changed:  # the Numba sampler compiled the edited Philox
+        assert after["numba"] == after["numpy"]

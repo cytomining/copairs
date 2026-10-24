@@ -4,13 +4,7 @@ Tests parametrized over ``AP_BACKENDS`` run the Numba kernels, and the CUDA
 ones (:mod:`copairs.fastap.cuda`) where CuPy compiles kernels for a GPU.
 """
 
-import os
-import sys
-import json
-import shutil
-import subprocess
 import tracemalloc
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -20,10 +14,15 @@ pytest.importorskip("numba", reason="Numba optional extra is unavailable")
 
 from numba.core.dispatcher import Dispatcher
 
-import copairs
 from copairs import fastap, compute, matching, _numba_cache
 from copairs.map import multilabel, average_precision
-from tests.helpers import fake_gpu, run_isolated, simulate_random_dframe
+from tests.helpers import (
+    fake_gpu,
+    run_on_copy,
+    copy_copairs,
+    run_isolated,
+    simulate_random_dframe,
+)
 from tests.markers import AP_BACKENDS, needs_gpu, needs_cupy
 from copairs.fastap import draws, ranking, similarity
 from copairs.fastap import multilabel as fast_multilabel
@@ -779,78 +778,38 @@ print(json.dumps(out))
 """
 
 
-def test_numba_cache_follows_edits_to_compiled_files(tmp_path):
-    """Cached kernels follow edits to ranking.py, whose functions they compile.
+@pytest.mark.parametrize(
+    "path,old,new",
+    [
+        (
+            "fastap/ranking.py",
+            "    return acc / num_pos\n",
+            "    return 0.5 * acc / num_pos\n",
+        ),
+        # Keys lie in [0, 2]: every positive now ranks ahead of every negative.
+        ("_search.py", "v <= key)", "v <= key + 2.0)"),
+    ],
+    ids=["ranking", "upper_bound"],
+)
+def test_numba_cache_follows_edits_to_compiled_files(tmp_path, path, old, new):
+    """Cached AP kernels follow edits to the files of the functions they compile.
 
-    Numba checks a cached kernel only against its own file; the draw and
-    multilabel AP kernels live elsewhere. An edit to ``ap_from_counts`` must
-    reach them in the next process, while a process after an unchanged one
-    still loads them from the cache.
+    Numba checks a cached kernel only against its own file. The draw and
+    multilabel AP kernels compile ranking.py's ``ap_from_counts``, and every
+    AP kernel the binary search of _search.py, shared with the Numba nulls.
+    After an edit, the next process gives the APs of a process with an empty
+    cache, while a process after an unchanged one loads the kernels from the
+    cache.
     """
-    shutil.copytree(
-        Path(copairs.__file__).parent,
-        tmp_path / "copairs",
-        ignore=shutil.ignore_patterns("__pycache__"),
-    )
-    env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "numba_cache")}
-
-    def run():
-        done = subprocess.run(
-            [sys.executable, "-c", _CACHE_PROBE, str(tmp_path)],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        assert done.returncode == 0, done.stderr
-        return json.loads(done.stdout)
-
-    before = run()
-    assert run()["hits"] == [1, 1]
-    source = tmp_path / "copairs" / "fastap" / "ranking.py"
-    old = "    return acc / num_pos\n"
+    copy_copairs(tmp_path)
+    before = run_on_copy(tmp_path, _CACHE_PROBE)
+    assert run_on_copy(tmp_path, _CACHE_PROBE)["hits"] == [1, 1]
+    source = tmp_path / "copairs" / path
     text = source.read_text()
     assert text.count(old) == 1
-    source.write_text(text.replace(old, "    return 0.5 * acc / num_pos\n"))
-    after = run()
-    for key in ("draws", "multilabel"):
-        np.testing.assert_array_equal(after[key], 0.5 * np.array(before[key]))
-
-
-def test_numba_cache_follows_edits_to_upper_bound(tmp_path):
-    """Cached AP kernels follow edits to the binary search they compile.
-
-    ``upper_bound`` lives outside ranking.py, shared with the Numba nulls.
-    After an edit to it, the next process must give the APs of a process with
-    an empty cache, for every kernel that compiles it.
-    """
-    package = Path(copairs.__file__).parent
-    defined_in = Path(fastap.ranking.upper_bound.py_func.__code__.co_filename)
-    shutil.copytree(
-        package, tmp_path / "copairs", ignore=shutil.ignore_patterns("__pycache__")
-    )
-
-    def run(cache):
-        done = subprocess.run(
-            [sys.executable, "-c", _CACHE_PROBE, str(tmp_path)],
-            cwd=tmp_path,
-            env={**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / cache)},
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        assert done.returncode == 0, done.stderr
-        return json.loads(done.stdout)
-
-    before = run("cache")
-    assert run("cache")["hits"] == [1, 1]
-    source = tmp_path / "copairs" / defined_in.relative_to(package)
-    text = source.read_text()
-    assert text.count("v <= key)") == 1
-    # Keys lie in [0, 2]: every positive now ranks ahead of every negative.
-    source.write_text(text.replace("v <= key)", "v <= key + 2.0)"))
-    after, fresh = run("cache"), run("empty_cache")
+    source.write_text(text.replace(old, new))
+    after = run_on_copy(tmp_path, _CACHE_PROBE)
+    fresh = run_on_copy(tmp_path, _CACHE_PROBE, cache="empty_cache")
     for key in ("pairs", "draws", "multilabel"):
         assert after[key] == fresh[key] != before[key], key
 

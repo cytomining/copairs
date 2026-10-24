@@ -1,9 +1,6 @@
 """Tests for the choice of mAP null in copairs' mAP functions."""
 
-import os
 import sys
-import json
-import shutil
 import subprocess
 import dataclasses
 from pathlib import Path
@@ -12,7 +9,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import copairs
 import copairs.map.map as map_module
 from copairs import compute
 from copairs.map import (
@@ -22,7 +18,7 @@ from copairs.map import (
     mean_average_precision,
     mean_average_precision_hierarchical,
 )
-from tests.helpers import ML_SPEC, ap_frame, query_meta
+from tests.helpers import ML_SPEC, ap_frame, query_meta, run_on_copy, copy_copairs
 from copairs.methods import NULLS
 from tests.test_nulls import run_python
 
@@ -517,12 +513,10 @@ _MAP_KERNELS = (
 )  # fmt: skip
 
 
-def map_cache_probe(
-    root: Path, env: dict[str, str], nulls=_MAP_NULLS, broken=()
-) -> dict:
-    """Return the probe's output on the copy of copairs in ``root``."""
-    args = (str(root), ",".join(nulls), ",".join(broken))
-    return json.loads(run_python(_MAP_CACHE_PROBE, *args, cwd=root, env=env))
+def map_cache_probe(root: Path, nulls=_MAP_NULLS, broken=()) -> dict:
+    """Return the probe's output on the copy of copairs in ``root``, on 2 Numba threads."""
+    args = (",".join(nulls), ",".join(broken))
+    return run_on_copy(root, _MAP_CACHE_PROBE, *args, NUMBA_NUM_THREADS="2")
 
 
 def pvalues_of(out: dict) -> dict:
@@ -534,22 +528,13 @@ def pvalues_of(out: dict) -> dict:
 def cached_copy(tmp_path_factory):
     """Copy copairs and fill a Numba cache with its mAP null kernels.
 
-    Returns ``(root, env, cold)``: the copy's directory, the environment
-    whose Numba cache it is, and the probe's output of the run that filled it.
+    Returns ``(root, cold)``: the copy's directory, whose Numba cache the
+    probe fills, and the probe's output of the run that filled it.
     """
     pytest.importorskip("numba")
     root = tmp_path_factory.mktemp("map_cache")
-    shutil.copytree(
-        Path(copairs.__file__).parent,
-        root / "copairs",
-        ignore=shutil.ignore_patterns("__pycache__"),
-    )
-    env = {
-        **os.environ,
-        "NUMBA_CACHE_DIR": str(root / "numba_cache"),
-        "NUMBA_NUM_THREADS": "2",
-    }
-    return root, env, map_cache_probe(root, env)
+    copy_copairs(root)
+    return root, map_cache_probe(root)
 
 
 def test_numba_cache_loads_the_map_null_kernels(cached_copy):
@@ -559,9 +544,9 @@ def test_numba_cache_loads_the_map_null_kernels(cached_copy):
     functions that Numba builds in a factory are never loaded from the cache
     when Python calls them, only as part of a kernel.
     """
-    root, env, cold = cached_copy
+    root, cold = cached_copy
     assert all(cold["cache_misses"].get(k, 0) >= 1 for k in _MAP_KERNELS), cold
-    cached = map_cache_probe(root, env)
+    cached = map_cache_probe(root)
     assert pvalues_of(cached) == pvalues_of(cold)
     assert cached["cache_misses"] == {}
     assert all(cached["cache_hits"].get(k, 0) >= 1 for k in _MAP_KERNELS), cached
@@ -610,13 +595,13 @@ def test_numba_cache_follows_edits_to_compiled_files(
     and those nulls raise. Once the file is restored, the kernels load from
     the cache again.
     """
-    root, env, cold = cached_copy
+    root, cold = cached_copy
     source = root / "copairs" / "nulls" / name
     text = source.read_text()
     assert text.count(old) >= 1
     source.write_text(text.replace(old, new))
     try:
-        edited = map_cache_probe(root, env, changed + broken, broken)
+        edited = map_cache_probe(root, changed + broken, broken)
     finally:
         source.write_text(text)
     for key, pvalues in pvalues_of(edited).items():
@@ -628,6 +613,6 @@ def test_numba_cache_follows_edits_to_compiled_files(
         else:
             assert pvalues != cold[key], key
     assert edited["cache_hits"] == {}
-    restored = map_cache_probe(root, env)
+    restored = map_cache_probe(root)
     assert pvalues_of(restored) == pvalues_of(cold)
     assert restored["cache_misses"] == {}
