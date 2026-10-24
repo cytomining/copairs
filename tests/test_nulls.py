@@ -676,6 +676,41 @@ print(list(p), list(m["p_value"]))
     assert out.strip()
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        "nulls.available_backends()",
+        "nulls.ap_nulls([[2, 5]], 4, 0)",
+        "compute.p_values(np.array([0.5]), [[2, 10]], 100, 0, progress_bar=False)",
+    ],
+)
+def test_broken_numba_warning_points_at_the_call(tmp_path, call):
+    """The broken-Numba warning points at the call into copairs that looked it up.
+
+    However deep in copairs the first lookup of "auto" runs.
+    """
+    fake = tmp_path / "numba"
+    fake.mkdir()
+    (fake / "__init__.py").write_text('raise ImportError("simulated broken numba")\n')
+    out = run_python(
+        without_modules("cupy")
+        + f"""
+import sys, warnings
+sys.path.insert(0, {str(tmp_path)!r})
+import numpy as np
+from copairs import nulls, compute
+
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    {call}
+shown = [w for w in caught if w.category is RuntimeWarning]
+assert len(shown) == 1, [str(w.message) for w in shown]
+print(shown[0].filename)
+"""
+    )
+    assert out.strip() == "<string>"
+
+
 def test_import_does_not_load_numba():
     """With numba installed, importing copairs and its null modules leaves it unloaded."""
     pytest.importorskip("numba")

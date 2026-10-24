@@ -5,6 +5,8 @@ SciPy, Numba and CuPy, so that copairs.matching can import it at the top
 while ``import copairs`` stays light.
 """
 
+import os
+import sys
 import warnings
 import importlib
 import importlib.util
@@ -146,7 +148,7 @@ _PROBES = {
 def _imports(backend: str) -> bool:
     """Whether ``backend``'s installed packages import; warn once if they do not.
 
-    The warning points at the caller of :func:`available_backends`.
+    The warning points at the call into copairs that led here.
     """
     module, subject, outcome = _PROBES[backend]
     try:
@@ -155,10 +157,26 @@ def _imports(backend: str) -> bool:
         warnings.warn(
             f"{subject} failed to import ({exc!r}); {outcome}.",
             RuntimeWarning,
-            stacklevel=4,  # _imports < cpu_backends or _cuda_usable < available_backends
+            stacklevel=_caller_level(),
         )
         return False
     return True
+
+
+_PACKAGE = os.path.dirname(__file__) + os.sep
+
+
+def _caller_level() -> int:
+    """Return the ``stacklevel`` that points the caller's warning out of copairs.
+
+    It names the first frame outside the package. The call paths into a
+    backend lookup differ in depth (available_backends, or "auto" deep in a
+    null), so the level is counted, not fixed.
+    """
+    frame, level = sys._getframe(1), 1
+    while frame is not None and frame.f_code.co_filename.startswith(_PACKAGE):
+        frame, level = frame.f_back, level + 1
+    return level
 
 
 def _cuda_usable() -> bool:
