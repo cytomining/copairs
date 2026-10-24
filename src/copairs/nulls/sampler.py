@@ -402,11 +402,8 @@ def _ap_nulls(
     sized so the blocks in flight keep their temporaries within
     ``budget_bytes``; the output is allocated on top of that. The Numba
     backend runs on Numba's threads. Samples do not depend on the threads.
-    The CUDA backend returns a CuPy array.
     """
     dtype = _check_dtype(dtype)
-    if backend == "cuda":
-        return _import_cuda_backend().ap_nulls(plan, start, null_size, dtype)
     num_pos, total, k0, k1 = plan
     out = np.empty((len(num_pos), null_size), dtype=dtype)
     if backend == "numba":

@@ -83,15 +83,20 @@ def _prepare(
     _check_max_workers(max_workers)
     backend = resolve_backend(backend, "ap_nulls")
     plan = null_plan(confs, resolve_seed(seed))
+    if backend == "cuda":
+        cuda = _import_cuda_backend()
+
+        def sample(plan, size, start):
+            return cuda.ap_nulls(plan, start, size, np.float64)
+
+        count_ge = partial(cuda.count_ge, budget_bytes=budget_bytes)
+        steps = _Steps(cuda.plan_on_device(plan), sample, count_ge, cuda.group_counts)
+        return thr, conf_ix, null_size, steps
     sample = partial(
         _ap_nulls, backend=backend, dtype=np.float64, budget_bytes=budget_bytes,
         max_workers=max_workers,
     )  # fmt: skip
-    if backend == "cuda":
-        cuda = _import_cuda_backend()
-        count_ge = partial(cuda.count_ge, budget_bytes=budget_bytes)
-        steps = _Steps(cuda.plan_on_device(plan), sample, count_ge, cuda.group_counts)
-    elif backend == "numba":
+    if backend == "numba":
         kernels = _import_numba_backend()
         group_counts = partial(_host_group_counts, kernels.group_ge)
         steps = _Steps(plan, sample, kernels.count_ge, group_counts)
