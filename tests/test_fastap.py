@@ -430,6 +430,29 @@ def test_draw_average_precisions_validation():
         fastap.draw_average_precisions(feats, [[0, 1]], [[2, 3]], backend="numpy")
 
 
+def test_draw_average_precisions_validate_before_the_backend(monkeypatch):
+    """Bad draws raise ValueError before the backend is looked up.
+
+    Under "cuda" the lookup checks the GPU, whose RuntimeError (no usable
+    GPU) would otherwise hide the input error.
+    """
+
+    def looked_up(backend):
+        raise AssertionError(f"backend {backend!r} looked up")
+
+    monkeypatch.setattr(draws, "backend_module", looked_up)
+    feats = np.eye(4, dtype=np.float32)
+    for args, match in (
+        ((feats, [[0]], [[1, 2]]), "at least 2 queries"),
+        ((feats, [[0, 1]], [[2], [3]]), "n_draws"),
+        ((feats, [[0, 4]], [[2, 3]]), "rows of feats"),
+        ((np.zeros((4, 2)), [[0, 1]], [[2, 3]]), "zero-norm"),
+        ((np.full((4, 2), np.nan), [[0, 1]], [[2, 3]]), "non-finite"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            fastap.draw_average_precisions(*args, backend="cuda")
+
+
 @pytest.mark.parametrize("bad", [-1, 4])
 def test_draw_average_precisions_index_range(bad):
     """Indices outside feats raise instead of wrapping to other rows."""

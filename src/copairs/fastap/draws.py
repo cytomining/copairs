@@ -126,9 +126,6 @@ def draw_average_precisions(
     np.ndarray
         ``(n_draws, k)`` float64 APs.
     """
-    kernels = backend_module(backend)
-    if kernels is None:
-        raise ValueError("backend must be 'numba' or 'cuda': draws have no NumPy code.")
     queries = np.asarray(queries, dtype=np.int64)
     references = np.asarray(references, dtype=np.int64)
     if queries.ndim != 2 or references.ndim != 2 or len(queries) != len(references):
@@ -141,7 +138,12 @@ def draw_average_precisions(
             raise ValueError(f"indices must address the {len(feats)} rows of feats")
     idx = np.concatenate([queries, references], axis=1)
     feats, idx = _drawn_rows(np.asarray(feats), idx)
-    return kernels.draw_aps(unit_rows(feats, normalized), idx, k, budget_bytes)
+    x = unit_rows(feats, normalized)
+    # Looked up after the checks: under "cuda" it checks the GPU.
+    kernels = backend_module(backend)
+    if kernels is None:
+        raise ValueError("backend must be 'numba' or 'cuda': draws have no NumPy code.")
+    return kernels.draw_aps(x, idx, k, budget_bytes)
 
 
 def draw_aps(x: np.ndarray, idx: np.ndarray, k: int, budget_bytes: int) -> np.ndarray:
