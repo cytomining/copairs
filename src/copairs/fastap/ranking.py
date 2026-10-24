@@ -13,13 +13,8 @@ import operator
 import numba
 import numpy as np
 
-from copairs import _search
 from copairs._search import upper_bound
 from copairs._numba_cache import launch, cached_njit
-
-# Files a kernel compiles when it calls this module's device functions, for
-# copairs._numba_cache.cached_njit: Numba's cache sees only the kernel's file.
-KERNEL_SOURCES = (__file__, _search.__file__)
 
 
 def sortable_keys(keys: np.ndarray, xp=np) -> np.ndarray:
@@ -128,7 +123,7 @@ def ap_from_counts(hist, base, num_pos):
     return acc / num_pos
 
 
-@cached_njit(KERNEL_SOURCES, parallel=True)
+@cached_njit(parallel=True)
 def _negative_hist(neg_pairs, neg_sims, ptr, vals, hist, n_neg):
     """Per-profile histograms of negatives over the gaps between positive keys.
 

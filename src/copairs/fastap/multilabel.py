@@ -13,7 +13,6 @@ import numba
 import numpy as np
 import pandas as pd
 
-from copairs.fastap import ranking
 from copairs.matching import _key_pairs, _pair_keys, find_pairs
 from copairs._numba_cache import launch, cached_njit
 from copairs.fastap.ranking import (
@@ -210,7 +209,7 @@ def disjoint_label_pairs(dframe, sameby, diffby, multilabel_col, found):
 
 # _rows_ap compiles ranking's device functions, which Numba's cache would not
 # see (see copairs._numba_cache).
-@cached_njit((__file__, *ranking.KERNEL_SOURCES), parallel=True)
+@cached_njit(parallel=True)
 def _rows_ap(pos_ptr, pos_vals, row_profile, neg_ptr, neg_vals, max_pos, n_tasks):
     """AP of rows with sorted positive keys and their profile's negatives.
 

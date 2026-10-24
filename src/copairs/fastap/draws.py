@@ -12,7 +12,6 @@ each of its sorted positives, so no row is fully sorted.
 import numba
 import numpy as np
 
-from copairs.fastap import ranking
 from copairs._backend import backend_module
 from copairs._numba_cache import launch, cached_njit
 from copairs.fastap.ranking import _rank_key, upper_bound, ap_from_counts
@@ -40,7 +39,7 @@ def unit_rows(feats, normalized: bool = False) -> np.ndarray:
 
 # _row_ap compiles ranking's device functions, which Numba's cache would not
 # see (see copairs._numba_cache).
-@cached_njit((__file__, *ranking.KERNEL_SOURCES), parallel=True)
+@cached_njit(parallel=True)
 def _row_ap(sims, k, out, n_tasks):
     """AP of each ``(draw, query)`` row of ``sims`` with shape ``(n_rows, k + m)``.
 

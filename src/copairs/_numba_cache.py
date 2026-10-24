@@ -1,11 +1,12 @@
-"""Numba's on-disk cache keyed on every source file a kernel compiles, and the launch lock.
+"""Numba's on-disk cache keyed on copairs' sources, and the launch lock.
 
 ``numba.njit(cache=True)`` checks a cached kernel only against the file that
 defines it. Jitted functions it calls from other files are compiled into the
 same cache entry, so after an edit to one of those files Numba keeps loading
-the old machine code. :func:`cached_njit` puts a digest of the source files a
-kernel depends on into the name Numba gives its cache entry, so an edit to any
-of them leads to a new entry, compiled from the current source.
+the old machine code. :func:`cached_njit` puts a digest of every source file
+of copairs into the name Numba gives its cache entry, so an edit to any of
+them leads to a new entry, compiled from the current source, whichever files
+the kernel compiles.
 
 Every parallel kernel of copairs runs under one lock (:func:`launch`).
 
@@ -37,27 +38,28 @@ def launch(kernel, *args):
 
 
 @cache
-def source_digest(paths: tuple[str, ...]) -> str:
-    """Hex digest of the contents of the files at ``paths``."""
+def source_digest() -> str:
+    """Hex digest of the paths and contents of copairs' ``.py`` files."""
+    root = Path(__file__).parent
     h = hashlib.sha256()
-    for path in paths:
-        h.update(Path(path).read_bytes())
+    for path in sorted(root.rglob("*.py")):
+        h.update(str(path.relative_to(root)).encode() + b"\0")
+        h.update(path.read_bytes())
     return h.hexdigest()[:16]
 
 
-def cached_njit(sources: tuple[str, ...], **options):
-    """``numba.njit(cache=True, **options)``, cached per content of ``sources``.
+def cached_njit(**options):
+    """``numba.njit(cache=True, **options)``, cached per content of copairs.
 
-    ``sources`` are the paths of the defining file and of every file whose
-    jitted functions the kernel calls. Numba names a cache entry after the
-    function's module and ``__qualname__``, so the kernel compiles a copy of
-    the function whose qualname ends in :func:`source_digest` of ``sources``;
-    the function itself is left unchanged. Entries for older sources are
-    never read again.
+    For kernels that compile jitted functions of other files. Numba names a
+    cache entry after the function's module and ``__qualname__``, so the
+    kernel compiles a copy of the function whose qualname ends in
+    :func:`source_digest`; the function itself is left unchanged. Entries
+    for older sources are never read again.
     """
     import numba
 
-    suffix = source_digest(tuple(sources))
+    suffix = source_digest()
 
     def jit(func):
         copy = types.FunctionType(
