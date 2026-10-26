@@ -230,6 +230,7 @@ class TestHierarchicalFDR:
         assert len(result) == 1
         first_ap = ap_scores["average_precision"].iloc[0]
         assert result["mean_average_precision"].iloc[0] == first_ap
+        assert result[["p_value", "corrected_p_value"]].notna().all(axis=None)
 
     def test_fdr_correction_no_tests(self):
         """FDR correction of zero p-values returns an empty table."""
