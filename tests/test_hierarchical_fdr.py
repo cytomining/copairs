@@ -200,19 +200,20 @@ class TestHierarchicalFDR:
 
     @pytest.mark.parametrize("hierarchical", [False, True])
     @pytest.mark.parametrize(
-        "column, value",
-        [("average_precision", np.nan), ("n_pos_pairs", 0), ("no rows", None)],
+        "invalidate",
+        [
+            lambda df: df.assign(average_precision=np.nan),
+            lambda df: df.assign(n_pos_pairs=0),
+            lambda df: df.iloc[:0],
+        ],
+        ids=["nan_ap", "no_positives", "no_rows"],
     )
     def test_no_valid_ap_scores(
-        self, sample_ap_scores, tmp_path, column, value, hierarchical
+        self, sample_ap_scores, tmp_path, invalidate, hierarchical
     ):
         """No valid AP scores raise UnpairedException in both mAP entry points."""
-        if column == "no rows":
-            ap_scores = sample_ap_scores.iloc[:0]
-        else:
-            ap_scores = sample_ap_scores.assign(**{column: value})
         with pytest.raises(UnpairedException, match="valid AP scores"):
-            run_map(ap_scores, hierarchical, tmp_path)
+            run_map(invalidate(sample_ap_scores), hierarchical, tmp_path)
 
     @pytest.mark.parametrize("hierarchical", [False, True])
     @pytest.mark.parametrize(
