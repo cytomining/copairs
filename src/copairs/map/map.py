@@ -66,14 +66,14 @@ def get_map_pvalue(
     Raises
     ------
     UnpairedException
-        If no AP score is valid (every AP is NaN or has no positive pairs).
+        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
 
     """
     # Filter out invalid or incomplete AP scores
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
     if ap_scores.empty:
         raise UnpairedException(
-            "Unable to find valid AP scores: every AP is NaN or has no positive pairs."
+            "Unable to find valid AP scores: no row has a non-NaN AP and positive pairs."
         )
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
@@ -180,7 +180,7 @@ def mean_average_precision(
     Raises
     ------
     UnpairedException
-        If no AP score is valid (every AP is NaN or has no positive pairs).
+        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
 
     See Also
     --------
@@ -276,7 +276,7 @@ def mean_average_precision_hierarchical(
     Raises
     ------
     UnpairedException
-        If no AP score is valid (every AP is NaN or has no positive pairs).
+        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
 
     See Also
     --------
