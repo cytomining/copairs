@@ -20,6 +20,23 @@ from copairs.map.hierarchical_fdr import (
 )
 
 
+def run_map(ap_scores, hierarchical, cache_dir):
+    """Run mAP per compound and dose, with or without hierarchical FDR."""
+    kwargs = dict(
+        sameby=["compound", "dose"],
+        null_size=100,
+        threshold=0.05,
+        seed=42,
+        progress_bar=False,
+        cache_dir=cache_dir,
+    )
+    if hierarchical:
+        return mean_average_precision_hierarchical(
+            ap_scores, hierarchical_by=["compound"], **kwargs
+        )
+    return mean_average_precision(ap_scores, **kwargs)
+
+
 class TestHierarchicalFDR:
     """Tests for hierarchical FDR correction in mean_average_precision."""
 
@@ -190,21 +207,8 @@ class TestHierarchicalFDR:
     ):
         """No valid AP scores raise UnpairedException in both mAP entry points."""
         ap_scores = sample_ap_scores.assign(**{column: value})
-        kwargs = dict(
-            sameby=["compound", "dose"],
-            null_size=100,
-            threshold=0.05,
-            seed=42,
-            progress_bar=False,
-            cache_dir=tmp_path,
-        )
         with pytest.raises(UnpairedException, match="valid AP scores"):
-            if hierarchical:
-                mean_average_precision_hierarchical(
-                    ap_scores, hierarchical_by=["compound"], **kwargs
-                )
-            else:
-                mean_average_precision(ap_scores, **kwargs)
+            run_map(ap_scores, hierarchical, tmp_path)
 
     @pytest.mark.parametrize("hierarchical", [False, True])
     @pytest.mark.parametrize(
@@ -216,20 +220,7 @@ class TestHierarchicalFDR:
         """One valid AP score among invalid ones still gives its group's mAP."""
         ap_scores = sample_ap_scores.copy()
         ap_scores.loc[ap_scores.index[1:], column] = value
-        kwargs = dict(
-            sameby=["compound", "dose"],
-            null_size=100,
-            threshold=0.05,
-            seed=42,
-            progress_bar=False,
-            cache_dir=tmp_path,
-        )
-        if hierarchical:
-            result = mean_average_precision_hierarchical(
-                ap_scores, hierarchical_by=["compound"], **kwargs
-            )
-        else:
-            result = mean_average_precision(ap_scores, **kwargs)
+        result = run_map(ap_scores, hierarchical, tmp_path)
 
         first = ap_scores.iloc[0]
         assert result[["compound", "dose"]].values.tolist() == [
