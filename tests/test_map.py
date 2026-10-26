@@ -591,12 +591,12 @@ def test_map_pvalue_rejects_misaligned_pos_pairs():
 
 def run_map_entry(ap_scores, hierarchical, **kwargs):
     """Run the mAP of group "g" from either entry point, hierarchical over "g"."""
-    kwargs = dict(sameby=["g"], null_size=100, threshold=0.05, seed=SEED) | kwargs
+    kwargs = dict(null_size=100, threshold=0.05, seed=SEED, progress_bar=False) | kwargs
     if hierarchical:
         return mean_average_precision_hierarchical(
-            ap_scores, hierarchical_by=["g"], progress_bar=False, **kwargs
+            ap_scores.assign(h=0), ["g", "h"], hierarchical_by=["g"], **kwargs
         )
-    return mean_average_precision(ap_scores, progress_bar=False, **kwargs)
+    return mean_average_precision(ap_scores, ["g"], **kwargs)
 
 
 @pytest.mark.parametrize("hierarchical", [False, True])
