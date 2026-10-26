@@ -10,8 +10,10 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs.matching import UnpairedException
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
+    check_hierarchical_by,
     apply_hierarchical_fdr_correction,
 )
 
@@ -61,9 +63,18 @@ def get_map_pvalue(
         - `p_value`: p-value comparing mAP to the null distribution.
         - `indices`: List of indices in the original ap_scores for this group.
 
+    Raises
+    ------
+    UnpairedException
+        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
+
     """
     # Filter out invalid or incomplete AP scores
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
+    if ap_scores.empty:
+        raise UnpairedException(
+            "Unable to find valid AP scores: no row has a non-NaN AP and positive pairs."
+        )
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
     logger.info("Computing null_dist...")
@@ -166,6 +177,11 @@ def mean_average_precision(
         - `below_p`: Boolean indicating if the p-value is below the threshold.
         - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.
 
+    Raises
+    ------
+    UnpairedException
+        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
+
     See Also
     --------
     mean_average_precision_hierarchical : For hierarchical FDR correction with grouped data.
@@ -257,11 +273,17 @@ def mean_average_precision_hierarchical(
         - `stage1_corrected_p_value`: BH-corrected Stage 1 p-value.
         - `stage1_significant`: Whether the group passed Stage 1.
 
+    Raises
+    ------
+    UnpairedException
+        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
+
     See Also
     --------
     mean_average_precision : For standard BH FDR correction.
 
     """
+    check_hierarchical_by(hierarchical_by, sameby)
     # Step 1: Compute mAP scores and p-values
     map_scores = get_map_pvalue(
         ap_scores=ap_scores,
@@ -305,7 +327,7 @@ def silent_thread_map(fn, *iterables, **kwargs):
     # (github.com/tqdm/tqdm/blob/0ed5d7f18fa3153834cbac0aa57e8092b217cc16/tqdm/contrib/concurrent.py#L29).
 
     kwargs = kwargs.copy()
-    max_workers = kwargs.pop("max_workers", min(32, cpu_count() + 4))
+    max_workers = kwargs.pop("max_workers", min(32, (cpu_count() or 1) + 4))
     chunksize = kwargs.pop("chunksize", 1)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         return list(ex.map(fn, *iterables, chunksize=chunksize, **kwargs))

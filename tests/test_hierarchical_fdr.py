@@ -11,7 +11,30 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import copairs.map.map as map_module
 from copairs.map.map import mean_average_precision, mean_average_precision_hierarchical
+from copairs.matching import UnpairedException
+from copairs.map.hierarchical_fdr import (
+    apply_fdr_correction,
+    apply_hierarchical_fdr_correction,
+)
+
+
+def run_map(ap_scores, hierarchical, cache_dir):
+    """Run mAP per compound and dose, with or without hierarchical FDR."""
+    kwargs = dict(
+        sameby=["compound", "dose"],
+        null_size=100,
+        threshold=0.05,
+        seed=42,
+        progress_bar=False,
+        cache_dir=cache_dir,
+    )
+    if hierarchical:
+        return mean_average_precision_hierarchical(
+            ap_scores, hierarchical_by=["compound"], **kwargs
+        )
+    return mean_average_precision(ap_scores, **kwargs)
 
 
 class TestHierarchicalFDR:
@@ -91,26 +114,27 @@ class TestHierarchicalFDR:
 
         return pd.DataFrame(data)
 
-    def test_hierarchical_by_validation_not_subset(self, sample_ap_scores):
-        """hierarchical_by must be subset of sameby."""
-        with pytest.raises(ValueError, match="must be a subset of"):
+    @pytest.mark.parametrize(
+        "sameby, hierarchical_by, match",
+        [
+            (["compound", "dose"], ["other_column"], "must be a subset of"),
+            (["compound"], ["compound"], "must be a proper subset"),
+        ],
+    )
+    def test_hierarchical_by_validation(
+        self, sample_ap_scores, monkeypatch, sameby, hierarchical_by, match
+    ):
+        """hierarchical_by must be a proper subset of sameby, checked before p-values."""
+        monkeypatch.setattr(
+            map_module,
+            "get_map_pvalue",
+            lambda *args, **kwargs: pytest.fail("p-values computed before validation"),
+        )
+        with pytest.raises(ValueError, match=match):
             mean_average_precision_hierarchical(
                 sample_ap_scores,
-                sameby=["compound", "dose"],
-                hierarchical_by=["other_column"],
-                null_size=100,
-                threshold=0.05,
-                seed=42,
-                progress_bar=False,
-            )
-
-    def test_hierarchical_by_validation_equal_to_sameby(self, sample_ap_scores):
-        """hierarchical_by must be proper subset of sameby."""
-        with pytest.raises(ValueError, match="must be a proper subset"):
-            mean_average_precision_hierarchical(
-                sample_ap_scores,
-                sameby=["compound"],
-                hierarchical_by=["compound"],
+                sameby=sameby,
+                hierarchical_by=hierarchical_by,
                 null_size=100,
                 threshold=0.05,
                 seed=42,
@@ -173,3 +197,54 @@ class TestHierarchicalFDR:
         nonsig_mask = ~result["stage1_significant"]
         if nonsig_mask.any():
             assert (result.loc[nonsig_mask, "corrected_p_value"] == 1.0).all()
+
+    @pytest.mark.parametrize("hierarchical", [False, True])
+    @pytest.mark.parametrize(
+        "invalidate",
+        [
+            lambda df: df.assign(average_precision=np.nan),
+            lambda df: df.assign(n_pos_pairs=0),
+            lambda df: df.iloc[:0],
+        ],
+        ids=["nan_ap", "no_positives", "no_rows"],
+    )
+    def test_no_valid_ap_scores(
+        self, sample_ap_scores, tmp_path, invalidate, hierarchical
+    ):
+        """No valid AP scores raise UnpairedException in both mAP entry points."""
+        with pytest.raises(UnpairedException, match="valid AP scores"):
+            run_map(invalidate(sample_ap_scores), hierarchical, tmp_path)
+
+    @pytest.mark.parametrize("hierarchical", [False, True])
+    @pytest.mark.parametrize(
+        "column, value", [("average_precision", np.nan), ("n_pos_pairs", 0)]
+    )
+    def test_one_valid_ap_score(
+        self, sample_ap_scores, tmp_path, column, value, hierarchical
+    ):
+        """One valid AP score among invalid ones still gives its group's mAP."""
+        ap_scores = sample_ap_scores.copy()
+        ap_scores.loc[ap_scores.index[1:], column] = value
+        result = run_map(ap_scores, hierarchical, tmp_path)
+
+        assert len(result) == 1
+        first_ap = ap_scores["average_precision"].iloc[0]
+        assert result["mean_average_precision"].iloc[0] == first_ap
+        assert result[["p_value", "corrected_p_value"]].notna().all(axis=None)
+
+    def test_fdr_correction_no_tests(self):
+        """FDR correction of zero p-values returns an empty table."""
+        empty = pd.DataFrame(
+            {
+                "compound": pd.Series([], dtype=str),
+                "dose": pd.Series([], dtype=int),
+                "p_value": pd.Series([], dtype=float),
+            }
+        )
+        standard = apply_fdr_correction(empty)
+        hierarchical = apply_hierarchical_fdr_correction(
+            empty, ["compound"], ["compound", "dose"]
+        )
+        for result in (standard, hierarchical):
+            assert len(result) == 0
+            assert "corrected_p_value" in result.columns
