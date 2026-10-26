@@ -1,6 +1,10 @@
 """Helper functions for testing."""
 
+import os
+import sys
+import subprocess
 from typing import Dict
+from pathlib import Path
 from itertools import product
 
 import numpy as np
@@ -9,6 +13,27 @@ import pandas as pd
 from copairs.matching import ColumnList
 
 SEED = 0
+PROJECT_ROOT = Path(__file__).parents[1]
+
+
+def run_isolated(code: str) -> subprocess.CompletedProcess:
+    """Run ``code`` in a fresh interpreter on this checkout's sources.
+
+    Keeps a crash in compiled code, or a module loaded by the code, out of
+    the test process.
+    """
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(PROJECT_ROOT / "src"), env.get("PYTHONPATH", "")]
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=PROJECT_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def simulate_plates(n_compounds, n_replicates, plate_size):

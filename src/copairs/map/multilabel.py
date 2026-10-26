@@ -1,13 +1,14 @@
 """Functions to compute mAP with multilabel support."""
 
 import logging
-from typing import List
+from typing import List, Literal
 
 import numpy as np
 import pandas as pd
 
 from copairs import compute
-from copairs.matching import UnpairedException, find_pairs_multilabel
+from copairs._backend import backend_module
+from copairs.matching import UnpairedException, _unique_pairs, _multilabel_matcher
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
@@ -79,47 +80,85 @@ def average_precision(
     batch_size=20000,
     distance="cosine",
     progress_bar: bool = True,
+    backend: Literal["numpy", "numba"] = "numpy",
 ) -> pd.DataFrame:
     """
     Compute average precision with multilabel support.
 
     Returns normalized_average_precision in addition to average_precision.
 
+    Parameters
+    ----------
+    backend : {"numpy", "numba"}
+        As in :func:`copairs.map.average_precision`. ``"numba"`` also matches
+        pairs through an inverted label index (see
+        :func:`copairs.matching.find_pairs_multilabel`) and computes every
+        label's APs in one parallel kernel instead of a loop over labels.
+        As there, ``batch_size`` and ``progress_bar`` apply only to
+        distances without a kernel.
+
     See Also
     --------
     copairs.map.average_precision : Average precision without multilabel support.
     """
+    fastap = backend_module(backend)
+
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
     meta, columns = evaluate_and_filter(meta, columns)
     validate_pipeline_input(meta, feats, columns)
     distance_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    if fastap is not None:
+        distance_fn = fastap.similarity_fn(feats, distance, distance_fn)
     # Critical!, otherwise the indexing wont work
     meta = meta.reset_index(drop=True).copy()
 
     logger.info("Indexing metadata...")
 
+    # One label index, under Numba, for both positive and negative pairs
+    find_pairs = _multilabel_matcher(meta, multilabel_col, fastap)
+
     logger.info("Finding positive pairs...")
-    pos_pairs, keys, pos_counts = find_pairs_multilabel(
-        meta, sameby=pos_sameby, diffby=pos_diffby, multilabel_col=multilabel_col
-    )
+    pos_pairs, keys, pos_counts = find_pairs(pos_sameby, pos_diffby)
     if len(pos_pairs) == 0:
         raise UnpairedException("Unable to find positive pairs.")
 
     logger.info("Finding negative pairs...")
-    neg_pairs = find_pairs_multilabel(
-        meta, sameby=neg_sameby, diffby=neg_diffby, multilabel_col=multilabel_col
-    )
+    neg_pairs = find_pairs(neg_sameby, neg_diffby)
     if len(neg_pairs) == 0:
         raise UnpairedException("Unable to find any negative pairs.")
 
     logger.info("Dropping dups in negative pairs...")
-    neg_pairs = np.unique(neg_pairs, axis=0)
+    neg_pairs = _unique_pairs(neg_pairs)
 
     logger.info("Computing positive similarities...")
     pos_sims = distance_fn(feats, pos_pairs, batch_size)
 
     logger.info("Computing negative similarities...")
     neg_sims = distance_fn(feats, neg_pairs, batch_size)
+
+    if fastap is not None:
+        logger.info("Computing AP per label...")
+        label, ix, ap, num_pos, total = fastap.multilabel.multilabel_ap(
+            pos_pairs, pos_sims, pos_counts, neg_pairs, neg_sims, len(meta)
+        )
+        # The per-label frames below broadcast each key: NumPy keys keep their
+        # dtype, strings make a str column (from a list, not an object array).
+        label_values = np.asarray(keys)[label]
+        if label_values.dtype == object:
+            label_values = label_values.tolist()
+        results = pd.DataFrame(
+            {
+                "average_precision": ap,
+                "normalized_average_precision": normalize_ap(
+                    ap, num_pos, total - num_pos, backend=backend
+                ),
+                "n_pos_pairs": num_pos,
+                "n_total_pairs": total,
+                "ix": ix,
+                multilabel_col: label_values,
+            }
+        )
+        return _merge_results(meta, results, multilabel_col)
 
     logger.info("Computing AP per label...")
     negs_for = _create_neg_query_solver(neg_pairs, neg_sims, len(meta))
@@ -150,6 +189,11 @@ def average_precision(
         )
         results.append(result)
     results = pd.concat(results).reset_index(drop=True)
+    return _merge_results(meta, results, multilabel_col)
+
+
+def _merge_results(meta, results, multilabel_col):
+    """Join per-label AP rows (by ``ix``) with the profiles' metadata."""
     meta = meta.drop(multilabel_col, axis=1)
     results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
     results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.uint32)

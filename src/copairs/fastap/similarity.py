@@ -1,0 +1,140 @@
+"""Pairwise similarities computed in parallel kernels.
+
+Cosine-type metrics normalize each profile once and then take one dot
+product per pair, instead of gathering and normalizing both rows of every
+pair. Normalization and dot products run in float64 and results are returned
+as float32, like ``copairs.compute.get_similarity_fn``; results match it to
+float32 rounding, not bitwise. One exception: the generic functions compute in
+the input's precision, so float32 rows whose norms overflow float32 (entries
+around 1e19 and up) get similarity 0 or NaN there and their actual value here.
+"""
+
+from typing import Callable
+
+import numba
+import numpy as np
+
+from copairs.fastap.ranking import index_pairs
+
+# Dot products of unit rows; 1 / (1 + distance), in _minkowski_pairs' order.
+COSINE_METRICS = ("cosine", "abs_cosine", "correlation")
+MINKOWSKI_METRICS = ("euclidean", "manhattan", "chebyshev")
+FAST_METRICS = COSINE_METRICS + MINKOWSKI_METRICS
+
+_ROW_BLOCK = 8192
+
+
+def _unit_rows(
+    feats: np.ndarray, center: bool, dtype=None, strict: bool = False
+) -> np.ndarray:
+    """Rows scaled to unit norm (after centering for correlation).
+
+    Computed in float64 one block of rows at a time, so the temporaries stay
+    small, and stored as ``dtype``: by default float32 unless ``feats`` is
+    float64. With ``strict``, non-finite and zero norms raise ValueError
+    instead of giving NaN rows.
+    """
+    if dtype is None:
+        dtype = np.float64 if feats.dtype == np.float64 else np.float32
+    out = np.empty(feats.shape, dtype=dtype)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for start in range(0, len(feats), _ROW_BLOCK):
+            x = np.asarray(feats[start : start + _ROW_BLOCK], dtype=np.float64)
+            if center:
+                x = x - x.mean(axis=1, keepdims=True)
+            norms = np.linalg.norm(x, axis=1, keepdims=True)
+            if strict and not np.isfinite(norms).all():
+                raise ValueError("non-finite features; clean them first")
+            if strict and (norms == 0).any():
+                raise ValueError(
+                    "zero-norm feature vector; cosine similarity is undefined"
+                )
+            out[start : start + _ROW_BLOCK] = x / norms
+    return out
+
+
+@numba.njit(parallel=True, fastmath={"reassoc", "contract"}, cache=True)
+def _dot_pairs(x, pairs, out):
+    for p in numba.prange(len(pairs)):
+        a, b = x[pairs[p, 0]], x[pairs[p, 1]]
+        acc = 0.0
+        for t in range(len(a)):
+            acc += np.float64(a[t]) * b[t]
+        out[p] = acc
+
+
+@numba.njit(parallel=True, fastmath={"reassoc", "contract"}, cache=True)
+def _minkowski_pairs(x, pairs, kind, out):
+    """``1 / (1 + distance)`` for kind 0 = euclidean, 1 = manhattan, 2 = chebyshev."""
+    for p in numba.prange(len(pairs)):
+        a, b = x[pairs[p, 0]], x[pairs[p, 1]]
+        acc = 0.0
+        for t in range(len(a)):
+            diff = abs(np.float64(a[t]) - b[t])
+            if kind == 0:
+                acc += diff * diff
+            elif kind == 1:
+                acc += diff
+            elif diff > acc or np.isnan(diff):  # NaN propagates, as in np.max
+                acc = diff
+        if kind == 0:
+            acc = np.sqrt(acc)
+        out[p] = 1.0 / (1.0 + acc)
+
+
+def pair_similarity(feats: np.ndarray, metric) -> Callable | None:
+    """Return a ``pairs -> float32 similarities`` kernel, or None without one.
+
+    Parameters
+    ----------
+    feats : np.ndarray
+        ``(n, d)`` profiles; the kernel uses them as given here.
+    metric : str or callable
+        A distance name; only :data:`FAST_METRICS` have a kernel.
+
+    Returns
+    -------
+    callable or None
+        Takes ``(m, 2)`` integer row indices of ``feats`` and returns ``m``
+        float32 similarities, rounded from float64 into the output without a
+        full-size temporary. uint32 pairs are used without a copy. Raises
+        ValueError for other shapes or dtypes and IndexError for indices
+        outside ``feats``, checked once per call before the kernel runs.
+    """
+    if not isinstance(metric, str) or metric not in FAST_METRICS:
+        return None
+    feats = np.asarray(feats)
+    if feats.dtype not in (np.float32, np.float64):
+        feats = feats.astype(np.float64)
+
+    if metric in MINKOWSKI_METRICS:
+        x = np.ascontiguousarray(feats)
+        kind = MINKOWSKI_METRICS.index(metric)
+
+        def minkowski(pairs):
+            pairs = index_pairs(pairs, len(x))
+            out = np.empty(len(pairs), dtype=np.float32)
+            _minkowski_pairs(x, pairs, kind, out)
+            return out
+
+        return minkowski
+
+    x = np.ascontiguousarray(_unit_rows(feats, metric == "correlation"))
+
+    def dot(pairs):
+        pairs = index_pairs(pairs, len(x))
+        out = np.empty(len(pairs), dtype=np.float32)
+        _dot_pairs(x, pairs, out)
+        if metric == "abs_cosine":
+            np.abs(out, out=out)
+        return out
+
+    return dot
+
+
+def PairSimilarity(feats: np.ndarray, metric: str) -> Callable:
+    """:func:`pair_similarity`'s kernel, raising ValueError for metrics without one."""
+    kernel = pair_similarity(feats, metric)
+    if kernel is None:
+        raise ValueError(f"no fast kernel for {metric!r}; expected {FAST_METRICS}")
+    return kernel

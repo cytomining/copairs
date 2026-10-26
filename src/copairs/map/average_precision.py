@@ -1,12 +1,13 @@
 """Functions to compute average precision."""
 
 import logging
-from typing import List
+from typing import List, Literal
 
 import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs._backend import backend_module
 from copairs.matching import UnpairedException, find_pairs
 
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
@@ -92,6 +93,7 @@ def average_precision(
     batch_size: int = 20000,
     distance: str = "cosine",
     progress_bar: bool = True,
+    backend: Literal["numpy", "numba"] = "numpy",
 ) -> pd.DataFrame:
     """Calculate average precision (AP) scores for pairs of profiles based on their similarity.
 
@@ -143,6 +145,23 @@ def average_precision(
     distance : str
         The distance function used for computing similarities. Default is "cosine".
 
+    progress_bar : bool
+        Whether to show progress bars for similarity computation.
+
+    backend : {"numpy", "numba"}
+        The default ``"numpy"`` has no optional dependencies and gives the
+        results of copairs <= 0.5.5. ``"numba"`` (install
+        ``copairs[numba]``) computes similarities with parallel kernels for
+        cosine, abs_cosine, correlation, euclidean, manhattan and chebyshev
+        (other distances use the NumPy functions), AP by counting the negatives
+        between sorted positives instead of sorting rank lists, and normalized
+        AP from a harmonic-number table. Given the same similarities, its APs
+        match ``"numpy"`` to float64 rounding. The kernels' similarities match
+        to float32 rounding, so near-ties can rank differently, and they are
+        computed in float64, so float32 rows whose norms overflow float32 get
+        their actual similarity. The kernels take all pairs at once:
+        ``batch_size`` and ``progress_bar`` apply only to the other distances.
+
     Returns
     -------
     pd.DataFrame
@@ -167,6 +186,8 @@ def average_precision(
         * Negative pairs are defined by `neg_diffby` (profiles differ in these metadata values)
           and optionally constrained by `neg_sameby` (profiles share these metadata values if specified).
     """
+    fastap = backend_module(backend)
+
     # Combine all metadata columns needed for pair definitions
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
 
@@ -176,6 +197,8 @@ def average_precision(
 
     # Get the distance function for similarity calculations (e.g., cosine)
     similarity_fn = compute.get_similarity_fn(distance, progress_bar=progress_bar)
+    if fastap is not None:
+        similarity_fn = fastap.similarity_fn(feats, distance, similarity_fn)
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
@@ -202,15 +225,22 @@ def average_precision(
     logger.info("Computing negative similarities...")
     neg_sims = similarity_fn(feats, neg_pairs, batch_size)
 
-    # Build rank lists for calculating average precision
-    logger.info("Building rank lists...")
-    paired_ix, rel_k_list, counts = build_rank_lists(
-        pos_pairs, neg_pairs, pos_sims, neg_sims
-    )
+    if fastap is not None:
+        # Count each positive's preceding negatives instead of sorting
+        logger.info("Computing average precision...")
+        paired_ix, ap_scores, null_confs = fastap.ap_from_pairs(
+            pos_pairs, neg_pairs, pos_sims, neg_sims, n=len(meta)
+        )
+    else:
+        # Build rank lists for calculating average precision
+        logger.info("Building rank lists...")
+        paired_ix, rel_k_list, counts = build_rank_lists(
+            pos_pairs, neg_pairs, pos_sims, neg_sims
+        )
 
-    # Compute average precision scores and associated configurations
-    logger.info("Computing average precision...")
-    ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
+        # Compute average precision scores and associated configurations
+        logger.info("Computing average precision...")
+        ap_scores, null_confs = compute.ap_contiguous(rel_k_list, counts)
 
     # Add AP scores and pair counts to the metadata DataFrame
     logger.info("Creating result DataFrame...")
@@ -227,7 +257,7 @@ def average_precision(
     M = null_confs[:, 0]  # n_pos_pairs
     L = null_confs[:, 1]  # n_total_pairs
     N = L - M  # n_neg_pairs
-    normalized_scores = normalize_ap(ap_scores, M, N)
+    normalized_scores = normalize_ap(ap_scores, M, N, backend=backend)
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
