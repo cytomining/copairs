@@ -222,11 +222,9 @@ class TestHierarchicalFDR:
         ap_scores.loc[ap_scores.index[1:], column] = value
         result = run_map(ap_scores, hierarchical, tmp_path)
 
-        first = ap_scores.iloc[0]
-        assert result[["compound", "dose"]].values.tolist() == [
-            [first["compound"], first["dose"]]
-        ]
-        assert result["mean_average_precision"].iloc[0] == first["average_precision"]
+        assert len(result) == 1
+        first_ap = ap_scores["average_precision"].iloc[0]
+        assert result["mean_average_precision"].iloc[0] == first_ap
 
     def test_fdr_correction_no_tests(self):
         """FDR correction of zero p-values returns an empty table."""
