@@ -46,6 +46,12 @@ def resolve_seed(seed: int | None) -> int:
     return int(seed)
 
 
+def check_seed(seed: int | None) -> None:
+    """Raise unless ``seed`` is ``None`` or a Philox seed, in ``[0, 2**64)``."""
+    if seed is not None and not 0 <= seed < 2**64:
+        raise ValueError(f"seed must be in [0, 2**64), got {seed}")
+
+
 def stream_key(seed: int, obj) -> tuple[np.uint64, np.uint64]:
     """Philox key ``(k0, k1)`` of ``obj``'s draws: a pure function of ``(seed, obj)``.
 

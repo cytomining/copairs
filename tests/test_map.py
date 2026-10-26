@@ -12,7 +12,12 @@ import pytest
 from sklearn.metrics import average_precision_score
 
 from copairs import compute
-from copairs.map import get_map_pvalue, average_precision, mean_average_precision
+from copairs.map import (
+    get_map_pvalue,
+    average_precision,
+    mean_average_precision,
+    mean_average_precision_hierarchical,
+)
 from tests.helpers import ap_frame, query_meta, simulate_random_dframe
 from copairs.matching import UnpairedException, find_pairs
 from copairs.map.multilabel import average_precision as multilabel_average_precision
@@ -582,3 +587,46 @@ def test_map_pvalue_rejects_misaligned_pos_pairs():
             pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
             **kwargs,
         )
+
+
+def run_map_entry(ap_scores, hierarchical, **kwargs):
+    """Run the mAP of group "g" from either entry point, hierarchical over "g"."""
+    kwargs = dict(sameby=["g"], null_size=100, threshold=0.05, seed=SEED) | kwargs
+    if hierarchical:
+        return mean_average_precision_hierarchical(
+            ap_scores, hierarchical_by=["g"], progress_bar=False, **kwargs
+        )
+    return mean_average_precision(ap_scores, progress_bar=False, **kwargs)
+
+
+@pytest.mark.parametrize("hierarchical", [False, True])
+@pytest.mark.parametrize("null", ["permutation", "joint", "copied"])
+def test_no_valid_ap_scores_raise_under_every_null(null, hierarchical, tmp_path):
+    """AP frames with no valid AP score raise, with their pairs attached."""
+    meta = query_meta()
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    for frame in (ap.iloc[:0], ap.assign(average_precision=np.nan)):
+        with pytest.raises(UnpairedException, match="valid AP scores"):
+            run_map_entry(frame, hierarchical, null=null, cache_dir=tmp_path)
+
+
+@pytest.mark.parametrize("hierarchical", [False, True])
+@pytest.mark.parametrize(
+    "bad, match",
+    [
+        (dict(null="exact"), "unknown null"),
+        (dict(null_size=-1), "null_size"),
+        (dict(seed=-1, null="joint"), "seed must be"),
+        (dict(seed=-1), "seed must be"),
+        (dict(seed=-1, null="copied"), "seed must be"),
+        (dict(pos_pairs=np.zeros((0, 2), dtype=int)), "joint null only"),
+        (dict(pairs=None, null="permutation"), "needs the pairs"),
+    ],
+)
+def test_empty_input_checks_arguments_first(bad, match, hierarchical):
+    """Bad arguments raise their own error on AP frames with no valid AP score."""
+    empty = ap_frame([("q", 0.5, 1, 10)]).iloc[:0]
+    empty.attrs.clear()  # no attached pairs
+    with pytest.raises(ValueError, match=match):
+        run_map_entry(empty, hierarchical, **bad)

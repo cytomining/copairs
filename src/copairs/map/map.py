@@ -14,6 +14,7 @@ from copairs import compute
 from copairs.nulls import joint, permutation, tie_thresholds
 from copairs.methods import check_null
 from copairs.matching import UnpairedException
+from copairs.nulls.common import check_seed, check_null_size
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     check_hierarchical_by,
@@ -130,6 +131,11 @@ def get_map_pvalue(
 
     """
     null = check_null(null)
+    null_size = check_null_size(null_size)
+    if null != "copied":
+        check_seed(seed)
+    elif seed is not None and seed < 0:  # NumPy takes any non-negative int
+        raise ValueError(f"seed must be non-negative, got {seed}")
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
     if null != "copied" and pos_pairs is None and pairs is None:
@@ -262,8 +268,6 @@ def _copied_pvalues(
     float32 rounding: the AP samples are float32, so a null mAP equal to the
     score can lie up to that rounding below it.
     """
-    if not groups:
-        return np.zeros(0, dtype=np.float64)
     rows = np.unique(np.concatenate(groups))
     null_confs = ap_scores.loc[rows, ["n_pos_pairs", "n_total_pairs"]].values
     null_confs, conf_ix = np.unique(null_confs, axis=0, return_inverse=True)
