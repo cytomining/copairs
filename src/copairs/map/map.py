@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from copairs import compute
+from copairs.matching import UnpairedException
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     check_hierarchical_by,
@@ -62,9 +63,18 @@ def get_map_pvalue(
         - `p_value`: p-value comparing mAP to the null distribution.
         - `indices`: List of indices in the original ap_scores for this group.
 
+    Raises
+    ------
+    UnpairedException
+        If no AP score is valid (every AP is NaN or has no positive pairs).
+
     """
     # Filter out invalid or incomplete AP scores
     ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
+    if ap_scores.empty:
+        raise UnpairedException(
+            "Unable to find valid AP scores: every AP is NaN or has no positive pairs."
+        )
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
     logger.info("Computing null_dist...")
@@ -167,6 +177,11 @@ def mean_average_precision(
         - `below_p`: Boolean indicating if the p-value is below the threshold.
         - `below_corrected_p`: Boolean indicating if the corrected p-value is below the threshold.
 
+    Raises
+    ------
+    UnpairedException
+        If no AP score is valid (every AP is NaN or has no positive pairs).
+
     See Also
     --------
     mean_average_precision_hierarchical : For hierarchical FDR correction with grouped data.
@@ -257,6 +272,11 @@ def mean_average_precision_hierarchical(
         - `stage1_p_value`: Group-level p-value from Stage 1 (minimum p-value).
         - `stage1_corrected_p_value`: BH-corrected Stage 1 p-value.
         - `stage1_significant`: Whether the group passed Stage 1.
+
+    Raises
+    ------
+    UnpairedException
+        If no AP score is valid (every AP is NaN or has no positive pairs).
 
     See Also
     --------

@@ -13,6 +13,7 @@ import pytest
 
 import copairs.map.map as map_module
 from copairs.map.map import mean_average_precision, mean_average_precision_hierarchical
+from copairs.matching import UnpairedException
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     apply_hierarchical_fdr_correction,
@@ -187,8 +188,34 @@ class TestHierarchicalFDR:
     def test_no_valid_ap_scores(
         self, sample_ap_scores, tmp_path, column, value, hierarchical
     ):
-        """No valid AP scores give an empty mAP table with the usual columns."""
+        """No valid AP scores raise UnpairedException in both mAP entry points."""
         ap_scores = sample_ap_scores.assign(**{column: value})
+        kwargs = dict(
+            sameby=["compound", "dose"],
+            null_size=100,
+            threshold=0.05,
+            seed=42,
+            progress_bar=False,
+            cache_dir=tmp_path,
+        )
+        with pytest.raises(UnpairedException, match="valid AP scores"):
+            if hierarchical:
+                mean_average_precision_hierarchical(
+                    ap_scores, hierarchical_by=["compound"], **kwargs
+                )
+            else:
+                mean_average_precision(ap_scores, **kwargs)
+
+    @pytest.mark.parametrize("hierarchical", [False, True])
+    @pytest.mark.parametrize(
+        "column, value", [("average_precision", np.nan), ("n_pos_pairs", 0)]
+    )
+    def test_one_valid_ap_score(
+        self, sample_ap_scores, tmp_path, column, value, hierarchical
+    ):
+        """One valid AP score among invalid ones still gives its group's mAP."""
+        ap_scores = sample_ap_scores.copy()
+        ap_scores.loc[ap_scores.index[1:], column] = value
         kwargs = dict(
             sameby=["compound", "dose"],
             null_size=100,
@@ -204,14 +231,11 @@ class TestHierarchicalFDR:
         else:
             result = mean_average_precision(ap_scores, **kwargs)
 
-        assert len(result) == 0
-        assert {
-            "mean_average_precision",
-            "p_value",
-            "corrected_p_value",
-            "below_p",
-            "below_corrected_p",
-        } <= set(result.columns)
+        first = ap_scores.iloc[0]
+        assert result[["compound", "dose"]].values.tolist() == [
+            [first["compound"], first["dose"]]
+        ]
+        assert result["mean_average_precision"].iloc[0] == first["average_precision"]
 
     def test_fdr_correction_no_tests(self):
         """FDR correction of zero p-values returns an empty table."""
