@@ -252,7 +252,7 @@ def get_map_pvalue(
 
 
 def _check_row_index(index: pd.Index) -> None:
-    """Raise unless ``index`` holds row numbers, which AP pairs can index."""
+    """Raise unless ``index`` holds distinct row numbers, which AP pairs can index."""
     if index.dtype.kind not in "iu" or (len(index) and index.min() < 0):
         raise ValueError(
             "the AP scores' index must hold the row numbers of the frame "
@@ -260,6 +260,12 @@ def _check_row_index(index: pd.Index) -> None:
             f"of dtype {index.dtype}"
             + ("" if index.dtype.kind not in "iu" else " with negative labels")
             + ". Keep that frame's index (no set_index or reset_index)."
+        )
+    if not index.is_unique:
+        raise ValueError(
+            "the AP scores' index repeats row numbers, e.g. after concatenating "
+            "copies or overlapping subsets of one AP frame, which keeps its "
+            "pairs; the pairs-based nulls need each profile's AP once."
         )
 
 

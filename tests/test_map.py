@@ -441,7 +441,7 @@ def test_map_pvalue_one_profile_groups_use_their_ap_null():
 
 
 def test_joint_null_reads_attached_pairs():
-    """The joint null takes edges from attached pairs, so a reset index raises."""
+    """The joint null takes edges from attached pairs, so a reset or repeated index raises."""
     rng = np.random.default_rng(SEED)
     meta = query_meta(others=3)
     meta = meta.sample(frac=1, random_state=1).reset_index(drop=True)
@@ -458,6 +458,10 @@ def test_joint_null_reads_attached_pairs():
     for null in ("joint", "permutation"):
         with pytest.raises(ValueError, match="no reset_index"):
             get_map_pvalue(reset, ["g"], 2000, SEED, progress_bar=False, null=null)
+    doubled = pd.concat([kept, kept])  # keeps the pairs, repeats every row
+    for null in ("joint", "permutation"):
+        with pytest.raises(ValueError, match="repeats row numbers"):
+            get_map_pvalue(doubled, ["g"], 2000, SEED, progress_bar=False, null=null)
 
 
 def test_joint_null_uses_attached_pairs_for_outside_positives():
