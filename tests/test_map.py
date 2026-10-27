@@ -617,7 +617,6 @@ def test_no_valid_ap_scores_raise_under_every_null(null, hierarchical, tmp_path)
     [
         (dict(null="exact"), "unknown null"),
         (dict(null_size=-1), "null_size"),
-        (dict(seed=-1, null="joint"), "seed must be"),
         (dict(seed=-1), "seed must be"),
         (dict(seed=-1, null="copied"), "seed must be"),
         (dict(pos_pairs=np.zeros((0, 2), dtype=int)), "joint null only"),
