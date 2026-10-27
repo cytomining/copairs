@@ -244,6 +244,14 @@ def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
     return 1 / (1 + c_dist)
 
 
+# SciPy metrics whose cdist estimates a scale (variances, covariance) from
+# each batch of pairs, so a pair's similarity depends on the batch it is in.
+BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
+# Rows per cdist call of :func:`_cdist_diag_sim`: cdist computes the whole
+# rows x rows matrix to take its diagonal.
+CDIST_BLOCK = 64
+
+
 def _cdist_diag_sim(
     x_sample: np.ndarray, y_sample: np.ndarray, metric: str
 ) -> np.ndarray:
@@ -264,7 +272,13 @@ def _cdist_diag_sim(
         A 1D array of distance scores for each row pair in `x_sample` and `y_sample (diagonal).
     """
     bounded_0_1 = ["jaccard", "hamming"]
-    distance = np.diag(cdist(x_sample, y_sample, metric=metric))
+    if metric in BATCH_DEPENDENT_METRICS:  # the scale comes from the whole batch
+        distance = np.diag(cdist(x_sample, y_sample, metric=metric))
+    else:  # each pair's distance alone, in blocks that bound cdist's matrix
+        distance = np.zeros(len(x_sample))
+        for i in range(0, len(x_sample), CDIST_BLOCK):
+            rows = slice(i, i + CDIST_BLOCK)
+            distance[rows] = np.diag(cdist(x_sample[rows], y_sample[rows], metric))
     if metric in bounded_0_1:
         return 1 - distance
     return 1 / (1 + distance)

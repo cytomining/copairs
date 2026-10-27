@@ -64,11 +64,6 @@ def attached_pairs(frame: pd.DataFrame):
     return handle.pairs if isinstance(handle, _AttachedPairs) else None
 
 
-# SciPy metrics whose cdist estimates a scale (variances, covariance) from
-# each batch of pairs, so a pair's similarity depends on the batch it is in.
-BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
-
-
 class _FeatureSimilarity:
     """``pairs -> similarities`` of an AP call's features, as its AP stage computed them.
 
@@ -104,7 +99,7 @@ def check_recomputable(similarity) -> None:
     if (
         isinstance(similarity, _FeatureSimilarity)
         and isinstance(similarity.distance, str)
-        and similarity.distance in BATCH_DEPENDENT_METRICS
+        and similarity.distance in compute.BATCH_DEPENDENT_METRICS
     ):
         raise ValueError(
             f"distance={similarity.distance!r} estimates its scale from each "
