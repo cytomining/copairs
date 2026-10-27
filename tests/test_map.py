@@ -611,6 +611,30 @@ def test_no_valid_ap_scores_raise_under_every_null(null, hierarchical, tmp_path)
             run_map_entry(frame, hierarchical, null=null, cache_dir=tmp_path)
 
 
+def test_indices_keep_rows_without_sameby_values(tmp_path):
+    """`indices` count rows missing a sameby value; only invalid APs are dropped."""
+    ap = ap_frame(
+        [
+            (None, 0.5, 1, 10),
+            ("a", np.nan, 1, 10),
+            ("a", 0.4, 1, 10),
+            ("b", 0.3, 0, 10),
+            ("b", 0.2, 1, 10),
+        ]
+    )
+    result = mean_average_precision(
+        ap,
+        ["g"],
+        100,
+        0.05,
+        SEED,
+        progress_bar=False,
+        null="copied",
+        cache_dir=tmp_path,
+    )
+    assert result.set_index("g")["indices"].to_dict() == {"a": [1], "b": [2]}
+
+
 @pytest.mark.parametrize("hierarchical", [False, True])
 @pytest.mark.parametrize(
     "bad, match",

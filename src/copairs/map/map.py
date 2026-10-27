@@ -122,7 +122,8 @@ def get_map_pvalue(
         - `mean_average_precision`: Mean AP score for each group.
         - `mean_normalized_average_precision`: Mean normalized AP score (scale-independent).
         - `p_value`: p-value comparing mAP to the null distribution.
-        - `indices`: List of indices in the original ap_scores for this group.
+        - `indices`: The group's rows, as positions in ap_scores after rows
+          with a NaN AP or no positive pairs are dropped.
 
     Raises
     ------
@@ -159,15 +160,16 @@ def get_map_pvalue(
     if null == "permutation" or pos_pairs is not None:
         _check_row_index(ap_scores.index)
 
-    # Filter out invalid or incomplete AP scores and rows the groupby would
-    # drop (a missing sameby value), remembering the original rows
-    ap_scores = ap_scores.query("~average_precision.isna() and n_pos_pairs > 0")
-    ap_scores = ap_scores.dropna(subset=sameby)
-    if ap_scores.empty:
+    # Filter out invalid or incomplete AP scores, remembering the original rows.
+    # Rows missing a sameby value stay (the groupby drops them), so `indices`
+    # keep their positions; the check counts only rows a group can take.
+    valid = ap_scores["average_precision"].notna() & (ap_scores["n_pos_pairs"] > 0)
+    if not (valid & ap_scores[sameby].notna().all(axis=1)).any():
         raise UnpairedException(
             "Unable to find valid AP scores: no row has a non-NaN AP, positive "
             "pairs and a value in every sameby column."
         )
+    ap_scores = ap_scores[valid]
     profile = ap_scores.index.to_numpy()
     ap_scores = ap_scores.reset_index(drop=True).copy()
 
