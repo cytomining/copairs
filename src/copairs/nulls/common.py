@@ -38,9 +38,9 @@ def tie_thresholds(scores) -> np.ndarray:
 def resolve_seed(seed: int | None) -> int:
     """Return ``seed`` as an int, or fresh OS entropy when it is ``None``.
 
-    The range is checked where the seed is used, by
-    :func:`copairs.nulls.philox.config_key_arrays`.
+    Raises unless ``seed`` is ``None`` or in ``[0, 2**64)`` (:func:`check_seed`).
     """
+    check_seed(seed)
     if seed is None:
         return int(np.random.SeedSequence().entropy % 2**64)
     return int(seed)
