@@ -5,9 +5,17 @@ profiles are drawn from the same distribution, so which of them carry the
 group's label is arbitrary. This module tests exactly that: a draw picks, in
 each block, as many profiles as the group has members there from the block's
 pool (its members and their shared references), gives them the group's
-label, and recomputes the group's mAP from the observed similarities with the
-same pair rules. Unlike the joint and copied nulls, it keeps whatever
-dependence the data induces between members' rank lists.
+label, and recomputes the group's mAP from the observed similarities: each
+labelled profile ranks the other labelled profiles (its positives, by the
+group's positive pairs) against the block's unlabelled pool profiles, as the
+observed members rank their references. The statistic is thus the same
+function of the labelling for the observed labelling and every draw. The
+negative rules are not re-applied to relabelled profiles: a column of
+``neg_diffby`` such as a control flag moves with the label, which is what
+designs ranking replicates against controls need, and a layout column there
+(e.g. negatives only from other plates) is not enforced for relabelled
+profiles. Unlike the joint and copied nulls, it keeps whatever dependence the
+data induces between members' rank lists.
 
 Blocks are sets of members with identical negatives (e.g. replicates of one
 plate ranked against that plate's controls); pools of different blocks must

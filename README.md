@@ -55,12 +55,18 @@ perfect retrieval) counts the atom.
   replicates and controls), any of the block's profiles could have carried the
   group's label. Draws relabel profiles and recompute the mAP from the
   observed similarities, so whatever dependence the data has between rank
-  lists stays in the null. Each group's positives must be its other members;
-  for groups of one profile whose positives are in other groups (e.g. one
-  profile per guide, positives by gene), use `"joint"`, which there is that
-  profile's AP null. It needs the pairs the APs came from, which
-  `average_precision` attaches to the frame it returns, so the usual calls
-  need nothing extra:
+  lists stays in the null. A relabelled profile is ranked against the
+  block's unlabelled profiles, as the members are ranked against their
+  references; the negative rules are not re-applied to it. A control flag in
+  `neg_diffby` (e.g. `Metadata_negcon`) thus moves with the label as it
+  should, but a layout column there (e.g. `neg_diffby=["g", "plate"]`,
+  negatives only from other plates) is not enforced for relabelled
+  profiles; use `"joint"` or `"copied"` if it must be. Each group's
+  positives must be its other members; for groups of one profile whose
+  positives are in other groups (e.g. one profile per guide, positives by
+  gene), use `"joint"`, which there is that profile's AP null. It needs the
+  pairs the APs came from, which `average_precision` attaches to the frame
+  it returns, so the usual calls need nothing extra:
 
   ```python
   ap = copairs.map.average_precision(meta, feats, ...)
