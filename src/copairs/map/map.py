@@ -171,7 +171,7 @@ def get_map_pvalue(
         )
     ap_scores = ap_scores[valid]
     profile = ap_scores.index.to_numpy()
-    ap_scores = ap_scores.reset_index(drop=True).copy()
+    ap_scores = ap_scores.reset_index(drop=True)
 
     # Average the APs in float64 and round the means to the APs' dtype: ties
     # carry the APs' rounding, and pandas averages float32 APs to float32 or
