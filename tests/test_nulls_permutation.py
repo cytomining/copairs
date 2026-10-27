@@ -446,12 +446,12 @@ def test_interleaved_pools_are_built_once(monkeypatch):
     assert p.tolist() == alone
 
 
-def shared_pool_aps():
-    """APs of 6 groups on 3 plates, two per pool, without the controls."""
+def shared_pool_aps(n_groups=6):
+    """APs of ``n_groups`` groups on 3 plates, a third per pool, without the controls."""
     rows = []
     for p in range(3):
         rows += [(f"c{p}_{i}", p) for i in range(6)]
-    for g in range(6):  # group g on plates g % 3 and (g + 1) % 3: 3 pools of 2 groups
+    for g in range(n_groups):  # group g on plates g % 3 and (g + 1) % 3: 3 pools
         rows += [(f"q{g}", g % 3), (f"q{g}", (g + 1) % 3)]
     meta = pd.DataFrame(rows, columns=["g", "plate"])
     meta["ref"] = np.where(meta["g"].str.startswith("c"), meta.index, -1)
@@ -494,6 +494,77 @@ def test_pool_memory_is_bounded(monkeypatch):
     got = mean_average_precision(ap, *args, progress_bar=False, max_workers=4)
     assert peak[0] == 1 and alive[0] == 0  # one pool at a time, all freed
     assert got["p_value"].tolist() == expected["p_value"].tolist()
+
+
+def test_failed_run_stops_threads_waiting_for_pool_memory(monkeypatch):
+    """A failing group raises its error while another thread waits for pool memory.
+
+    In visiting order the pools are A, B and C, 3 groups each. Pool C is built
+    beside A while a group of B waits for memory (A + C fit, B fits alone);
+    then a group of A fails, the run's queued C group is cancelled, and C is
+    never freed, so B's thread must be stopped for the executor to exit.
+    """
+    ap = shared_pool_aps(n_groups=9)
+    shared, calls, lock = [], [], threading.Lock()
+    built = {"A": threading.Event(), "C": threading.Event()}
+    init = permutation._SharedPools.__init__
+
+    def recorded_init(self, *args):
+        init(self, *args)
+        shared.append(self)
+
+    def pool_name(blocks):
+        keys = sorted(set(shared[0].key))
+        return "ABC"[keys.index(tuple(b.tobytes() for b in blocks))]
+
+    def pool_bytes(blocks):
+        name = pool_name(blocks)
+        if name == "B":
+            built["A"].wait(10)  # B's first group waits beside A
+        return {"A": 5, "B": 6, "C": 5}[name]
+
+    class SignalledPool(permutation._Pool):
+        def __init__(self, blocks, *args):
+            super().__init__(blocks, *args)
+            if pool_name(blocks) in built:
+                built[pool_name(blocks)].set()
+
+    null = permutation.permutation_null
+
+    def failing_null(*args):
+        name = pool_name(args[2])
+        with lock:
+            calls.append(name)
+            last_of_a = calls.count("A") == 3 and name == "A"
+        if last_of_a:
+            built["C"].wait(10)
+            raise RuntimeError("group failed")
+        if name == "C":
+            time.sleep(1)  # the run is cancelled while C's last group is queued
+        return null(*args)
+
+    monkeypatch.setattr(permutation._SharedPools, "__init__", recorded_init)
+    monkeypatch.setattr(permutation, "_pool_bytes", pool_bytes)
+    monkeypatch.setattr(permutation, "_Pool", SignalledPool)
+    monkeypatch.setattr(permutation, "permutation_null", failing_null)
+    monkeypatch.setattr(permutation, "POOL_BUDGET", 10, raising=False)
+    raised = []
+
+    def run():
+        try:
+            mean_average_precision(
+                ap, ["g"], 300, 0.05, 0, progress_bar=False, max_workers=5
+            )
+        except BaseException as e:
+            raised.append(e)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "the failed run hangs"
+    # C was built beside A, and one of its groups was cancelled
+    assert built["C"].is_set() and calls.count("C") < 3
+    assert [str(e) for e in raised] == ["group failed"]
 
 
 def test_overlapping_pools_slice_one_key_table(monkeypatch):

@@ -32,7 +32,7 @@ perform the same operations vectorized over draws and give identical mAPs.
 
 import threading
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 
 import numpy as np
 
@@ -913,6 +913,8 @@ class _SharedPools:
     until then its thread waits for other pools to be freed. Groups must be
     visited pool by pool: a waiting thread then holds no pool, and every
     alive pool's remaining groups have started, so its pools are freed.
+    When a run fails, :meth:`abort` stops the waiting threads: the cancelled
+    groups never release their pools.
     """
 
     def __init__(self, layouts, similarity, table=None):
@@ -927,6 +929,7 @@ class _SharedPools:
         self.freed = threading.Condition(self.lock)
         self.budget = POOL_BUDGET
         self.used = 0
+        self.aborted = False
 
     def acquire(self, g, blocks):
         """Return group ``g``'s pool (its ``blocks``' references), building it once."""
@@ -937,8 +940,12 @@ class _SharedPools:
             if key not in self.pools:
                 need = _pool_bytes(blocks)
                 with self.freed:
-                    while self.used and self.used + need > self.budget:
+                    while (
+                        self.used and self.used + need > self.budget
+                    ) and not self.aborted:
                         self.freed.wait()
+                    if self.aborted:
+                        raise CancelledError("another group of the run failed")
                     self.used += need
                 try:
                     pool = _Pool(blocks, self.similarity, self.table)
@@ -948,6 +955,12 @@ class _SharedPools:
                 with self.lock:
                     self.pools[key], self.bytes[key] = pool, need
             return self.pools[key]
+
+    def abort(self):
+        """Make threads waiting for memory, and later pool builds, raise."""
+        with self.freed:
+            self.aborted = True
+            self.freed.notify_all()
 
     def _free(self, size):
         with self.freed:
@@ -1041,6 +1054,7 @@ def permutation_pvalues(
         return (count + 1) / (null_size + 1)
 
     pvals = np.empty(len(groups), dtype=np.float64)
+    pools = None
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         try:
             # Pools ranking overlapping references slice one key table.
@@ -1055,5 +1069,7 @@ def permutation_pvalues(
                 pvals[g] = p
         except BaseException:
             ex.shutdown(wait=False, cancel_futures=True)
+            if pools is not None:  # cancelled groups never release their pools
+                pools.abort()
             raise
     return pvals
