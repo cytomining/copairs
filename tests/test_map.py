@@ -602,11 +602,11 @@ def run_map_entry(ap_scores, hierarchical, **kwargs):
 @pytest.mark.parametrize("hierarchical", [False, True])
 @pytest.mark.parametrize("null", ["permutation", "joint", "copied"])
 def test_no_valid_ap_scores_raise_under_every_null(null, hierarchical, tmp_path):
-    """AP frames with no valid AP score raise, with their pairs attached."""
+    """AP frames with no valid AP score or group key raise, with their pairs attached."""
     meta = query_meta()
     feats = np.random.default_rng(SEED).standard_normal((len(meta), 10))
     ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
-    for frame in (ap.iloc[:0], ap.assign(average_precision=np.nan)):
+    for frame in (ap.iloc[:0], ap.assign(average_precision=np.nan), ap.assign(g=None)):
         with pytest.raises(UnpairedException, match="valid AP scores"):
             run_map_entry(frame, hierarchical, null=null, cache_dir=tmp_path)
 

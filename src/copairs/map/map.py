@@ -127,7 +127,8 @@ def get_map_pvalue(
     Raises
     ------
     UnpairedException
-        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
+        If no row has a non-NaN AP, positive pairs and a value in every
+        `sameby` column, e.g. an empty table.
 
     """
     null = check_null(null)
@@ -191,6 +192,11 @@ def get_map_pvalue(
         score_dtype
     )
     groups = map_scores["indices"].tolist()
+    if not groups:
+        raise UnpairedException(
+            "Unable to find valid AP scores: every row with a non-NaN AP and "
+            "positive pairs has a missing value in a sameby column."
+        )
     scores = map_scores["mean_average_precision"].to_numpy()
     copied = dict(
         null_size=null_size,
@@ -365,7 +371,8 @@ def mean_average_precision(
     Raises
     ------
     UnpairedException
-        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
+        If no row has a non-NaN AP, positive pairs and a value in every
+        `sameby` column, e.g. an empty table.
 
     See Also
     --------
@@ -479,7 +486,8 @@ def mean_average_precision_hierarchical(
     Raises
     ------
     UnpairedException
-        If no row has a non-NaN AP and positive pairs, e.g. an empty table.
+        If no row has a non-NaN AP, positive pairs and a value in every
+        `sameby` column, e.g. an empty table.
 
     See Also
     --------
