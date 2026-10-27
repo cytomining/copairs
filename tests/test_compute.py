@@ -319,9 +319,9 @@ def test_scipy_metrics_take_cdist_in_bounded_blocks(monkeypatch, metric):
     distance = np.diag(cdist(x, y, metric))
     rows = []
 
-    def recorded_cdist(a, b, m):
+    def recorded_cdist(a, b, metric):
         rows.append(len(a))
-        return cdist(a, b, m)
+        return cdist(a, b, metric)
 
     monkeypatch.setattr(compute, "cdist", recorded_cdist)
     similarity = compute.pairwise_similarity_fn(metric)(x, y)
