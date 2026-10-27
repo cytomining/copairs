@@ -53,6 +53,7 @@ nav:
       - Phenotypic Activity: examples/phenotypic_activity.ipynb
       - Phenotypic Consistency: examples/phenotypic_consistency.ipynb
       - Null Size Estimation: examples/null_size.ipynb
+      - Null Comparison: examples/null_comparison.ipynb
   - API Reference:
       - Overview: api/index.md
       - matching: api/matching.md
