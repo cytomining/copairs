@@ -136,8 +136,8 @@ def get_map_pvalue(
     null_size = check_null_size(null_size)
     if null != "copied":
         check_seed(seed)
-    elif seed is not None and seed < 0:  # NumPy takes any non-negative int
-        raise ValueError(f"seed must be non-negative, got {seed}")
+    elif seed is not None and (int(seed) != seed or seed < 0):  # NumPy: any int >= 0
+        raise ValueError(f"seed must be a non-negative integer, got {seed}")
     if null != "joint" and pos_pairs is not None:
         raise ValueError("pos_pairs is used by the joint null only")
     if null != "copied" and pos_pairs is None and pairs is None:

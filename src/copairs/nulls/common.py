@@ -47,9 +47,9 @@ def resolve_seed(seed: int | None) -> int:
 
 
 def check_seed(seed: int | None) -> None:
-    """Raise unless ``seed`` is ``None`` or a Philox seed, in ``[0, 2**64)``."""
-    if seed is not None and not 0 <= seed < 2**64:
-        raise ValueError(f"seed must be in [0, 2**64), got {seed}")
+    """Raise unless ``seed`` is ``None`` or a Philox seed, an integer in ``[0, 2**64)``."""
+    if seed is not None and (int(seed) != seed or not 0 <= seed < 2**64):
+        raise ValueError(f"seed must be an integer in [0, 2**64), got {seed}")
 
 
 def stream_key(seed: int, obj) -> tuple[np.uint64, np.uint64]:
