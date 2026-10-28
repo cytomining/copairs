@@ -10,8 +10,9 @@ and does not include PR #156's production diff.
 
 ## Precisely what is compared
 
-All scenarios have one queried group with **complete positive pairs**; no
-`pos_diffby` restriction is introduced or relaxed. Observed members have group
+The main quantitative scenarios have one queried group with **complete positive
+pairs**; no `pos_diffby` restriction is introduced or relaxed in that matrix.
+A separate matched-rule diagnostic below exercises the public positive guard. Observed members have group
 `query`, role `is_control=False`; all other profiles have distinct control group
 labels and `is_control=True`. Positive rules are `pos_sameby=[group]`,
 `pos_diffby=[]`. Negative rules always include `neg_diffby=[is_control]`, plus
@@ -48,6 +49,39 @@ this is not an implicit request to drop it as an AP-frame filtering pipeline
 might do. The report records zero-reference fractions. AP without positives is
 unsupported. No empty support is converted into a fabricated tail probability.
 
+## Positive/negative policy consistency: current guard behavior
+
+The owner's consistency requirement is **one pool-based relabelling policy for
+positive and negative pair restrictions**, with fixed metadata handling on both
+sides deferred to future follow-up. The current positive-only `pos_diffby`
+rejection needs review for alignment; it has not been separately approved as the
+final policy. This study records behavior at the pinned source, not an implemented
+production policy change.
+
+`matched_plate_guard_diagnostic` uses six profiles: query members 0/1 on plates
+0/1, controls 2/3 on plate 0 and 4/5 on plate 1. The observed positive edge is
+(0,1); negatives are (0,4), (0,5), (1,2), (1,3). The two specifications differ
+only by adding `pos_diffby=[plate]` to the negative-plate specification above;
+their observed pair graphs and mAP are identical. Through the public
+`average_precision` → `mean_average_precision(null='permutation')` path:
+
+- Negative plate restriction only: **accepted**.
+- Matched positive **and** negative plate restrictions: **rejected** by the
+  production `pos_diffby` guard; the full error is preserved in results.json.
+
+No rejected specification receives a production p-value, and **no guard is
+bypassed**. A metadata-only enumeration of the nine assignments from pools
+`[0,4,5]` and `[1,2,3]` finds eight with at least one negative edge that would
+violate a reapplied fixed plate rule. Four assignments have zero positives if
+that fixed plate rule is reapplied to positives. We record all nine rather than
+dropping undefined draws, and compute no relabelled mAP or permutation p-value
+for the rejected specification (the observed mAP is available from the AP stage). A full changing-positive-graph comparator, including an explicit
+zero-positive statistic policy, remains outside this first slice. This coverage
+gap does not change the A/B_local/B_global negative-reference comparisons.
+The tiny guard example has two declared features per profile (saved in JSON),
+negative squared-Euclidean similarity, and a 32-draw public acceptance check;
+its sampled p-value is deliberately not presented as another comparison.
+
 ## Bounded synthetic design
 
 `SCENARIOS` in `study.py` is the authoritative matrix, also saved with each result:
@@ -64,7 +98,7 @@ unsupported. No empty support is converted into a fabricated tail probability.
 - Three-plate cross-reference overlap: `(1,1,1)` / `(2,2,2)`, effect 4;
   intentionally unsupported by A, with no alternative substituted.
 
-Each profile has 8 features. With plate index `p` and feature index `j`,
+Each profile in the main quantitative matrix has 8 features. With plate index `p` and feature index `j`,
 `X[i,j] = epsilon[i,j] + plate_effect*p + cluster_sd*u[unit(i),j]`, with independent
 standard-normal epsilon and unit effects. Units pair consecutive profiles within
 a plate (last profile is a singleton if needed), with members ordered before
@@ -133,5 +167,5 @@ collection without that variable does not require an external research snapshot.
 No production dependencies/configuration are changed. The study uses one Python
 process and bounded small arrays, with BLAS/OpenMP limited to one thread. See
 [VALIDATION.md](VALIDATION.md) for actual commands, outcomes, runtime and memory.
-Only compact summaries are saved: no raw draws, features, environment or copied
-production source is committed.
+Only compact summaries and the tiny declared guard example are saved: no raw
+draws, main-matrix feature arrays, environment or copied production source is committed.

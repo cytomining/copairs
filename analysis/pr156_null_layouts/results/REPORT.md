@@ -60,6 +60,21 @@ Counts depend on layout, not feature seed/effect. Means are over slots and exact
 Across all paired sampler comparisons, maximum approximate SE(Δp) = 0.0110; maximum |sampled Δp − exact Δp| = 0.0164. These are descriptive diagnostics, not simultaneous uncertainty bounds. The main tables use exact values.
 
 
+## Positive/negative policy consistency and current guard asymmetry
+
+The owner requires one pool-based relabelling policy for positive and negative pair restrictions; fixed metadata handling on both sides is future follow-up. The current positive-only `pos_diffby` rejection needs review for alignment and has not been separately approved as the final policy. This report documents current behavior; it does not claim that policy alignment has been implemented.
+
+A matched six-profile example has one query member and two controls on each of two plates. Both specifications have the same observed positive edge (0,1) and negatives (0,4), (0,5), (1,2), (1,3). Public `average_precision` followed by `mean_average_precision(null='permutation')` gives:
+
+| Positive plate rule | Negative plate rule | Pinned production outcome |
+|---|---|---|
+| none | `neg_diffby=['is_control','plate']` | accepted_by_production |
+| `pos_diffby=['plate']` | same negative rule | rejected_by_production_guard |
+
+The rejection says `pos_diffby values do not fix which relabelled profiles are positives`; its full text and explicit pair lists are saved in results.json. No rejected specification is assigned a production p-value, and **no guard is bypassed**.
+
+Metadata-only enumeration of the 9 blockwise assignments finds 8 with forbidden A negative edges under a reapplied fixed plate rule, and 4 with zero positive edges if the fixed positive plate rule were reapplied. This is not a lower-level-kernel null run: no relabelled mAP or permutation p-value is computed for that rejected specification, and undefined assignments are not silently dropped. A full positive-graph/reference comparison, including a stated policy for zero-positive statistics, remains a coverage gap. The main bounded A/B_local/B_global comparisons above remain negative-reference comparisons with complete positive graphs and no `pos_diffby` rule.
+
 ## Interpretation and limitations
 
 - Shared-reference and same-plate scenarios are invariance checks, not evidence that cross-plate restrictions are harmless. Differences can exist even at zero nuisance effect.

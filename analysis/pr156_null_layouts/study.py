@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from importlib.metadata import version
 
 import numpy as np
+import pandas as pd
 from source import PIN, load_permutation
 from scipy.stats import wasserstein_distance
 
@@ -346,6 +347,103 @@ def run_one(scenario, seed, draws):
     )
 
 
+def matched_plate_guard_diagnostic():
+    """Exercise public guards on matched observed graphs, without bypassing a rejection."""
+    from copairs.map import average_precision, mean_average_precision
+
+    plate = np.array([0, 1, 0, 0, 1, 1])
+    meta = pd.DataFrame(
+        {
+            "group": [
+                "query",
+                "query",
+                "control_0",
+                "control_1",
+                "control_2",
+                "control_3",
+            ],
+            "is_control": [False, False, True, True, True, True],
+            "plate": plate,
+        }
+    )
+    features = np.array([[1, 0], [0, 1], [1, 0.1], [1, 0.2], [0.1, 1], [0.2, 1]])
+
+    def similarity(left, right):
+        return -np.square(left - right).sum(axis=1)
+
+    cases = []
+    for positive_plate_rule in (False, True):
+        rules = dict(
+            pos_sameby=["group"],
+            pos_diffby=["plate"] if positive_plate_rule else [],
+            neg_sameby=[],
+            neg_diffby=["is_control", "plate"],
+        )
+        ap, pairs = average_precision(
+            meta,
+            features,
+            **rules,
+            distance=similarity,
+            progress_bar=False,
+            return_pairs=True,
+        )
+        query = ap.loc[ap["group"] == "query"]
+        case = dict(
+            name="positive_and_negative_plate"
+            if positive_plate_rule
+            else "negative_plate_only",
+            rules=rules,
+            positive_pairs=sorted(pairs.pos.tolist()),
+            negative_pairs=sorted(pairs.neg.tolist()),
+            observed_map=float(query["average_precision"].mean()),
+        )
+        try:
+            mean_average_precision(
+                query,
+                ["group"],
+                null_size=32,
+                threshold=0.05,
+                seed=DRAW_SEED,
+                progress_bar=False,
+                max_workers=1,
+                null="permutation",
+                pairs=pairs,
+            )
+        except ValueError as error:
+            if not positive_plate_rule or "pos_diffby" not in str(error):
+                raise
+            case.update(status="rejected_by_production_guard", reason=str(error))
+        else:
+            case["status"] = "accepted_by_production"
+        cases.append(case)
+    # Metadata-only enumeration, not a null computation or lower-level kernel bypass.
+    pools = [[0, 4, 5], [1, 2, 3]]
+    metadata_assignments = []
+    for chosen in itertools.product(*pools):
+        forbidden_negatives = sum(
+            plate[x] == plate[y]
+            for x, pool in zip(chosen, pools)
+            for y in pool
+            if y != x
+        )
+        metadata_assignments.append(
+            dict(
+                chosen=list(chosen),
+                fixed_positive_edges=int(plate[chosen[0]] != plate[chosen[1]]),
+                forbidden_pool_negative_edges=int(forbidden_negatives),
+            )
+        )
+    return dict(
+        profiles=meta.to_dict(orient="records"),
+        features=features.tolist(),
+        similarity="negative squared Euclidean",
+        cases=cases,
+        pool_assignment_metadata=metadata_assignments,
+        guard_bypassed=False,
+        positive_reapplication_maps="not computed; zero-positive assignments are undefined, not dropped",
+    )
+
+
 def render_report(result):
     """Render exact ranges across datasets; preserve per-dataset detail in JSON."""
     lines = [
@@ -472,6 +570,46 @@ def render_report(result):
         "These are descriptive diagnostics, not simultaneous uncertainty bounds. The main tables use exact values.",
         "",
     ]
+    guard = result["matched_plate_guard"]
+    metadata = guard["pool_assignment_metadata"]
+    undefined = sum(row["fixed_positive_edges"] == 0 for row in metadata)
+    negative_violations = sum(
+        row["forbidden_pool_negative_edges"] > 0 for row in metadata
+    )
+    lines += [
+        "",
+        "## Positive/negative policy consistency and current guard asymmetry",
+        "",
+        "The owner requires one pool-based relabelling policy for positive and negative "
+        "pair restrictions; fixed metadata handling on both sides is future follow-up. "
+        "The current positive-only `pos_diffby` rejection needs review for alignment and "
+        "has not been separately approved as the final policy. This report documents "
+        "current behavior; it does not claim that policy alignment has been implemented.",
+        "",
+        "A matched six-profile example has one query member and two controls on each "
+        "of two plates. Both specifications have the same observed positive edge (0,1) "
+        "and negatives (0,4), (0,5), (1,2), (1,3). Public `average_precision` followed by "
+        "`mean_average_precision(null='permutation')` gives:",
+        "",
+        "| Positive plate rule | Negative plate rule | Pinned production outcome |",
+        "|---|---|---|",
+        f"| none | `neg_diffby=['is_control','plate']` | {guard['cases'][0]['status']} |",
+        f"| `pos_diffby=['plate']` | same negative rule | {guard['cases'][1]['status']} |",
+        "",
+        "The rejection says `pos_diffby values do not fix which relabelled profiles are "
+        "positives`; its full text and explicit pair lists are saved in results.json. "
+        "No rejected specification is assigned a production p-value, and **no guard is bypassed**.",
+        "",
+        f"Metadata-only enumeration of the {len(metadata)} blockwise assignments finds "
+        f"{negative_violations} with forbidden A negative edges under a reapplied fixed plate "
+        f"rule, and {undefined} with zero positive edges if the fixed positive plate rule "
+        "were reapplied. This is not a lower-level-kernel null run: no relabelled mAP "
+        "or permutation p-value is computed for that rejected specification, and undefined assignments are not "
+        "silently dropped. A full positive-graph/reference comparison, including a stated "
+        "policy for zero-positive statistics, remains a coverage gap. The main bounded "
+        "A/B_local/B_global comparisons above remain negative-reference comparisons "
+        "with complete positive graphs and no `pos_diffby` rule.",
+    ]
     lines += [
         "",
         "## Interpretation and limitations",
@@ -535,6 +673,7 @@ def main():
             for name in ["numpy", "scipy", "pandas", "pytest", "ruff"]
         },
         invocation=["study.py", *sys.argv[1:]],
+        matched_plate_guard=matched_plate_guard_diagnostic(),
         results=rows,
     )
     args.output.mkdir(parents=True, exist_ok=True)
