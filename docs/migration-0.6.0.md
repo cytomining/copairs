@@ -1,0 +1,160 @@
+# Migrating to copairs 0.6.0 (unreleased)
+
+This is a breaking release preparation. Historical numerical results and null
+baselines are not guaranteed. No legacy-reproduction mode is planned.
+
+**Integration status:** the #156 review adjustments below are implemented in this
+branch. Multilabel permutation support from #157 still needs integration and
+combined validation before release. Package version metadata is 0.6.0; this does
+not mean that the release is complete or published.
+
+## Choose the statistical model explicitly when needed
+
+The default mAP null is label permutation. `null="joint"` and `null="copied"`
+remain explicit alternatives. Missing data or unsupported structure raises;
+there is no warning-based substitution of another null.
+
+Multi-member joint groups require actual positive pairs. Pair counts cannot
+establish a clique, even when every member has `group_size - 1` positives.
+Singleton joint groups can use their individual AP-null distributions from counts.
+Copied sampling uses counts and does not need pair identities, but it is not a
+historical reproduction mode. Its existing AP-draw cache remains supported.
+
+Permutation retains the observed positive graph, including non-complete graphs.
+Initial positive/negative metadata rules determine the graph and reference pools.
+Draws move profiles into those roles without reapplying fixed metadata rules on
+either side. Identical reference sets define automatic blocks; each draw keeps
+member counts per block. The additional positive-only `pos_diffby` guard is removed.
+Structural restrictions remain, including incomplete groups, positives outside a
+single-label tested group, negatives inside it, and overlapping-but-different
+reference sets within a group. The selected exchangeability hypothesis remains
+an assumption, not a general calibration guarantee.
+
+## Preserve row identities and unchanged backing data
+
+```python
+ap, pairs = copairs.map.average_precision(meta, feats, ..., return_pairs=True)
+kept = ap.loc[whole_group_mask].copy()  # preserve index and _copairs_row_id
+result = copairs.map.mean_average_precision(
+    kept, ["group"], null_size=10_000, threshold=0.05, pairs=pairs
+)
+```
+
+AP results now carry a reserved `_copairs_row_id` provenance column, combining an
+AP-call identity with original row position. Do not edit/drop it or relabel the
+index. It detects misaligned equal-degree/equal-score rows after filtering and
+resetting, and pair handles from another AP call. Tokens are deliberately fresh
+across separate AP calls; compare analytical columns when checking numerical
+reproducibility. Tokens are not used as random-stream keys.
+
+Explicit `pairs=` overrides attached information, subject to identity validation.
+Raw `pos_pairs=` is joint-only and must agree with the selected handle when one
+is available. Mixed AP-call identities are rejected even when attachments have
+been lost and raw positive pairs are supplied. Same-source joint tables can still
+use caller-aligned raw pairs after a results-only save. An external AP table
+without provenance requires caller-aligned explicit pairs; the library cannot
+establish the origin of manually constructed data.
+
+Permutation handles also retain a snapshot of the original contributors'
+metadata (`source_metadata`), indexed by original row. This is required even for
+explicit handles, so missing members can be detected when the positive graph is
+disconnected. Whole-group filtering is checked against the requested `sameby`
+columns. Retained grouping values must match the snapshot. Newly added grouping
+columns are supported only while all original contributors are present; include
+such columns in the metadata before AP calculation if you plan to filter later.
+
+The metadata snapshot is copied once at AP calculation and shared through the
+pair handle on subsequent copies; do not mutate it. This adds metadata storage,
+not a copy of the separate feature matrix. It is not included in the table-memory
+budgets or ordinary saved results.
+
+Copies share pair handles, arrays and feature storage. Do not mutate features or
+pair arrays between AP calculation and testing. A frozen container does not make
+NumPy arrays immutable. Ordinary CSV/Parquet/pickle saves contain results only,
+not the pair/features state required for later permutation tests. Recompute AP or
+supply sufficient original state. Concatenating incompatible AP sources must not
+be used to manufacture a new graph.
+
+Missing AP/no-positive rows and missing group keys are excluded with logged
+counts. No usable groups, invalid scores/counts and incomplete permutation groups
+raise. Drop whole groups; recompute AP when removing members of a tested group.
+Integer-valued counts are normalized to int64 without rounding integer inputs
+through float64. NumPy integers, nullable pandas integers, Arrow integers and
+integral floating columns are supported. Fractional, nonfinite and out-of-range
+counts in tested rows raise useful validation errors.
+
+## Scores-only calls and downstream corrections
+
+For all three null models, `null_size=0` retains scores after applicable input and
+layout validation, skips sampling/correction and returns:
+
+| Columns | Scores-only values |
+| --- | --- |
+| `mean_average_precision`, `mean_normalized_average_precision` | Computed scores |
+| `p_value`, `corrected_p_value` | `NaN` |
+| `below_p`, `below_corrected_p` | `pd.NA`, nullable `boolean` dtype |
+| Hierarchical `stage1_p_value`, `stage1_corrected_p_value` | `NaN` |
+| Hierarchical `stage1_significant` | `pd.NA`, nullable `boolean` dtype |
+
+Grouping columns must be nonempty, distinct string names present in the input;
+`hierarchical_by` must be a nonempty proper subset of `sameby`. `max_workers`
+must be None or a positive integer (not a boolean), even for zero draws or joint
+sampling. These checks run before sampling/executor construction.
+
+Unknown significance is not `False`. Correction helpers exclude missing tests
+and preserve their missing results without contaminating tested rows. This change
+does not define zero-positive assignments under a future metadata-reapplied null.
+
+Positive draws still use inclusive ties with dtype-aware tolerance, float64 means
+reported in AP dtype, observed-mAP consistency checks and `(hits + 1)/(draws + 1)`.
+Sampling is Monte Carlo; no automatic exact enumeration or adaptive stopping runs.
+
+## Seeds, resources and execution
+
+`get_map_pvalue`, `mean_average_precision` and
+`mean_average_precision_hierarchical` default to `seed=0`. Explicit `None` resolves
+fresh entropy once per run. Joint/permutation use unsigned-64-bit seeds; copied
+accepts any non-negative integer and leaves fresh runs uncached. Supply
+`hierarchical_by=[...]` explicitly, preferably by keyword.
+
+All three functions accept keyword-only settings:
+
+```python
+max_reference_profiles=16_384
+pool_memory_budget=4 * 1024**3
+key_table_memory_budget=256 * 1024**2
+```
+
+- The reference cap is a non-negative integer counting all reference profile rows
+  across one tested group's blocks. It is checked before quadratic pool-table
+  allocation. Splitting unchanged references into more blocks does not help.
+- The pool budget is a positive byte count for scheduling estimated concurrent
+  pool key/rank tables. One oversized pool may run alone.
+- The key-table budget is non-negative; zero disables optional cross-pool reuse.
+- These limits do not cap total process RAM. Features, layouts, temporaries and
+  other allocations are not all counted. Per-call settings do not mutate globals.
+- `max_workers` controls permutation group/key work and copied p-value evaluation;
+  it does not control joint sampling, DuckDB, the original AP thread pool or BLAS.
+
+Identical inputs, identities and seed give the same results across supported
+worker/chunk settings in the same supported environment. Equivalent joint
+signatures share draws and correlated Monte Carlo errors. Arbitrary future
+software-version identity is not promised.
+
+Custom similarities must be independent of batch size and contents. The observed
+mAP check cannot prove every callable meets that contract. Batch-estimated
+`seuclidean` and `mahalanobis` remain unsupported for permutation testing.
+
+## Remaining integration and separate work
+
+- Integrate #157's multilabel functionality in this same 0.6.0 package and apply
+  the policies above to its expanded AP-row/profile mapping and pool driver.
+- Keep #157's `stop_after` implementation out of this branch; adaptive stopping
+  belongs in a separate PR. No stopping PR has been created by this work.
+- Reconcile #155's release plan with the withdrawn legacy-reproduction requirement.
+  Its acceleration/backend work has not been imported here; NumPy remains first.
+- Run combined integration checks before treating the release as ready.
+
+Calibration (#162), fixed variance/covariance distances (#164), persistent
+joint/permutation caching (#165), metadata-reapplied zero-positive assignments
+(#161), and a persistence framework remain separate work.

@@ -47,6 +47,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Migrating to 0.6.0: migration-0.6.0.md
   - Examples:
       - Overview: examples/README.md
       - Finding Pairs: examples/finding_pairs.ipynb
