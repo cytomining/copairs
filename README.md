@@ -78,26 +78,17 @@ perfect retrieval) counts the atom.
 
   The pairs (`ap.attrs["copairs_pairs"]`) follow the frame through filtering
   and copies, but not through saving, pickling or concatenating frames of
-  different AP calls; such frames raise under this null. Keep the original
-  index and private `_copairs_row_id` column; resetting indices can misidentify
-  equal-degree profiles and is rejected when it changes their identity.
-  Filter out whole groups (or controls) only: dropping some members raises,
-  including entire disconnected positive-graph components. Shared handles keep
-  the original contributors' metadata snapshot to check membership under the
-  requested grouping columns. Retained grouping values must stay unchanged;
-  add new grouping columns before AP calculation if you will filter later.
-  Recompute the APs on the kept profiles or use `"joint"`
-  or `"copied"`. For frames without pairs, recompute the APs, pass
-  `pairs=` (`average_precision(..., return_pairs=True)` also returns them),
-  or explicitly choose a model whose required inputs are available. Explicit
-  `pairs=` takes precedence over attachments and must match the AP row identities.
-  External, manually built AP tables need caller-aligned pairs and original
-  contributor metadata for permutation; there is no provenance guarantee for
-  data constructed outside the AP pipeline. Mixed-source provenance is rejected
-  even when raw joint positive pairs are supplied after attachments are lost.
-  Copies share the backing features, pair arrays and source-metadata snapshot:
-  **do not mutate them between AP calculation and testing**. The metadata
-  snapshot is copied once during AP calculation and is outside table-memory budgets. Ordinary saves contain results, not
+  different AP calls; frames without pairs require an explicit pair dictionary
+  or AP recomputation. `average_precision(..., return_pairs=True)` returns the
+  dictionary with `"pos"`, `"neg"` and `"similarity"` entries. Explicit `pairs=`
+  takes precedence over attachments; use `pairs["pos"]` for raw joint pairs.
+  Keep the original AP index, correct pairs and complete tested groups. These
+  are caller responsibilities: there are no row tokens or original-membership
+  snapshots. Existing pair/count/layout checks cannot detect every misalignment
+  or omission, including dropped disconnected components. Filter whole groups
+  only; recompute AP when removing members from a tested group.
+  Copies share the dictionary, backing features and pair arrays:
+  **do not mutate them between AP calculation and testing**. Ordinary saves contain results, not
   the state needed to resume permutation testing. The attached pairs keep the features and
   every positive and negative pair alive with the frame (8 bytes per pair,
   e.g. 800 MB for 10^8 negative pairs), whichever null is used;
@@ -160,7 +151,8 @@ for implemented changes and remaining release integration.
   and corrected values are `NaN`; significance flags are nullable booleans with
   `pd.NA`, including hierarchical stage-1 outputs. No sampling or correction runs.
 - Rows without usable AP/positive pairs or group keys are excluded with a log
-  warning. No usable groups, invalid data or incomplete permutation groups raise.
+  warning. No usable groups, invalid data or unsupported layouts raise. Preserve
+  complete tested groups; structural checks cannot detect every missing member.
 
 ### Per-call permutation resources
 

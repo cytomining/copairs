@@ -45,8 +45,6 @@ def test_assign_reference_index():
 
     # Check AP values for all other samples are equal
     pd.testing.assert_frame_equal(
-        ap_ri.query("l!='l1'").drop(
-            columns=["Metadata_Reference_Index", "_copairs_row_id"]
-        ),
-        ap.query("l!='l1'").drop(columns="_copairs_row_id"),
+        ap_ri.query("l!='l1'").drop(columns="Metadata_Reference_Index"),
+        ap.query("l!='l1'"),
     )
