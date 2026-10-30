@@ -1,0 +1,2 @@
+include docs/migration-0.6.0.md
+recursive-include tests *.py
