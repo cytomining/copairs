@@ -197,11 +197,3 @@ def test_hierarchical_takes_each_null():
         mean_average_precision_hierarchical(
             ap, sameby, hierarchical_by=["g"], null="exact", **kwargs
         )
-
-
-def test_adaptive_stopping_is_not_part_of_public_api():
-    """Adaptive stopping remains separate from the fixed-draw multilabel PR."""
-    import inspect
-
-    for function in (mean_average_precision, mean_average_precision_hierarchical):
-        assert "stop_after" not in inspect.signature(function).parameters

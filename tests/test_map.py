@@ -405,19 +405,25 @@ def test_map_pvalue_narrows_with_group_size():
     assert p["n2"] > p["n4"] > p["n8"]
 
 
-def test_map_pvalue_requires_explicit_copied_selection(tmp_path):
-    """Missing graphs raise instead of silently selecting the copied model."""
+def test_map_pvalue_requires_explicit_copied_selection(tmp_path, monkeypatch):
+    """Missing graphs raise without invoking copied sampling; explicit copied works."""
     rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
-    with pytest.raises(ValueError, match="actual positive pairs"):
-        get_map_pvalue(
-            ap_frame(rows),
-            ["g"],
-            1000,
-            SEED,
-            progress_bar=False,
-            cache_dir=tmp_path,
-            null="joint",
-        )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("copied fallback called")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("copairs.map.map._copied_pvalues", forbidden)
+        with pytest.raises(ValueError, match="actual positive pairs"):
+            get_map_pvalue(
+                ap_frame(rows),
+                ["g"],
+                1000,
+                SEED,
+                progress_bar=False,
+                cache_dir=tmp_path,
+                null="joint",
+            )
     result = get_map_pvalue(
         ap_frame(rows),
         ["g"],

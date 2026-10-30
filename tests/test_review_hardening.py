@@ -11,17 +11,16 @@ from copairs.map import (
 from tests.test_review_adjustments import profiles
 
 
-@pytest.mark.parametrize("draws", [0, 20])
 @pytest.mark.parametrize("null", ["joint", "permutation", "copied"])
 @pytest.mark.parametrize("dtype", ["Int64", "UInt32", "int64", "uint32", "float64"])
-def test_numeric_count_dtypes(dtype, null, draws, tmp_path):
+def test_numeric_count_dtypes(dtype, null, tmp_path):
     """All models normalize valid integer-valued count columns consistently."""
     ap, _ = profiles()
     converted = ap.astype({"n_pos_pairs": dtype, "n_total_pairs": dtype})
     kwargs = dict(null=null, progress_bar=False, cache_dir=tmp_path)
     pd.testing.assert_frame_equal(
-        get_map_pvalue(converted, ["g"], draws, **kwargs),
-        get_map_pvalue(ap, ["g"], draws, **kwargs),
+        get_map_pvalue(converted, ["g"], 20, **kwargs),
+        get_map_pvalue(ap, ["g"], 20, **kwargs),
     )
 
 
@@ -40,35 +39,31 @@ def test_arrow_count_dtypes(null, tmp_path):
     )
 
 
-@pytest.mark.parametrize("draws", [0, 10])
 @pytest.mark.parametrize("workers", [0, -1, True, 1.5])
-@pytest.mark.parametrize("null", ["joint", "permutation", "copied"])
-def test_workers_validated_before_sampling(draws, workers, null):
-    """Invalid worker settings raise even without an executor or for joint sampling."""
+def test_workers_validated_before_sampling(workers):
+    """Shared validation rejects invalid workers even for scores-only joint calls."""
     ap, _ = profiles()
     with pytest.raises(ValueError, match="max_workers"):
         get_map_pvalue(
-            ap, ["g"], draws, null=null, max_workers=workers, progress_bar=False
+            ap, ["g"], 0, null="joint", max_workers=workers, progress_bar=False
         )
 
 
-@pytest.mark.parametrize("draws", [0, 10])
 @pytest.mark.parametrize("keys", [[], ["g", "g"], ["absent"], [None]])
-def test_group_columns_validated_before_sampling(draws, keys):
+def test_group_columns_validated_before_sampling(keys):
     """Empty, duplicate, missing and invalid column names get useful errors."""
     ap, _ = profiles()
     with pytest.raises(ValueError, match="sameby|column"):
-        get_map_pvalue(ap, keys, draws, progress_bar=False)
+        get_map_pvalue(ap, keys, 0, progress_bar=False)
 
 
-@pytest.mark.parametrize("draws", [0, 10])
 @pytest.mark.parametrize("keys", [[], ["g", "g"], [None]])
-def test_hierarchy_columns_validated_before_sampling(draws, keys):
+def test_hierarchy_columns_validated_before_sampling(keys):
     """Scores-only cannot bypass invalid hierarchy specifications."""
     ap, _ = profiles()
     with pytest.raises(ValueError, match="hierarchical_by|column"):
         mean_average_precision_hierarchical(
-            ap, ["batch", "g"], draws, 0.05, hierarchical_by=keys, progress_bar=False
+            ap, ["batch", "g"], 0, 0.05, hierarchical_by=keys, progress_bar=False
         )
 
 

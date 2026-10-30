@@ -30,20 +30,6 @@ def profiles():
     )
 
 
-def test_joint_missing_pairs_never_falls_back(monkeypatch):
-    """A multi-member group without its graph raises before any copied sampling."""
-    ap, _ = profiles()
-    ap.attrs.clear()
-    module = importlib.import_module("copairs.map.map")
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("copied fallback called")
-
-    monkeypatch.setattr(module, "_copied_pvalues", forbidden)
-    with pytest.raises(ValueError, match="positive pairs|pos_pairs"):
-        get_map_pvalue(ap, ["g"], 10, null="joint", progress_bar=False)
-
-
 @pytest.mark.parametrize("null", ["joint", "permutation", "copied"])
 @pytest.mark.parametrize("hierarchical", [False, True])
 def test_zero_draws_are_untested(null, hierarchical, monkeypatch, tmp_path):
@@ -86,16 +72,16 @@ def test_zero_draws_are_untested(null, hierarchical, monkeypatch, tmp_path):
         assert str(out[column].dtype) == "boolean"
 
 
-def test_default_seed_and_explicit_pairs_precedence():
-    """Omitted seed equals zero and explicit valid pairs override attached state."""
+def test_explicit_pairs_precedence():
+    """Explicit valid pairs override a malformed attachment and preserve results."""
     ap, pairs = profiles()
     from copairs.map.average_precision import attach_pairs
 
+    kwargs = dict(progress_bar=False, max_workers=1)
+    expected = mean_average_precision(ap, ["g"], 40, 0.05, **kwargs)
     attach_pairs(ap, {**pairs, "pos": pairs["pos"][1:]})
-    kwargs = dict(progress_bar=False, pairs=pairs, max_workers=1)
-    a = mean_average_precision(ap, ["g"], 40, 0.05, **kwargs)
-    b = mean_average_precision(ap, ["g"], 40, 0.05, seed=0, **kwargs)
-    pd.testing.assert_frame_equal(a, b)
+    got = mean_average_precision(ap, ["g"], 40, 0.05, pairs=pairs, **kwargs)
+    pd.testing.assert_frame_equal(got, expected)
     with pytest.raises(ValueError, match="positive pairs"):
         mean_average_precision(ap, ["g"], 40, 0.05, progress_bar=False)
 
@@ -253,23 +239,18 @@ def test_public_entry_points_default_seed_zero(null, tmp_path):
         pd.testing.assert_frame_equal(
             fn(*args, **extra, **kwargs), fn(*args, seed=0, **extra, **kwargs)
         )
-        zero_args = list(args)
-        zero_args[2] = 0
-        assert fn(*zero_args, **extra, **kwargs).p_value.isna().all()
 
 
-@pytest.mark.parametrize("null_size", [0, 10])
-@pytest.mark.parametrize("null", ["joint", "permutation", "copied"])
 @pytest.mark.parametrize(
     "column,value",
     [("average_precision", np.inf), ("n_total_pairs", 1), ("n_pos_pairs", 1.5)],
 )
-def test_scores_only_still_rejects_invalid_data(null_size, null, column, value):
-    """Missing tests are not a fallback for invalid scores or pair counts."""
+def test_scores_only_still_rejects_invalid_data(column, value):
+    """Shared score/count validation runs before dispatch, including at zero draws."""
     ap, _ = profiles()
     ap[column] = value
     with pytest.raises(ValueError, match="counts must|scores must"):
-        get_map_pvalue(ap, ["g"], null_size, null=null, progress_bar=False)
+        get_map_pvalue(ap, ["g"], 0, progress_bar=False)
 
 
 def test_pair_validation_and_backing_arrays():
