@@ -24,6 +24,7 @@ We show how to use copairs for:
 - [calculating mAP to assess phenotypic activity of perturbations](./phenotypic_activity.ipynb)
 - [calculating mAP to assess phenotypic consistency of perturbations](./phenotypic_consistency.ipynb)
 - [estimating null size for mAP p-value calculation](./null_size.ipynb)
+- [comparing the mAP null distributions](./null_comparison.ipynb)
 
 ## Data used
 
