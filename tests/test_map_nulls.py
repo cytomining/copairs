@@ -58,7 +58,12 @@ def test_map_pvalue_counts_ties(tmp_path):
         ("joint", np.array([1 / 199, 2 / 100 - 1 / 199 + both_two])),
     ):
         got = mean_average_precision(
-            perfect_retrieval_scores(), ["g"], null=null, cache_dir=tmp_path, **kwargs
+            perfect_retrieval_scores(),
+            ["g"],
+            null=null,
+            cache_dir=tmp_path,
+            pos_pairs=np.array([[0, 1], [2, 3]]) if null == "joint" else None,
+            **kwargs,
         )
         se = np.sqrt(expected * (1 - expected) / kwargs["null_size"])
         assert (np.abs(got["p_value"].to_numpy() - expected) < 5 * se).all()
@@ -83,7 +88,15 @@ def test_float32_scores_count_ties(null, tmp_path):
         }
     )
     got = mean_average_precision(
-        scores, ["g"], 1000, 0.05, 0, progress_bar=False, null=null, cache_dir=tmp_path
+        scores,
+        ["g"],
+        1000,
+        0.05,
+        0,
+        progress_bar=False,
+        null=null,
+        cache_dir=tmp_path,
+        pos_pairs=np.array([[0, 1]]) if null == "joint" else None,
     )
     assert got["p_value"].iloc[0] == 1.0
     assert got["mean_average_precision"].dtype == np.float32

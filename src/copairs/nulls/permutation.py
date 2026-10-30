@@ -31,6 +31,7 @@ perform the same operations vectorized over draws and give identical mAPs.
 """
 
 import threading
+from operator import index as integer_index
 from collections import Counter
 from concurrent.futures import CancelledError, ThreadPoolExecutor
 
@@ -40,11 +41,13 @@ from copairs.nulls.common import (
     chunks,
     progress,
     stream_key,
+    check_pairs,
     group_edges,
     resolve_seed,
     make_head_sort,
     tie_thresholds,
     check_null_size,
+    check_max_workers,
     check_pair_counts,
 )
 from copairs.nulls.philox import (
@@ -310,7 +313,7 @@ class _KeyTable:
         return self.keys[np.ix_(ix, ix)]
 
 
-def _key_table(layouts, similarity, map=map):
+def _key_table(layouts, similarity, map=map, budget=KEY_TABLE_BUDGET):
     """Return a ``_KeyTable`` of the layouts' pools, or None if it does not pay.
 
     It is built when its ``4 * U**2`` bytes over the ``U`` profiles of all
@@ -323,7 +326,7 @@ def _key_table(layouts, similarity, map=map):
         return None
     profiles = np.unique(np.concatenate(refs))
     u = len(profiles)
-    if 4 * u * u > KEY_TABLE_BUDGET or u * u >= sum(len(r) ** 2 for r in refs):
+    if 4 * u * u > budget or u * u >= sum(len(r) ** 2 for r in refs):
         return None
     return _KeyTable(profiles, similarity, map)
 
@@ -353,15 +356,10 @@ def _row_ranks(row_ptr, flat, keys):
 class _Pool:
     """Reference keys of one pool: its blocks' references, concatenated."""
 
-    def __init__(self, blocks, similarity, table=None):
+    def __init__(self, blocks, similarity, table=None, max_reference_profiles=MAX_POOL):
+        check_pool_size(blocks, max_reference_profiles)
         self.blocks = blocks
         self.refs = np.concatenate(blocks).astype(np.int64)
-        if len(self.refs) > MAX_POOL:
-            raise ValueError(
-                f"a group pool has {len(self.refs)} reference profiles; the "
-                f"permutation null supports up to {MAX_POOL}. Split references "
-                "into blocks (neg_sameby) or rank fewer of them."
-            )
         size = np.cumsum([0] + [len(b) for b in blocks])
         self.cr_lo, self.cr_hi = size[:-1].astype(np.int64), size[1:].astype(np.int64)
         r = len(self.refs)
@@ -700,12 +698,12 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     indices, positive pairs between local member indices, each block's sorted
     reference profiles and each member's block.
     """
-    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
-    neg_pairs = np.asarray(neg_pairs, dtype=np.int64).reshape(-1, 2)
+    pos_pairs = check_pairs(pos_pairs, "positive pairs")
+    neg_pairs = check_pairs(neg_pairs, "negative pairs")
     n_prof = 1 + max(
         int(profile.max(initial=-1)),
-        int(pos_pairs.max(initial=-1)),
-        int(neg_pairs.max(initial=-1)),
+        int(pos_pairs.max()) if pos_pairs.size else -1,
+        int(neg_pairs.max()) if neg_pairs.size else -1,
     )
     group_of = np.full(n_prof, -1, dtype=np.int64)
     rows = np.concatenate(groups) if groups else np.zeros(0, dtype=np.int64)
@@ -777,89 +775,37 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     return layouts
 
 
-def check_pos_diffby(layouts, codes):
-    """Raise unless relabelling keeps each group's positive pairs under ``pos_diffby``.
+def check_resources(
+    max_reference_profiles, pool_memory_budget, key_table_memory_budget
+):
+    """Validate per-call reference/table limits; zero disables the shared key table."""
+    values = []
+    for name, value, minimum in (
+        ("max_reference_profiles", max_reference_profiles, 0),
+        ("pool_memory_budget", pool_memory_budget, 1),
+        ("key_table_memory_budget", key_table_memory_budget, 0),
+    ):
+        try:
+            if isinstance(value, (bool, np.bool_)):
+                raise TypeError
+            number = integer_index(value)
+            if number < minimum:
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(f"{name} must be an integer >= {minimum}") from None
+        values.append(number)
+    return tuple(values)
 
-    ``codes[p, c]`` is profile ``p``'s value code in the APs' ``pos_diffby``
-    column ``c``; two profiles are positives only if they differ in every
-    column. A draw puts profiles of a block's pool (its members and
-    references) into the block's slots, so the pairs it keeps are the
-    group's only when, for each pair of slots, whether two drawn profiles
-    differ is fixed by their blocks. Per column that holds within a block
-    whose pool has one value (never differ) or no repeated value (always
-    differ), and across two blocks whose pools have one value each or share
-    none. A column whose profiles never differ for a pair of blocks fixes
-    the pair (never positive) whatever the other columns. Layouts outside
-    these rules raise, so this check is sufficient, not necessary.
-    """
-    codes = np.asarray(codes, dtype=np.int64)
-    n_col = codes.shape[1]
-    ref_uniq = {}
 
-    def refs_stats(refs):  # per column: the references' sorted distinct values
-        key = id(refs)
-        if key not in ref_uniq:
-            ref_uniq[key] = (refs, [np.unique(codes[refs, c]) for c in range(n_col)])
-        return ref_uniq[key][1]
-
-    def contains(sorted_vals, x):
-        i = np.minimum(np.searchsorted(sorted_vals, x), max(len(sorted_vals) - 1, 0))
-        return len(sorted_vals) > 0 and bool((sorted_vals[i] == x).any())
-
-    bad = []
-    for g, (members, _, blocks, block_of) in enumerate(layouts):
-        stats = []  # per block, per column: (its one value or None, no repeats,
-        # member values, sorted reference values)
-        for b, refs in enumerate(blocks):
-            mine = codes[members[block_of == b]]
-            col = []
-            for c, u in enumerate(refs_stats(refs)):
-                m = mine[:, c]
-                one = len(u) <= 1 and (m == (u[0] if len(u) else m[0])).all()
-                distinct = (
-                    len(u) == len(refs)
-                    and len(np.unique(m)) == len(m)
-                    and not contains(u, m)
-                )
-                col.append((m[0] if one else None, distinct, m, u))
-            stats.append(col)
-        sizes = np.bincount(block_of, minlength=len(blocks))
-        ok = True
-        for b in range(len(blocks)):
-            for d in range(b, len(blocks)):
-                if b == d and sizes[b] < 2:
-                    continue
-                fixed = []
-                for c in range(n_col):
-                    vb, db, mb, ub = stats[b][c]
-                    vd, dd, md, ud = stats[d][c]
-                    if b == d:
-                        rel = False if vb is not None else (True if db else None)
-                    elif vb is not None and vd is not None:
-                        rel = bool(vb != vd)
-                    elif not (
-                        np.intersect1d(ub, ud).size
-                        or contains(ud, mb)
-                        or contains(ub, md)
-                        or np.isin(mb, md).any()
-                    ):
-                        rel = True
-                    else:
-                        rel = None
-                    fixed.append(rel)
-                ok &= False in fixed or all(fixed)
-        if not ok:
-            bad.append(g)
-    if bad:
+def check_pool_size(blocks, limit):
+    """Check a group's total references before allocating its quadratic tables."""
+    size = sum(len(block) for block in blocks)
+    if size > limit:
         raise ValueError(
-            f"{len(bad)} group(s) (e.g. group {bad[0]}) rank references whose "
-            "pos_diffby values do not fix which relabelled profiles are "
-            "positives: a draw could pair profiles that share a pos_diffby "
-            "value, or split profiles that do not, unlike the group's "
-            "members. The permutation null keeps the members' positive "
-            "pairs, so it would test the wrong rule. Block references by "
-            "those columns (e.g. neg_sameby), or pass null='joint' or "
-            "null='copied'"
+            f"a group pool has {size} reference profiles, exceeding max_reference_profiles={limit}. "
+            "Select fewer references or explicitly raise the limit if RAM permits; "
+            "table memory grows quadratically. Splitting the same references into blocks "
+            "does not reduce their total."
         )
 
 
@@ -909,7 +855,7 @@ class _SharedPools:
 
     Groups ranking the same references share one read-only pool, so threads
     can run them concurrently. A pool is built only when its estimated
-    bytes fit in ``POOL_BUDGET`` beside the pools alive (or none is alive);
+    bytes fit in the per-call ``budget`` beside the pools alive (or none is alive);
     until then its thread waits for other pools to be freed. Groups must be
     visited pool by pool: a waiting thread then holds no pool, and every
     alive pool's remaining groups have started, so its pools are freed.
@@ -917,7 +863,15 @@ class _SharedPools:
     groups never release their pools.
     """
 
-    def __init__(self, layouts, similarity, table=None):
+    def __init__(
+        self,
+        layouts,
+        similarity,
+        table=None,
+        budget=POOL_BUDGET,
+        max_reference_profiles=MAX_POOL,
+    ):
+        self.max_reference_profiles = max_reference_profiles
         self.similarity = similarity
         self.table = table
         self.key = [tuple(b.tobytes() for b in layout[2]) for layout in layouts]
@@ -927,7 +881,7 @@ class _SharedPools:
         self.building = {}
         self.lock = threading.Lock()
         self.freed = threading.Condition(self.lock)
-        self.budget = POOL_BUDGET
+        self.budget = budget
         self.used = 0
         self.aborted = False
 
@@ -948,7 +902,9 @@ class _SharedPools:
                         raise CancelledError("another group of the run failed")
                     self.used += need
                 try:
-                    pool = _Pool(blocks, self.similarity, self.table)
+                    pool = _Pool(
+                        blocks, self.similarity, self.table, self.max_reference_profiles
+                    )
                 except BaseException:
                     self._free(need)
                     raise
@@ -983,7 +939,8 @@ class _SharedPools:
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
     null_size, seed, observed=None, progress_bar=False, max_workers=None,
-    pos_diffby=None,
+    max_reference_profiles=MAX_POOL, pool_memory_budget=POOL_BUDGET,
+    key_table_memory_budget=KEY_TABLE_BUDGET,
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
 
@@ -1015,12 +972,16 @@ def permutation_pvalues(
         Threads that run groups concurrently (default: ``ThreadPoolExecutor``'s).
         Each group's p-value depends only on its own draws, so results do not
         depend on it. The pools they build at once hold at most
-        ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or one
+        ``pool_memory_budget`` (default 4 GiB) of estimated key and rank tables, or one
         pool if it alone is larger.
-    pos_diffby : np.ndarray, optional
-        ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
-        columns, indexed like the pairs; layouts whose draws could break
-        that rule raise (:func:`check_pos_diffby`). Not checked when omitted.
+    max_reference_profiles : int
+        Maximum total references across a group's blocks (default 16,384).
+    pool_memory_budget : int
+        Positive byte budget for estimated concurrent pool tables (default 4 GiB).
+        One oversized pool may run alone. This does not cap total process RAM.
+    key_table_memory_budget : int
+        Byte limit for the optional shared key table (default 256 MiB); zero
+        disables this optimization. Other allocations are not included.
 
     Returns
     -------
@@ -1028,14 +989,22 @@ def permutation_pvalues(
         float64 p-values.
     """
     null_size = check_null_size(null_size)
+    max_workers = check_max_workers(max_workers)
     seed = resolve_seed(seed)
+    max_reference_profiles, pool_memory_budget, key_table_memory_budget = (
+        check_resources(
+            max_reference_profiles, pool_memory_budget, key_table_memory_budget
+        )
+    )
     profile = np.asarray(profile, dtype=np.int64)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
     layouts = group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs)
-    if pos_diffby is not None and np.shape(pos_diffby)[1]:
-        check_pos_diffby(layouts, pos_diffby)
+    for _, _, blocks, _ in layouts:
+        check_pool_size(blocks, max_reference_profiles)
+    if null_size == 0:
+        return np.full(len(groups), np.nan)
 
     def pvalue(g):
         try:
@@ -1058,8 +1027,10 @@ def permutation_pvalues(
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         try:
             # Pools ranking overlapping references slice one key table.
-            table = _key_table(layouts, similarity, ex.map)
-            pools = _SharedPools(layouts, similarity, table)
+            table = _key_table(layouts, similarity, ex.map, key_table_memory_budget)
+            pools = _SharedPools(
+                layouts, similarity, table, pool_memory_budget, max_reference_profiles
+            )
             # Visit groups pool by pool, so few pools are alive at a time.
             order = sorted(range(len(groups)), key=lambda g: pools.key[g])
             done = progress(

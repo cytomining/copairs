@@ -330,9 +330,8 @@ def test_dropped_members_say_why_and_what_to_do():
     args = (["g"], 100, 0.05, 0)
     with pytest.raises(
         ValueError,
-        match=r"1 group\(s\) .* profiles the AP scores no longer have.*"
-        r"computed with them as positives.*recompute average_precision.*"
-        r"null='joint' or null='copied'",
+        match=r"incomplete permutation group.*dropped or excluded.*"
+        r"drop whole groups only.*recompute AP",
     ):
         mean_average_precision(ap.drop(index=[0]), *args, progress_bar=False)
     kept = ap[ap["g"] == "q"]  # whole groups (and controls) may be dropped
@@ -355,8 +354,8 @@ def test_rejects_batch_dependent_metrics(distance):
         assert len(mean_average_precision(ap, *args, progress_bar=False, null=null))
 
 
-def test_rejects_pools_that_break_pos_diffby():
-    """Relabelling must keep pos_diffby's pairs; pools that could break them raise."""
+def test_pools_keep_the_observed_positive_graph():
+    """Positive metadata is not reapplied after selecting the observed graph."""
     meta = pd.DataFrame(
         {"g": ["q"] * 3 + ["c0", "c1"], "plate": ["A", "B", "C", "A", "A"]}
     )
@@ -364,9 +363,10 @@ def test_rejects_pools_that_break_pos_diffby():
     spec = dict(SPEC, pos_diffby=["plate"])
     ap = average_precision(meta, feats, progress_bar=False, **spec)
     args = (["g"], 100, 0.05, 0)
-    with pytest.raises(ValueError, match="pos_diffby.*null='joint'"):
-        mean_average_precision(ap, *args, progress_bar=False)
-    assert len(mean_average_precision(ap, *args, progress_bar=False, null="joint"))
+    got = mean_average_precision(ap, *args, progress_bar=False)
+    unrestricted = average_precision(meta, feats, progress_bar=False, **SPEC)
+    expected = mean_average_precision(unrestricted, *args, progress_bar=False)
+    pd.testing.assert_frame_equal(got, expected)
     # One plate value per block, or a distinct value per profile, keeps the rules.
     distinct = meta.assign(plate=list("ABCDE"), well=range(5))
     cases = [(distinct, d) for d in (["plate"], ["plate", "well"], ["well"])]
@@ -490,8 +490,9 @@ def test_pool_memory_is_bounded(monkeypatch):
 
     monkeypatch.setattr(permutation, "_Pool", SlowPool)
     monkeypatch.setattr(permutation._SharedPools, "release", counted_release)
-    monkeypatch.setattr(permutation, "POOL_BUDGET", 1, raising=False)
-    got = mean_average_precision(ap, *args, progress_bar=False, max_workers=4)
+    got = mean_average_precision(
+        ap, *args, progress_bar=False, max_workers=4, pool_memory_budget=1
+    )
     assert peak[0] == 1 and alive[0] == 0  # one pool at a time, all freed
     assert got["p_value"].tolist() == expected["p_value"].tolist()
 
@@ -547,13 +548,19 @@ def test_failed_run_stops_threads_waiting_for_pool_memory(monkeypatch):
     monkeypatch.setattr(permutation, "_pool_bytes", pool_bytes)
     monkeypatch.setattr(permutation, "_Pool", SignalledPool)
     monkeypatch.setattr(permutation, "permutation_null", failing_null)
-    monkeypatch.setattr(permutation, "POOL_BUDGET", 10, raising=False)
     raised = []
 
     def run():
         try:
             mean_average_precision(
-                ap, ["g"], 300, 0.05, 0, progress_bar=False, max_workers=5
+                ap,
+                ["g"],
+                300,
+                0.05,
+                0,
+                progress_bar=False,
+                max_workers=5,
+                pool_memory_budget=10,
             )
         except BaseException as e:
             raised.append(e)

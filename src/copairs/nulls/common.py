@@ -7,6 +7,7 @@ a tie, as in the ``>=`` definition of a permutation p-value.
 """
 
 import hashlib
+from operator import index as integer_index
 
 import numpy as np
 
@@ -63,6 +64,21 @@ def stream_key(seed: int, obj) -> tuple[np.uint64, np.uint64]:
     return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
 
 
+def check_max_workers(max_workers):
+    """Validate concurrency before dispatch, including scores-only calls."""
+    if max_workers is None:
+        return None
+    try:
+        if isinstance(max_workers, (bool, np.bool_)):
+            raise TypeError
+        workers = integer_index(max_workers)
+        if workers <= 0:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("max_workers must be a positive integer or None") from None
+    return workers
+
+
 def check_null_size(null_size: int) -> int:
     """Return ``null_size`` as an int; raise unless it is a non-negative integer."""
     if int(null_size) != null_size or null_size < 0:
@@ -87,6 +103,32 @@ def progress(items, total: int, enabled: bool, desc: str):
     from tqdm.autonotebook import tqdm
 
     return tqdm(items, total=total, desc=desc, leave=False)
+
+
+def check_pairs(pairs, name="pairs") -> np.ndarray:
+    """Validate an undirected pair array and return its canonical ordering."""
+    pairs = np.asarray(pairs)
+    if pairs.ndim != 2 or pairs.shape[1] != 2 or pairs.dtype.kind not in "iu":
+        raise ValueError(
+            f"{name} must be a (n, 2) integer array indexing the original rows"
+        )
+    if pairs.size and (pairs.min() < 0 or pairs.max() > np.iinfo(np.int64).max):
+        raise ValueError(f"{name} must index the rows with non-negative int64 values")
+    # Preserve the usual already-canonical arrays and their compact dtype.
+    # Large negative-pair tables must not acquire full int64 copies just to validate.
+    if pairs.dtype == np.uint64:
+        pairs = pairs.astype(np.int64)
+    ordered = pairs if (pairs[:, 0] <= pairs[:, 1]).all() else np.sort(pairs, axis=1)
+    a, b = ordered.T
+    if (a == b).any():
+        raise ValueError(f"{name} cannot contain self pairs")
+    increasing = (a[1:] > a[:-1]) | ((a[1:] == a[:-1]) & (b[1:] > b[:-1]))
+    if increasing.all():
+        return ordered
+    unique = np.unique(ordered, axis=0)
+    if len(unique) != len(ordered):
+        raise ValueError(f"{name} cannot contain duplicate pairs")
+    return unique
 
 
 def check_pair_counts(count, member, expected, kind: str) -> None:
@@ -131,9 +173,11 @@ def group_edges(groups, profile, num_pos, pos_pairs):
         Per group, whether a positive pair joins one of its members to a
         profile outside it.
     """
-    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
+    pos_pairs = check_pairs(pos_pairs, "positive pairs")
     profile = np.asarray(profile, dtype=np.int64)
-    size = 1 + max(int(profile.max(initial=-1)), int(pos_pairs.max(initial=-1)))
+    size = 1 + max(
+        int(profile.max(initial=-1)), int(pos_pairs.max()) if pos_pairs.size else -1
+    )
     rows = np.concatenate(groups) if len(groups) else np.zeros(0, dtype=np.int64)
     degree = np.bincount(pos_pairs.ravel(), minlength=size)
     check_pair_counts(degree, profile[rows], np.asarray(num_pos)[rows], "positive")

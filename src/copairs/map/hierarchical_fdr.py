@@ -13,18 +13,50 @@ logger = logging.getLogger("copairs")
 def _multipletests(
     pvals: np.ndarray, method: str = "fdr_bh"
 ) -> tuple[np.ndarray, np.ndarray, float, float]:
-    """Run multipletests, also for no tests (statsmodels < 0.15 divides by zero).
-
-    No tests give what statsmodels 0.15 returns: empty arrays and NaN alphas.
-    """
+    """Correct only tested p-values; retain missing results and unknown rejection."""
     pvals = np.asarray(pvals, dtype=float)
-    if len(pvals) == 0:
-        return np.zeros(0, dtype=bool), pvals, np.nan, np.nan
-    return multipletests(pvals, method=method)
+    valid = ~np.isnan(pvals)
+    corrected = np.full(len(pvals), np.nan)
+    reject = np.zeros(len(pvals), dtype=bool)
+    sidak = bonf = np.nan
+    if valid.any():
+        reject[valid], corrected[valid], sidak, bonf = multipletests(
+            pvals[valid], method=method
+        )
+    if not valid.all():
+        reject = pd.array(reject, dtype="boolean")
+        reject[~valid] = pd.NA
+    return reject, corrected, sidak, bonf
+
+
+def check_group_columns(columns, name, frame=None):
+    """Return a nonempty list of distinct grouping column names, or raise."""
+    if isinstance(columns, str):
+        columns = [columns]
+    elif not isinstance(columns, (list, tuple, pd.Index)):
+        raise ValueError(
+            f"{name} must be a column name or a nonempty list of column names"
+        )
+    columns = list(columns)
+    if not columns or any(
+        not isinstance(column, str) or not column for column in columns
+    ):
+        raise ValueError(f"{name} must contain nonempty string column names")
+    if len(set(columns)) != len(columns):
+        raise ValueError(f"{name} must contain distinct column names")
+    if frame is not None:
+        for column in columns:
+            if list(frame.columns).count(column) != 1:
+                raise ValueError(
+                    f"{name} column {column!r} must occur exactly once in the input"
+                )
+    return columns
 
 
 def check_hierarchical_by(hierarchical_by: list[str], sameby: list[str]) -> None:
-    """Raise ValueError unless ``hierarchical_by`` is a proper subset of ``sameby``."""
+    """Raise ValueError unless ``hierarchical_by`` is a nonempty proper subset."""
+    hierarchical_by = check_group_columns(hierarchical_by, "hierarchical_by")
+    sameby = check_group_columns(sameby, "sameby")
     if not set(hierarchical_by).issubset(set(sameby)):
         raise ValueError(
             f"hierarchical_by columns {hierarchical_by} must be a subset of "
@@ -86,6 +118,8 @@ def apply_hierarchical_fdr_correction(
     which is the expected biological behavior.
 
     """
+    sameby = check_group_columns(sameby, "sameby", map_scores)
+    hierarchical_by = check_group_columns(hierarchical_by, "hierarchical_by")
     check_hierarchical_by(hierarchical_by, sameby)
 
     logger.info("Applying hierarchical FDR correction...")
@@ -112,10 +146,13 @@ def apply_hierarchical_fdr_correction(
 
     # Stage 2: For groups that passed Stage 1, apply BH within each group
     # For groups that didn't pass, set corrected_p_value to 1.0
-    map_scores["corrected_p_value"] = 1.0
+    map_scores["corrected_p_value"] = np.where(
+        map_scores["p_value"].notna(), 1.0, np.nan
+    )
 
     for group_key, group_df in map_scores.groupby(hierarchical_by, observed=True):
-        if not group_df["stage1_significant"].iloc[0]:
+        passed = group_df["stage1_significant"].iloc[0]
+        if pd.isna(passed) or not passed:
             # Group didn't pass Stage 1, skip
             continue
 

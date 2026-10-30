@@ -255,7 +255,9 @@ def test_progress_bar_consistency():
         )
         for progress_bar in (True, False)
     ]
-    assert with_pb.equals(no_pb), "The progress_bar argument changed results"
+    assert with_pb.drop(columns="_copairs_row_id").equals(
+        no_pb.drop(columns="_copairs_row_id")
+    ), "The progress_bar argument changed results"
 
 
 def test_multilabel_has_normalized_ap():
@@ -359,7 +361,7 @@ def test_mean_average_precision_independent_of_other_groups(tmp_path):
 
 
 def test_map_pvalue_replicates_use_the_joint_null():
-    """Replicate groups get the joint null, inferred or from explicit `pos_pairs`."""
+    """Replicate groups require actual pairs, attached or explicitly supplied."""
     rng = np.random.default_rng(SEED)
     meta = query_meta()
     feats = rng.standard_normal((len(meta), 10))
@@ -368,8 +370,9 @@ def test_map_pvalue_replicates_use_the_joint_null():
     )
     kwargs = dict(progress_bar=False, null="joint")
     bare = ap_scores.copy()
-    bare.attrs.clear()  # no attached pairs: positives are inferred
-    inferred = get_map_pvalue(bare, ["g"], 20_000, SEED, **kwargs)
+    bare.attrs.clear()
+    with pytest.raises(ValueError, match="actual positive pairs"):
+        get_map_pvalue(bare, ["g"], 20_000, SEED, **kwargs)
     attached = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, **kwargs)
     given = get_map_pvalue(bare, ["g"], 20_000, SEED, pairs=pairs, **kwargs)
     explicit = get_map_pvalue(
@@ -382,8 +385,7 @@ def test_map_pvalue_replicates_use_the_joint_null():
     )
     assert attached["p_value"].tolist() == explicit["p_value"].tolist()
     assert given["p_value"].tolist() == explicit["p_value"].tolist()
-    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
-    assert ((inferred["p_value"] > 0) & (inferred["p_value"] <= 1)).all()
+    assert ((attached["p_value"] > 0) & (attached["p_value"] <= 1)).all()
 
 
 def test_map_pvalue_narrows_with_group_size():
@@ -391,18 +393,25 @@ def test_map_pvalue_narrows_with_group_size():
     rows = []
     for n in (2, 4, 8):
         rows += [(f"n{n}", 0.18, n - 1, n - 1 + 100)] * n
+    frame = ap_frame(rows)
     result = get_map_pvalue(
-        ap_frame(rows), ["g"], 20_000, SEED, progress_bar=False, null="joint"
+        frame,
+        ["g"],
+        20_000,
+        SEED,
+        progress_bar=False,
+        null="joint",
+        pos_pairs=find_pairs(frame, sameby=["g"], diffby=[]),
     )
     p = result.set_index("g")["p_value"]
     assert p["n2"] > p["n4"] > p["n8"]
 
 
-def test_map_pvalue_falls_back_with_warning(tmp_path):
-    """Groups whose positives are not their other members use the previous null."""
+def test_map_pvalue_requires_explicit_copied_selection(tmp_path):
+    """Missing graphs raise instead of silently selecting the copied model."""
     rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
-    with pytest.warns(UserWarning, match="pos_pairs"):
-        result = get_map_pvalue(
+    with pytest.raises(ValueError, match="actual positive pairs"):
+        get_map_pvalue(
             ap_frame(rows),
             ["g"],
             1000,
@@ -411,6 +420,15 @@ def test_map_pvalue_falls_back_with_warning(tmp_path):
             cache_dir=tmp_path,
             null="joint",
         )
+    result = get_map_pvalue(
+        ap_frame(rows),
+        ["g"],
+        1000,
+        SEED,
+        progress_bar=False,
+        cache_dir=tmp_path,
+        null="copied",
+    )
     p = result.set_index("g")["p_value"]
     assert 0 < p["odd"] <= 1 and 0 < p["rep"] <= 1
 
@@ -448,11 +466,12 @@ def test_joint_null_reads_attached_pairs():
     feats = rng.standard_normal((len(meta), 10))
     ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
     kept = ap[ap["g"] != "other"]
-    bare = kept.reset_index(drop=True)
-    bare.attrs.clear()  # no pairs: edges are inferred from the pair counts
+    bare = kept.copy()
+    pairs = attached_pairs(bare)
+    bare.attrs.clear()
     kwargs = dict(progress_bar=False, null="joint")
     got = get_map_pvalue(kept, ["g"], 2000, SEED, **kwargs)
-    expected = get_map_pvalue(bare, ["g"], 2000, SEED, **kwargs)
+    expected = get_map_pvalue(bare, ["g"], 2000, SEED, pairs=pairs, **kwargs)
     assert got["p_value"].tolist() == expected["p_value"].tolist()
     reset = kept.reset_index(drop=True)  # pairs now misaligned
     for null in ("joint", "permutation"):
@@ -495,11 +514,12 @@ def test_pairs_need_the_ap_frames_row_index(null):
         with pytest.raises(ValueError, match="index must hold the row numbers"):
             get_map_pvalue(relabelled, ["g"], 100, SEED, progress_bar=False, null=null)
     bare = ap.set_axis(meta["g"] + meta.index.astype(str))
-    bare.attrs.clear()  # without pairs the joint and copied nulls ignore the index
-    for other in ("joint", "copied"):
-        assert len(
-            get_map_pvalue(bare, ["g"], 100, SEED, progress_bar=False, null=other)
-        )
+    bare.attrs.clear()
+    with pytest.raises(ValueError, match="actual positive pairs"):
+        get_map_pvalue(bare, ["g"], 100, SEED, progress_bar=False, null="joint")
+    assert len(
+        get_map_pvalue(bare, ["g"], 100, SEED, progress_bar=False, null="copied")
+    )
 
 
 def test_ap_frames_carry_their_pairs():

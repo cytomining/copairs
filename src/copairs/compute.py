@@ -592,13 +592,19 @@ def get_null_dists(
 
     num_confs = len(confs)
     null_dists = np.empty([len(confs), null_size], dtype=np.float32)
+    # Resolve fresh entropy once, before dispatching configuration work. Keep
+    # seed=None runs uncached even though each worker now gets a derived seed.
+    run_seed = np.random.SeedSequence().entropy if seed is None else seed
 
     def par_func(i):
         num_pos, total = confs[i]
-        conf_seed = None if seed is None else _conf_seed(seed, num_pos, total)
-        null_dists[i] = null_dist_cached(
-            num_pos, total, conf_seed, null_size, cache_dir
-        )
+        conf_seed = _conf_seed(run_seed, num_pos, total)
+        if seed is None:
+            null_dists[i] = random_ap(null_size, num_pos, total, conf_seed)
+        else:
+            null_dists[i] = null_dist_cached(
+                num_pos, total, conf_seed, null_size, cache_dir
+            )
 
     parallel_map(par_func, np.arange(num_confs), progress_bar)
 
