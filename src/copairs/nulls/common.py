@@ -7,6 +7,7 @@ a tie, as in the ``>=`` definition of a permutation p-value.
 """
 
 import hashlib
+from operator import index as integer_index
 
 import numpy as np
 
@@ -38,24 +39,41 @@ def tie_thresholds(scores) -> np.ndarray:
 def resolve_seed(seed: int | None) -> int:
     """Return ``seed`` as an int, or fresh OS entropy when it is ``None``.
 
-    The range is checked where the seed is used, by
-    :func:`copairs.nulls.philox.config_key_arrays`.
+    Raises unless ``seed`` is ``None`` or in ``[0, 2**64)`` (:func:`check_seed`).
     """
+    check_seed(seed)
     if seed is None:
         return int(np.random.SeedSequence().entropy % 2**64)
     return int(seed)
 
 
-def stream_key(seed: int, obj, suffix: str = "") -> tuple[np.uint64, np.uint64]:
-    """Philox key ``(k0, k1)`` of ``obj``'s draws: a pure function of ``(seed, obj)``.
+def check_seed(seed: int | None) -> None:
+    """Raise unless ``seed`` is ``None`` or a Philox seed, an integer in ``[0, 2**64)``."""
+    if seed is not None and (int(seed) != seed or not 0 <= seed < 2**64):
+        raise ValueError(f"seed must be an integer in [0, 2**64), got {seed}")
 
-    The key is the 64-bit blake2b digest of ``repr((seed, obj)) + suffix``,
-    so ``obj`` must have a deterministic ``repr`` (tuples of ints).
-    """
+
+def stream_key(seed: int, obj, suffix: str = "") -> tuple[np.uint64, np.uint64]:
+    """Philox key from the deterministic representation of ``(seed, obj)`` and suffix."""
     text = repr((int(seed), obj)) + suffix
     digest = hashlib.blake2b(text.encode(), digest_size=8)
     word = int.from_bytes(digest.digest(), "little")
     return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
+
+
+def check_max_workers(max_workers):
+    """Validate concurrency before dispatch, including scores-only calls."""
+    if max_workers is None:
+        return None
+    try:
+        if isinstance(max_workers, (bool, np.bool_)):
+            raise TypeError
+        workers = integer_index(max_workers)
+        if workers <= 0:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("max_workers must be a positive integer or None") from None
+    return workers
 
 
 def check_null_size(null_size: int) -> int:
@@ -84,32 +102,43 @@ def progress(items, total: int, enabled: bool, desc: str):
     return tqdm(items, total=total, desc=desc, leave=False)
 
 
-def check_pair_counts(count, member, expected, kind: str, label=None) -> None:
-    """Raise unless profile ``member[i]`` has ``expected[i]`` pairs, ``count[i]`` found.
+def check_pairs(pairs, name="pairs") -> np.ndarray:
+    """Validate an undirected pair array and return its canonical ordering."""
+    pairs = np.asarray(pairs)
+    if pairs.ndim != 2 or pairs.shape[1] != 2 or pairs.dtype.kind not in "iu":
+        raise ValueError(
+            f"{name} must be a (n, 2) integer array indexing the original rows"
+        )
+    if pairs.size and (pairs.min() < 0 or pairs.max() > np.iinfo(np.int64).max):
+        raise ValueError(f"{name} must index the rows with non-negative int64 values")
+    # Preserve the usual already-canonical arrays and their compact dtype.
+    # Large negative-pair tables must not acquire full int64 copies just to validate.
+    if pairs.dtype == np.uint64:
+        pairs = pairs.astype(np.int64)
+    ordered = pairs if (pairs[:, 0] <= pairs[:, 1]).all() else np.sort(pairs, axis=1)
+    a, b = ordered.T
+    if (a == b).any():
+        raise ValueError(f"{name} cannot contain self pairs")
+    increasing = (a[1:] > a[:-1]) | ((a[1:] == a[:-1]) & (b[1:] > b[:-1]))
+    if increasing.all():
+        return ordered
+    unique = np.unique(ordered, axis=0)
+    if len(unique) != len(ordered):
+        raise ValueError(f"{name} cannot contain duplicate pairs")
+    return unique
 
-    ``kind`` names the pairs ("positive"); ``label`` names the label of a
-    multilabel group, whose pairs multilabel.average_precision returned.
-    """
+
+def check_pair_counts(count, member, expected, kind: str, label=None) -> None:
+    """Validate member-aligned pair counts, optionally identifying a multilabel group."""
     wrong = np.flatnonzero(count != expected)
     if not len(wrong):
         return
     i = wrong[0]
-    if label is None:
-        found = f"{count[i]} {kind} pairs"
-        fix = (
-            "the pairs must index the rows of the frame average_precision "
-            "returned, as average_precision(..., return_pairs=True) gives them, "
-            "and the AP scores must keep that frame's index (no reset_index)"
-        )
-    else:
-        found = f"{count[i]} {kind} pairs for {label!r}"
-        fix = (
-            "pass the pairs multilabel.average_precision(..., return_pairs=True) "
-            "returned with the frame it returned, and keep that frame's index "
-            "(no reset_index)"
-        )
+    suffix = "" if label is None else f" for {label!r}"
     raise ValueError(
-        f"profile {member[i]} has {found} but {expected[i]} in the AP table; {fix}"
+        f"profile {member[i]} has {count[i]} {kind} pairs{suffix} but {expected[i]} in "
+        "the AP table; use the pairs returned with this AP frame and preserve "
+        "its original index (no reset_index)"
     )
 
 
@@ -138,13 +167,16 @@ def group_edges(groups, profile, num_pos, pos_pairs):
         Per group, whether a positive pair joins one of its members to a
         profile outside it.
     """
-    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
+    pos_pairs = check_pairs(pos_pairs, "positive pairs")
     profile = np.asarray(profile, dtype=np.int64)
-    size = 1 + max(int(profile.max(initial=-1)), int(pos_pairs.max(initial=-1)))
+    size = 1 + max(
+        int(profile.max(initial=-1)), int(pos_pairs.max()) if pos_pairs.size else -1
+    )
     rows = np.concatenate(groups) if len(groups) else np.zeros(0, dtype=np.int64)
     degree = np.bincount(pos_pairs.ravel(), minlength=size)
-    member = profile[rows]
-    check_pair_counts(degree[member], member, np.asarray(num_pos)[rows], "positive")
+    check_pair_counts(
+        degree[profile[rows]], profile[rows], np.asarray(num_pos)[rows], "positive"
+    )
     group_of = np.full(size, -1, dtype=np.int64)
     local = np.zeros(size, dtype=np.int64)
     for g, ix in enumerate(groups):

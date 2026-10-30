@@ -5,9 +5,10 @@ profiles are drawn from the same distribution, so which of them carry the
 group's label is arbitrary. This module tests exactly that: a draw picks, in
 each block, as many profiles as the group has members there from the block's
 pool (its members and their shared references), gives them the group's
-label, and recomputes the group's mAP from the observed similarities with the
-same pair rules. Unlike the joint and copied nulls, it keeps whatever
-dependence the data induces between members' rank lists.
+label, and recomputes the group's mAP from the observed similarities and
+original positive graph. Its negatives are the block's unlabelled profiles;
+fixed metadata restrictions are not reapplied. Unlike the joint and copied
+nulls, it keeps the dependence induced by the observed similarity table.
 
 Blocks are sets of members with identical negatives (e.g. replicates of one
 plate ranked against that plate's controls); pools of different blocks must
@@ -21,9 +22,8 @@ recomputes the group's mAP from integer rank codes, with IEEE divisions and
 additions in a fixed order. :func:`_draws_np` and :func:`_group_maps_np`
 perform the same operations vectorized over draws and give identical mAPs.
 
-With ``stop_after``, a group's draws stop at its ``stop_after``-th draw that
-reaches its mAP (Besag and Clifford's sequential p-value); draw ``j``
-stays the same, so a stopped run is a prefix of the full one.
+Every positive-size request runs all its Monte Carlo draws. Zero draws
+validate the layout and return untested statistical results.
 
 A multilabel group (:func:`label_permutation_pvalues`) holds one label of a
 multilabel column, and its pools are whole components of the graph of
@@ -35,6 +35,7 @@ vectorized twins.
 
 import os
 from typing import NamedTuple
+from operator import index as integer_index
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
@@ -46,11 +47,13 @@ from copairs.nulls.common import (
     chunks,
     progress,
     stream_key,
+    check_pairs,
     group_edges,
     resolve_seed,
     make_head_sort,
     tie_thresholds,
     check_null_size,
+    check_max_workers,
     check_pair_counts,
 )
 from copairs.nulls.philox import (
@@ -64,9 +67,9 @@ from copairs.nulls.philox import (
 
 # A slot sorts up to this many drawn profiles by insertion, more by quicksort.
 _INSERTION = 128
-# Reference profiles per group pool (for a multilabel group, profiles of the
-# components holding its label); a pool keeps its key matrix and each
-# reference's sorted keys, about 2 * MAX_POOL**2 float32 (2 GiB).
+# Reference profiles per tested group: component-union size minus members
+# for multilabel groups. Multilabel tables include members, so their memory
+# estimates use the full component sizes, not only this cap.
 MAX_POOL = 2**14
 # Estimated bytes of the pools alive at once (:func:`_pool_bytes`): a group
 # with a new pool starts once the pool fits beside the others, so concurrent
@@ -84,9 +87,6 @@ RANK_POOL = 2**12
 # Elements of the per-slot arrays of one vectorized chunk of draws.
 _CHUNK_ELEMENTS = 2**22
 _FULL_TABLE = 2**20  # largest (code, code) table a layout gathers from
-# A run that may stop early (``stop_after``) starts with this many draws and
-# doubles them each round, up to the layout's chunk.
-_FIRST_ROUND = 256
 
 # Rank code of a NaN key: after every number.
 _NAN = np.uint32(0xFFFFFFFF)
@@ -348,19 +348,19 @@ class _KeyTable:
         return self.keys[np.ix_(ix, ix)]
 
 
-def _key_table(pools, similarity, map=map):
+def _key_table(pools, similarity, map=map, budget=KEY_TABLE_BUDGET):
     """Return a ``_KeyTable`` of the profiles of ``pools``, or None if it does not pay.
 
     ``pools`` lists the profiles of each distinct pool. The table is built
     when its ``4 * U**2`` bytes over the ``U`` profiles of all pools fit in
-    ``KEY_TABLE_BUDGET`` and its ``U**2`` pairs are fewer than the pools' key
+    the per-call ``budget`` and its ``U**2`` pairs are fewer than the pools' key
     matrices hold together.
     """
     if not pools:
         return None
     profiles = np.unique(np.concatenate(pools))
     u = len(profiles)
-    if 4 * u * u > KEY_TABLE_BUDGET or u * u >= sum(len(r) ** 2 for r in pools):
+    if 4 * u * u > budget or u * u >= sum(len(r) ** 2 for r in pools):
         return None
     return _KeyTable(profiles, similarity, map)
 
@@ -406,18 +406,47 @@ def _pool_keys(similarity, profiles, table=None):
     return table.matrix(profiles)
 
 
+def check_resources(
+    max_reference_profiles, pool_memory_budget, key_table_memory_budget
+):
+    """Validate per-call limits; zero disables the optional shared key table."""
+    values = []
+    for name, value, minimum in (
+        ("max_reference_profiles", max_reference_profiles, 0),
+        ("pool_memory_budget", pool_memory_budget, 1),
+        ("key_table_memory_budget", key_table_memory_budget, 0),
+    ):
+        try:
+            if isinstance(value, (bool, np.bool_)):
+                raise TypeError
+            number = integer_index(value)
+            if number < minimum:
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(f"{name} must be an integer >= {minimum}") from None
+        values.append(number)
+    return tuple(values)
+
+
+def check_pool_size(blocks, limit):
+    """Check total references before allocating quadratic tables."""
+    size = sum(len(block) for block in blocks)
+    if size > limit:
+        raise ValueError(
+            f"a group pool has {size} reference profiles, exceeding max_reference_profiles={limit}. "
+            "Select fewer references or explicitly raise the limit if RAM permits; "
+            "table memory grows quadratically. Splitting the same references into blocks "
+            "does not reduce their total."
+        )
+
+
 class _Pool:
     """Reference keys of one pool: its blocks' references, concatenated."""
 
-    def __init__(self, blocks, similarity, table=None):
+    def __init__(self, blocks, similarity, table=None, max_reference_profiles=MAX_POOL):
+        check_pool_size(blocks, max_reference_profiles)
         self.blocks = blocks
         self.refs, self.cr_lo, self.cr_hi = _concat_codes(blocks)
-        if len(self.refs) > MAX_POOL:
-            raise ValueError(
-                f"a group pool has {len(self.refs)} reference profiles; the "
-                f"permutation null supports up to {MAX_POOL}. Split references "
-                "into blocks (neg_sameby) or rank fewer of them."
-            )
         r = len(self.refs)
         self.krr = krr = _pool_keys(similarity, self.refs, table)
         # Each reference's codes to the other references of its block, sorted.
@@ -786,12 +815,12 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     indices, positive pairs between local member indices, each block's sorted
     reference profiles and each member's block.
     """
-    pos_pairs = np.asarray(pos_pairs, dtype=np.int64).reshape(-1, 2)
-    neg_pairs = np.asarray(neg_pairs, dtype=np.int64).reshape(-1, 2)
+    pos_pairs = check_pairs(pos_pairs, "positive pairs")
+    neg_pairs = check_pairs(neg_pairs, "negative pairs")
     n_prof = 1 + max(
         int(profile.max(initial=-1)),
-        int(pos_pairs.max(initial=-1)),
-        int(neg_pairs.max(initial=-1)),
+        int(pos_pairs.max()) if pos_pairs.size else -1,
+        int(neg_pairs.max()) if neg_pairs.size else -1,
     )
     group_of = np.full(n_prof, -1, dtype=np.int64)
     rows = np.concatenate(groups) if groups else np.zeros(0, dtype=np.int64)
@@ -863,103 +892,6 @@ def group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs):
     return layouts
 
 
-def check_pos_diffby(layouts, codes, whole_pools=False):
-    """Raise unless relabelling keeps each group's positive pairs under ``pos_diffby``.
-
-    ``codes[p, c]`` is profile ``p``'s value code in the APs' ``pos_diffby``
-    column ``c``; two profiles are positives only if they differ in every
-    column. A draw puts profiles of a block's pool (its members and
-    references) into the block's slots, so the pairs it keeps are the
-    group's only when, for each pair of slots, whether two drawn profiles
-    differ is fixed by their blocks. Per column that holds within a block
-    whose pool has one value (never differ) or no repeated value (always
-    differ), and across two blocks whose pools have one value each or share
-    none. A column whose profiles never differ for a pair of blocks fixes
-    the pair (never positive) whatever the other columns. Layouts outside
-    these rules raise, so this check is sufficient, not necessary.
-
-    With ``whole_pools``, a layout's ``blocks`` are its blocks' whole pools,
-    members included (the label null's components); shared pools are then
-    summarized once, however many groups rank them.
-    """
-    codes = np.asarray(codes, dtype=np.int64)
-    n_col = codes.shape[1]
-    ref_uniq = {}
-    no_members = np.zeros(0, dtype=np.int64)
-
-    def refs_stats(refs):  # per column: the references' sorted distinct values
-        key = id(refs)
-        if key not in ref_uniq:
-            ref_uniq[key] = (refs, [np.unique(codes[refs, c]) for c in range(n_col)])
-        return ref_uniq[key][1]
-
-    def contains(sorted_vals, x):
-        i = np.minimum(np.searchsorted(sorted_vals, x), max(len(sorted_vals) - 1, 0))
-        return len(sorted_vals) > 0 and bool((sorted_vals[i] == x).any())
-
-    bad = []
-    for g, (members, _, blocks, block_of) in enumerate(layouts):
-        stats = []  # per block, per column: (its one value or None, no repeats,
-        # member values, sorted reference values)
-        for b, refs in enumerate(blocks):
-            if whole_pools:  # the pool's one value, no repeats and values
-                stats.append([
-                    (u[0] if len(u) == 1 else None, len(u) == len(refs), no_members, u)
-                    for u in refs_stats(refs)
-                ])  # fmt: skip
-                continue
-            mine = codes[members[block_of == b]]
-            col = []
-            for c, u in enumerate(refs_stats(refs)):
-                m = mine[:, c]
-                one = len(u) <= 1 and (m == (u[0] if len(u) else m[0])).all()
-                distinct = (
-                    len(u) == len(refs)
-                    and len(np.unique(m)) == len(m)
-                    and not contains(u, m)
-                )
-                col.append((m[0] if one else None, distinct, m, u))
-            stats.append(col)
-        sizes = np.bincount(block_of, minlength=len(blocks))
-        ok = True
-        for b in range(len(blocks)):
-            for d in range(b, len(blocks)):
-                if b == d and sizes[b] < 2:
-                    continue
-                fixed = []
-                for c in range(n_col):
-                    vb, db, mb, ub = stats[b][c]
-                    vd, dd, md, ud = stats[d][c]
-                    if b == d:
-                        rel = False if vb is not None else (True if db else None)
-                    elif vb is not None and vd is not None:
-                        rel = bool(vb != vd)
-                    elif not (
-                        np.intersect1d(ub, ud).size
-                        or contains(ud, mb)
-                        or contains(ub, md)
-                        or np.isin(mb, md).any()
-                    ):
-                        rel = True
-                    else:
-                        rel = None
-                    fixed.append(rel)
-                ok &= False in fixed or all(fixed)
-        if not ok:
-            bad.append(g)
-    if bad:
-        raise ValueError(
-            f"{len(bad)} group(s) (e.g. group {bad[0]}) rank references whose "
-            "pos_diffby values do not fix which relabelled profiles are "
-            "positives: a draw could pair profiles that share a pos_diffby "
-            "value, or split profiles that do not, unlike the group's "
-            "members. The permutation null keeps the members' positive "
-            "pairs, so it would test the wrong rule. Block references by "
-            "those columns (e.g. neg_sameby), or pass null='joint' or "
-            "null='copied'"
-        )
-
-
 def group_key(seed: int, members) -> tuple[np.uint64, np.uint64]:
     """Philox key of a group's draws: a pure function of ``(seed, members)``."""
     return stream_key(seed, tuple(sorted(int(m) for m in members)))
@@ -992,11 +924,9 @@ class _Run:
         """Return the mAPs of draws ``start, ..., start + size - 1``."""
         return self.layout.maps(self.layout.draws(start, size, *self.key))
 
-    def count(self, null_size, stop_after=None, out=None):
-        """``(count, draws)`` of up to ``null_size`` draws, as :func:`_count_hits`."""
-        return _count_hits(
-            self.maps_of, null_size, self.thr, self.layout.chunk(), stop_after, out
-        )
+    def count(self, null_size, out=None):
+        """``(count, draws)`` after every requested draw, as :func:`_count_hits`."""
+        return _count_hits(self.maps_of, null_size, self.thr, self.layout.chunk(), out)
 
 
 def permutation_null(
@@ -1020,99 +950,42 @@ def permutation_null(
 
 
 class _Hits:
-    """A group's draws that reach its mAP, counted as their mAPs arrive.
+    """Count all requested draws, independent of chunk completion order."""
 
-    Without ``stop_after`` all ``null_size`` draws run, in chunks of
-    ``chunk`` that may arrive in any order. With it, rounds start at
-    :data:`_FIRST_ROUND` draws and double up to ``chunk``, one round at a
-    time, and the run stops at its ``stop_after``-th hit: ``draws`` is then
-    the draw of that hit. Draw ``j`` does not depend on the chunks or
-    rounds, so neither does the result.
-    """
-
-    def __init__(self, null_size, thr, chunk, stop_after=None):
+    def __init__(self, null_size, thr, chunk):
         self.null_size = null_size
         self.thr = thr
         self.chunk = chunk
-        self.stop_after = stop_after
-        self.size = chunk if stop_after is None else min(_FIRST_ROUND, chunk)
-        self.count = 0  # hits so far
-        self.draws = null_size  # draws the hits came from
-        self.issued = 0  # draws handed out by tasks()
-        self.arrived = 0  # draws whose mAPs were added
+        self.count = 0
+        self.draws = null_size
+        self.arrived = 0
         self.done = null_size == 0
 
     def tasks(self):
-        """``(start, size)`` of the draws to run next: every chunk, or one round."""
-        if self.stop_after is None:
-            todo = list(chunks(self.null_size, self.chunk))
-        else:
-            todo = [(self.issued, min(self.size, self.null_size - self.issued))]
-            self.size = min(2 * self.size, self.chunk)
-        self.issued = sum(todo[-1])
-        return todo
+        """Return the complete fixed set of draw chunks."""
+        return chunks(self.null_size, self.chunk)
 
     def add(self, start, maps):
-        """Count the mAPs of draws ``start, ...``; return whether the run is done."""
-        hits = maps >= self.thr
-        if self.stop_after is not None:
-            seen = np.cumsum(hits)
-            if self.count + seen[-1] >= self.stop_after:
-                at = int(np.searchsorted(seen, self.stop_after - self.count))
-                self.count, self.draws = self.stop_after, start + at + 1
-                self.done = True
-                return True
-        self.count += int(hits.sum())
+        """Count a completed chunk; return whether all draws have arrived."""
+        self.count += int((maps >= self.thr).sum())
         self.arrived += len(maps)
         self.done = self.arrived == self.null_size
         return self.done
 
     def pvalue(self):
-        """Return the run's p-value (:func:`_sequential_pvalue`)."""
-        return _sequential_pvalue(
-            self.count, self.draws, self.null_size, self.stop_after
-        )
+        """Inclusive plus-one Monte Carlo p-value, or NaN for zero draws."""
+        return (self.count + 1) / (self.null_size + 1) if self.null_size else np.nan
 
 
-def _count_hits(maps_of, null_size, thr, chunk, stop_after=None, out=None):
-    """Count a group's draws whose mAP reaches ``thr``, one task after another.
-
-    ``maps_of(start, size)`` returns the mAPs of draws ``start, ...,
-    start + size - 1``; chunks, rounds and ``stop_after`` as in
-    :class:`_Hits`. Returns ``(count, draws)``: the hits and the draws they
-    came from. ``out`` receives the mAPs of the draws run.
-    """
-    hits = _Hits(null_size, thr, chunk, stop_after)
-    while not hits.done:
-        for start, size in hits.tasks():
-            maps = maps_of(start, size)
-            if out is not None:
-                out[start : start + size] = maps
-            hits.add(start, maps)
+def _count_hits(maps_of, null_size, thr, chunk, out=None):
+    """Return ``(hits, draws)`` after all fixed draws; optionally retain their mAPs."""
+    hits = _Hits(null_size, thr, chunk)
+    for start, size in hits.tasks():
+        maps = maps_of(start, size)
+        if out is not None:
+            out[start : start + size] = maps
+        hits.add(start, maps)
     return hits.count, hits.draws
-
-
-def _sequential_pvalue(count, draws, null_size, stop_after=None) -> float:
-    """P-value of a group's run of draws (:meth:`_Run.count`).
-
-    ``(count + 1) / (null_size + 1)`` after all draws, and ``count / draws``
-    when the run stopped at its ``stop_after``-th hit (Besag and Clifford,
-    1991, Biometrika 78:301). Both are valid p-values; stopping spends few
-    draws on groups with large p-values and none of the resolution of small
-    ones, which run all draws.
-    """
-    if stop_after is not None and count >= stop_after:
-        return count / draws
-    return (count + 1) / (null_size + 1)
-
-
-def check_stop_after(stop_after):
-    """Return ``stop_after`` as an int, or None; raise unless a positive integer."""
-    if stop_after is None:
-        return None
-    if int(stop_after) != stop_after or stop_after < 1:
-        raise ValueError(f"stop_after must be a positive integer, got {stop_after}")
-    return int(stop_after)
 
 
 def _pool_bytes(blocks):
@@ -1129,13 +1002,14 @@ class _SharedPools:
     Groups ranking the same references share one read-only pool, so threads
     can run them concurrently. Only the thread that schedules the groups
     (:func:`_schedule`) uses this: it starts a group whose pool is new once
-    ``reserve`` finds the pool's estimated bytes fit in ``POOL_BUDGET``
+    ``reserve`` finds the pool's estimated bytes fit in its per-call budget
     beside the pools alive (or none is alive), and ``release`` frees a pool
     after its last group. ``keys[g]`` names group ``g``'s pool and
     ``nbytes(g)`` estimates its bytes.
     """
 
-    def __init__(self, keys, nbytes):
+    def __init__(self, keys, nbytes, budget=POOL_BUDGET):
+        self.budget = budget
         self.key = list(keys)
         self.nbytes = nbytes
         self.left = Counter(self.key)
@@ -1146,7 +1020,7 @@ class _SharedPools:
     def reserve(self, g):
         """Count group ``g``'s new pool in the budget; False if it does not fit yet."""
         need = self.nbytes(g)
-        if self.used and self.used + need > POOL_BUDGET:
+        if self.used and self.used + need > self.budget:
             return False
         self.used += need
         self.bytes[self.key[g]] = need
@@ -1175,7 +1049,8 @@ def _check_identity(g, identity, observed):
 def permutation_pvalues(
     groups, profile, num_pos, num_total, pos_pairs, neg_pairs, similarity,
     null_size, seed, observed=None, progress_bar=False, max_workers=None,
-    pos_diffby=None, stop_after=None,
+    max_reference_profiles=MAX_POOL, pool_memory_budget=POOL_BUDGET,
+    key_table_memory_budget=KEY_TABLE_BUDGET,
 ):  # fmt: skip
     """P-value of each group's mAP against its label permutations.
 
@@ -1210,14 +1085,14 @@ def permutation_pvalues(
         draws, so results do not depend on it. The pools built at once hold
         at most ``POOL_BUDGET`` (4 GiB) of estimated key and rank tables, or
         one pool if it alone is larger.
-    pos_diffby : np.ndarray, optional
-        ``(profiles, columns)`` integer codes of the APs' ``pos_diffby``
-        columns, indexed like the pairs; layouts whose draws could break
-        that rule raise (:func:`check_pos_diffby`). Not checked when omitted.
-    stop_after : int, optional
-        Stop a group's draws at its ``stop_after``-th draw that reaches its
-        mAP, with ``p = stop_after / draws`` (Besag and Clifford's
-        sequential p-value). Default: run all draws.
+    max_reference_profiles : int
+        Maximum total references across a group's blocks (default 16,384).
+    pool_memory_budget : int
+        Positive budget for estimated concurrent pool tables (default 4 GiB).
+        One oversized pool may run alone; this does not cap total process RAM.
+    key_table_memory_budget : int
+        Byte limit for the optional shared key table (default 256 MiB).
+        Zero disables sharing.
 
     Returns
     -------
@@ -1225,15 +1100,22 @@ def permutation_pvalues(
         float64 p-values.
     """
     null_size = check_null_size(null_size)
+    max_workers = check_max_workers(max_workers)
     seed = resolve_seed(seed)
-    stop_after = check_stop_after(stop_after)
+    max_reference_profiles, pool_memory_budget, key_table_memory_budget = (
+        check_resources(
+            max_reference_profiles, pool_memory_budget, key_table_memory_budget
+        )
+    )
     profile = np.asarray(profile, dtype=np.int64)
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
     layouts = group_layouts(groups, profile, num_pos, num_neg, pos_pairs, neg_pairs)
-    if pos_diffby is not None and np.shape(pos_diffby)[1]:
-        check_pos_diffby(layouts, pos_diffby)
+    for _, _, blocks, _ in layouts:
+        check_pool_size(blocks, max_reference_profiles)
+    if null_size == 0:
+        return np.full(len(groups), np.nan)
 
     keys = [_pool_key(blocks) for _, _, blocks, _ in layouts]
     refs = {}  # each pool's references, for one key table
@@ -1242,7 +1124,7 @@ def permutation_pvalues(
             refs[key] = np.concatenate(blocks)
 
     def build(g, table):
-        return _Pool(layouts[g][2], similarity, table)
+        return _Pool(layouts[g][2], similarity, table, max_reference_profiles)
 
     def start(g, pool):
         members, edges, _, block_of = layouts[g]
@@ -1253,13 +1135,13 @@ def permutation_pvalues(
 
     return _run_groups(
         keys, refs, similarity, build, lambda g: _pool_bytes(layouts[g][2]), start,
-        null_size, stop_after, progress_bar, max_workers,
+        null_size, progress_bar, max_workers, pool_memory_budget, key_table_memory_budget,
     )  # fmt: skip
 
 
 def _run_groups(
-    keys, refs, similarity, build, nbytes, start, null_size, stop_after,
-    progress_bar, max_workers,
+    keys, refs, similarity, build, nbytes, start, null_size,
+    progress_bar, max_workers, pool_memory_budget, key_table_memory_budget,
 ):  # fmt: skip
     """P-value of each group of a permutation null, its draws run on threads.
 
@@ -1275,10 +1157,12 @@ def _run_groups(
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         try:
             # Pools ranking overlapping profiles slice one key table.
-            table = _key_table(list(refs.values()), similarity, ex.map)
+            table = _key_table(
+                list(refs.values()), similarity, ex.map, key_table_memory_budget
+            )
             done = _schedule(
                 ex, max_workers, keys, lambda g: build(g, table), nbytes, start,
-                null_size, stop_after,
+                null_size, pool_memory_budget,
             )  # fmt: skip
             for g, p in progress(done, len(keys), progress_bar, "permutation null"):
                 pvals[g] = p
@@ -1288,20 +1172,19 @@ def _run_groups(
     return pvals
 
 
-def _schedule(ex, workers, keys, build, nbytes, start, null_size, stop_after):
+def _schedule(ex, workers, keys, build, nbytes, start, null_size, pool_memory_budget):
     """Yield ``(g, p_value)`` as groups finish, running their steps on ``ex``.
 
     A group's pool is built once (``build(g)``), the group starts on it
     (``start(g, pool)`` gives its ``_Run``), and its draws run as chunk
-    tasks, or round by round with ``stop_after`` (:class:`_Hits`), so the
-    draws of a large group spread over the threads. Only this thread submits
+    tasks, so all requested draws of a large group spread over the threads. Only this thread submits
     tasks, and no task waits for another: a group starts once its pool is
     built, and a group with a new pool only once ``_SharedPools.reserve``
     admits it. Groups start pool by pool, at most ``workers`` at a time, so
     every pool alive has unfinished groups, which free it, and few layouts
     are alive at once.
     """
-    pools = _SharedPools(keys, nbytes)
+    pools = _SharedPools(keys, nbytes, pool_memory_budget)
     order = sorted(range(len(keys)), key=lambda g: keys[g])
     tasks = {}  # future -> (step, group, first draw)
     waiting = {}  # pool key -> groups waiting for its build
@@ -1340,15 +1223,13 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, stop_after):
             if step == "start":
                 runs[g] = (
                     result,
-                    _Hits(null_size, result.thr, result.layout.chunk(), stop_after),
+                    _Hits(null_size, result.thr, result.layout.chunk()),
                 )
                 done = runs[g][1].done
                 if not done:
                     draw(g)
             else:
                 done = runs[g][1].add(first, result)
-                if not done and stop_after is not None:
-                    draw(g)  # the next round
             if done:
                 _, hits = runs.pop(g)
                 pools.release(g)
@@ -1510,7 +1391,7 @@ class _LabelPool:
         self.comps = comps
         parts = [comp_profiles[c] for c in comps]
         self.profiles, self.cr_lo, self.cr_hi = _concat_codes(parts)
-        p = len(self.profiles)  # at most MAX_POOL (_label_layouts)
+        p = len(self.profiles)  # includes members as well as capped references
         self.code = np.full(len(nbr_ptr) - 1, -1, dtype=np.int64)
         self.code[self.profiles] = np.arange(p)
         self.keys = _pool_keys(similarity, self.profiles, table)
@@ -1541,7 +1422,8 @@ class _LabelPool:
 def _label_pool_bytes(p, n_neg):
     """Estimated bytes of a ``_LabelPool`` of ``p`` profiles with ``n_neg`` negatives."""
     ranked = 4 * p * p + 8 * n_neg if p <= RANK_POOL else 0  # rank table, words
-    return 4 * p * p + p * p // 8 + 4 * n_neg + ranked
+    bitset = 8 * p * ((p + 63) // 64)
+    return 4 * p * p + bitset + 4 * n_neg + ranked
 
 
 class _LabelLayout:
@@ -1670,7 +1552,9 @@ def _segments(key, n_keys):
     return order, np.searchsorted(key[order], np.arange(n_keys + 1)).astype(np.int64)
 
 
-def _label_layouts(groups, rows, num_pos, num_neg, pairs):
+def _label_layouts(
+    groups, rows, num_pos, num_neg, pairs, max_reference_profiles=MAX_POOL
+):
     """Members, edges, lone pairs and components of each multilabel group.
 
     Parameters
@@ -1710,9 +1594,9 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
     row_key = np.asarray(pairs.row_key, dtype=np.int64)
     profile, label_of = profile_of[rows], row_key[rows]
     # Positive pairs of AP rows as pairs of profiles, with their labels.
-    pos_rows = np.asarray(pairs.pos, dtype=np.int64).reshape(-1, 2)
+    pos_rows = check_pairs(pairs.pos, "positive pairs")
     pos, pos_key = profile_of[pos_rows], row_key[pos_rows[:, 0]]
-    neg = np.asarray(pairs.neg).reshape(-1, 2)  # no int64 copy
+    neg = check_pairs(pairs.neg, "negative pairs")
     lone, lone_key = pairs._lone()
     lone = np.asarray(lone).reshape(-1, 2)
     n_prof = 1 + max(
@@ -1754,18 +1638,13 @@ def _label_layouts(groups, rows, num_pos, num_neg, pairs):
         check_pair_counts(degree, members, num_pos[ix], "positive", label)
         check_pair_counts(n_neg, members, num_neg[ix], "negative", label)
         comps, block_of = np.unique(comp[members], return_inverse=True)
-        size = sum(len(comp_profiles[int(c)]) for c in comps)
-        if size > MAX_POOL:
-            # Finer blocks can split one component, but not shrink several.
-            fix = (
-                "" if len(comps) > 1 else "split profiles into blocks (neg_sameby) or "
-            )
+        size = sum(len(comp_profiles[int(c)]) for c in comps) - n
+        if size > max_reference_profiles:
             raise ValueError(
-                f"label {label!r} is held on {len(comps)} component(s) of the "
-                f"negative pairs (e.g. plates), {size} profiles in all; the "
-                "permutation null of multilabel APs moves a label among every "
-                f"profile of its components, up to {MAX_POOL}: {fix}pass "
-                "null='joint' or null='copied'"
+                f"label {label!r}: components contain {size} reference profiles "
+                f"excluding its {n} members, exceeding max_reference_profiles={max_reference_profiles}. "
+                "Select smaller eligible components or explicitly raise the limit if RAM permits; "
+                "table memory grows quadratically."
             )
         layouts.append(
             _LabelGroup(
@@ -1823,7 +1702,8 @@ def _label_run(members, edges, lone, comps, block_of, key, pool, seed, draws=0):
 
 def label_permutation_pvalues(
     groups, rows, num_pos, num_total, pairs, null_size, seed, observed=None,
-    progress_bar=False, max_workers=None, stop_after=None,
+    progress_bar=False, max_workers=None, max_reference_profiles=MAX_POOL,
+    pool_memory_budget=POOL_BUDGET, key_table_memory_budget=KEY_TABLE_BUDGET,
 ):  # fmt: skip
     """P-value of each multilabel group's mAP against moves of its label.
 
@@ -1842,11 +1722,15 @@ def label_permutation_pvalues(
     rows : np.ndarray
         The AP table's index (rows of ``pairs.profile``), which also gives
         each row's label (``pairs.row_key``).
-    num_pos, num_total, null_size, seed, observed, progress_bar, max_workers, stop_after
+    num_pos, num_total, null_size, seed, observed, progress_bar, max_workers
         As in :func:`permutation_pvalues`; pools are components' profiles.
     pairs : copairs.map.LabelPairs
-        The pairs the APs were computed from. Layouts whose draws could
-        break their ``pos_diffby`` rule raise (:func:`check_pos_diffby`).
+        Original positive graph, negatives, row mapping and similarities.
+    max_reference_profiles : int
+        Maximum component-union size minus the tested group's members.
+        Sum across all its components, rather than limiting each separately.
+    pool_memory_budget, key_table_memory_budget : int
+        As in :func:`permutation_pvalues`; table estimates include members.
 
     Returns
     -------
@@ -1854,21 +1738,26 @@ def label_permutation_pvalues(
         float64 p-values.
     """
     null_size = check_null_size(null_size)
+    max_workers = check_max_workers(max_workers)
     seed = resolve_seed(seed)
-    stop_after = check_stop_after(stop_after)
+    max_reference_profiles, pool_memory_budget, key_table_memory_budget = (
+        check_resources(
+            max_reference_profiles, pool_memory_budget, key_table_memory_budget
+        )
+    )
     num_pos = np.asarray(num_pos, dtype=np.int64)
     num_neg = np.asarray(num_total, dtype=np.int64) - num_pos
     groups = [np.asarray(ix, dtype=np.int64) for ix in groups]
     layouts, comp_profiles, (nbr_ptr, nbr) = _label_layouts(
-        groups, np.asarray(rows, dtype=np.int64), num_pos, num_neg, pairs
+        groups,
+        np.asarray(rows, dtype=np.int64),
+        num_pos,
+        num_neg,
+        pairs,
+        max_reference_profiles,
     )
-    if pairs.pos_diffby is not None and np.shape(pairs.pos_diffby)[1]:
-        # A draw fills a component's slots from all its profiles.
-        whole = [
-            (members, edges, [comp_profiles[c] for c in comps], block_of)
-            for members, edges, _, comps, block_of, _ in layouts
-        ]
-        check_pos_diffby(whole, pairs.pos_diffby, whole_pools=True)
+    if null_size == 0:
+        return np.full(len(groups), np.nan)
     degree = np.diff(nbr_ptr)
 
     def pool_bytes(g):
@@ -1891,5 +1780,5 @@ def label_permutation_pvalues(
     }
     return _run_groups(
         keys, refs, pairs.similarity, build, pool_bytes, start, null_size,
-        stop_after, progress_bar, max_workers,
+        progress_bar, max_workers, pool_memory_budget, key_table_memory_budget,
     )  # fmt: skip

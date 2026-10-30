@@ -58,7 +58,12 @@ def test_map_pvalue_counts_ties(tmp_path):
         ("joint", np.array([1 / 199, 2 / 100 - 1 / 199 + both_two])),
     ):
         got = mean_average_precision(
-            perfect_retrieval_scores(), ["g"], null=null, cache_dir=tmp_path, **kwargs
+            perfect_retrieval_scores(),
+            ["g"],
+            null=null,
+            cache_dir=tmp_path,
+            pos_pairs=np.array([[0, 1], [2, 3]]) if null == "joint" else None,
+            **kwargs,
         )
         se = np.sqrt(expected * (1 - expected) / kwargs["null_size"])
         assert (np.abs(got["p_value"].to_numpy() - expected) < 5 * se).all()
@@ -83,7 +88,15 @@ def test_float32_scores_count_ties(null, tmp_path):
         }
     )
     got = mean_average_precision(
-        scores, ["g"], 1000, 0.05, 0, progress_bar=False, null=null, cache_dir=tmp_path
+        scores,
+        ["g"],
+        1000,
+        0.05,
+        0,
+        progress_bar=False,
+        null=null,
+        cache_dir=tmp_path,
+        pos_pairs=np.array([[0, 1]]) if null == "joint" else None,
     )
     assert got["p_value"].iloc[0] == 1.0
     assert got["mean_average_precision"].dtype == np.float32
@@ -188,18 +201,9 @@ def test_hierarchical_takes_each_null():
         )
 
 
-def test_hierarchical_passes_stop_after():
-    """stop_after reaches the permutation p-values through the hierarchical entry point."""
-    ap = dose_ap()
-    sameby = ["g", "dose"]
-    kwargs = dict(null_size=300, threshold=0.05, seed=0, progress_bar=False)
-    full = mean_average_precision(ap, sameby, **kwargs)["p_value"].tolist()
-    flat = mean_average_precision(ap, sameby, stop_after=3, **kwargs)
-    hier = mean_average_precision_hierarchical(
-        ap, sameby, hierarchical_by=["g"], stop_after=3, **kwargs
-    )
-    assert hier["p_value"].tolist() == flat["p_value"].tolist() != full
-    with pytest.raises(ValueError, match="permutation null only"):
-        mean_average_precision_hierarchical(
-            ap, sameby, hierarchical_by=["g"], null="joint", stop_after=3, **kwargs
-        )
+def test_adaptive_stopping_is_not_part_of_public_api():
+    """Adaptive stopping remains separate from the fixed-draw multilabel PR."""
+    import inspect
+
+    for function in (mean_average_precision, mean_average_precision_hierarchical):
+        assert "stop_after" not in inspect.signature(function).parameters

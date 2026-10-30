@@ -520,6 +520,8 @@ def joint_pvalues(
         raise ValueError(f"sig_ix must index the {len(signatures)} signatures")
     null_size = check_null_size(null_size)
     plan = joint_plan(signatures, resolve_seed(seed))
+    if null_size == 0:
+        return np.full(len(thr), np.nan)
     order = np.argsort(sig_ix, kind="stable")
     ptr = np.searchsorted(sig_ix[order], np.arange(len(signatures) + 1))
     counts = np.zeros(len(thr), dtype=np.int64)
@@ -535,29 +537,22 @@ def joint_pvalues(
 
 
 def group_signatures(groups, num_pos, num_neg, profile=None, pos_pairs=None):
-    """Canonical signature of each group, or None where it cannot be inferred.
+    """Canonical signatures from actual positive pairs, or singleton AP counts.
 
-    ``groups`` lists each group's rows of the AP table and ``num_pos``,
-    ``num_neg`` its rows' pair counts. With ``pos_pairs`` (indexing the
-    profiles ``profile`` of the AP rows), a group's edges are its positive
-    pairs inside it (:func:`copairs.nulls.common.group_edges`). Without them,
-    a group whose members each have ``len(group) - 1`` positives is taken to
-    be a replicate group (all its pairs are edges), a group of one profile
-    has no edges, and other groups get None.
+    Counts alone cannot identify a multi-member group's internal graph.
+    Singleton groups have no internal edge and need only their AP counts.
     """
     if pos_pairs is None:
-        edges_of = [
-            [(i, j) for i in range(len(ix)) for j in range(i + 1, len(ix))]
-            if len(ix) == 1 or (num_pos[ix] == len(ix) - 1).all()
-            else None
-            for ix in groups
-        ]
+        if any(len(ix) > 1 for ix in groups):
+            raise ValueError(
+                "null='joint' needs actual positive pairs for multi-member groups; "
+                "supply pairs= or pos_pairs=, recompute AP, or explicitly select null='copied'"
+            )
+        edges_of = [[] for _ in groups]
     else:
         edges_of, _ = group_edges(groups, profile, num_pos, pos_pairs)
     return [
-        None
-        if edges is None
-        else canonical_signature(zip(num_pos[ix], num_neg[ix]), edges)
+        canonical_signature(zip(num_pos[ix], num_neg[ix]), edges)
         for ix, edges in zip(groups, edges_of)
     ]
 
@@ -572,24 +567,23 @@ def group_pvalues(
     profile: np.ndarray | None = None,
     pos_pairs: np.ndarray | None = None,
     progress_bar: bool = False,
-) -> tuple[np.ndarray, list[int]]:
-    """P-value of each group's mAP ``scores`` under the joint null.
+) -> np.ndarray:
+    """P-values under the requested joint null; insufficient pair information raises.
 
-    Groups share the null of their signature (:func:`group_signatures`).
-    Returns ``(p_values, fallback)``: ``fallback`` lists the groups without a
-    signature, whose p-values are NaN.
+    Equal signatures share draws and therefore Monte Carlo estimation errors.
     """
+    null_size = check_null_size(null_size)
+    seed = resolve_seed(seed)
     signatures = group_signatures(groups, num_pos, num_neg, profile, pos_pairs)
-    unique = sorted(set(sig for sig in signatures if sig is not None))
+    if null_size == 0:
+        return np.full(len(groups), np.nan)
+    unique = sorted(set(signatures))
     index = {sig: k for k, sig in enumerate(unique)}
-    sampled = [g for g, sig in enumerate(signatures) if sig is not None]
-    p_values = np.full(len(groups), np.nan)
-    p_values[sampled] = joint_pvalues(
-        scores[sampled],
-        [index[signatures[g]] for g in sampled],
+    return joint_pvalues(
+        scores,
+        [index[sig] for sig in signatures],
         unique,
         null_size,
         seed,
         progress_bar=progress_bar,
     )
-    return p_values, [g for g, sig in enumerate(signatures) if sig is None]

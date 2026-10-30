@@ -244,6 +244,14 @@ def pairwise_chebyshev(x_sample: np.ndarray, y_sample: np.ndarray) -> np.ndarray
     return 1 / (1 + c_dist)
 
 
+# SciPy metrics whose cdist estimates a scale (variances, covariance) from
+# each batch of pairs, so a pair's similarity depends on the batch it is in.
+BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
+# Rows per cdist call of :func:`_cdist_diag_sim`: cdist computes the whole
+# rows x rows matrix to take its diagonal.
+CDIST_BLOCK = 64
+
+
 def _cdist_diag_sim(
     x_sample: np.ndarray, y_sample: np.ndarray, metric: str
 ) -> np.ndarray:
@@ -264,7 +272,13 @@ def _cdist_diag_sim(
         A 1D array of distance scores for each row pair in `x_sample` and `y_sample (diagonal).
     """
     bounded_0_1 = ["jaccard", "hamming"]
-    distance = np.diag(cdist(x_sample, y_sample, metric=metric))
+    if metric in BATCH_DEPENDENT_METRICS:  # the scale comes from the whole batch
+        distance = np.diag(cdist(x_sample, y_sample, metric=metric))
+    else:  # each pair's distance alone, in blocks that bound cdist's matrix
+        distance = np.zeros(len(x_sample))
+        for i in range(0, len(x_sample), CDIST_BLOCK):
+            rows = slice(i, i + CDIST_BLOCK)
+            distance[rows] = np.diag(cdist(x_sample[rows], y_sample[rows], metric))
     if metric in bounded_0_1:
         return 1 - distance
     return 1 / (1 + distance)
@@ -578,13 +592,19 @@ def get_null_dists(
 
     num_confs = len(confs)
     null_dists = np.empty([len(confs), null_size], dtype=np.float32)
+    # Resolve fresh entropy once, before dispatching configuration work. Keep
+    # seed=None runs uncached even though each worker now gets a derived seed.
+    run_seed = np.random.SeedSequence().entropy if seed is None else seed
 
     def par_func(i):
         num_pos, total = confs[i]
-        conf_seed = None if seed is None else _conf_seed(seed, num_pos, total)
-        null_dists[i] = null_dist_cached(
-            num_pos, total, conf_seed, null_size, cache_dir
-        )
+        conf_seed = _conf_seed(run_seed, num_pos, total)
+        if seed is None:
+            null_dists[i] = random_ap(null_size, num_pos, total, conf_seed)
+        else:
+            null_dists[i] = null_dist_cached(
+                num_pos, total, conf_seed, null_size, cache_dir
+            )
 
     parallel_map(par_func, np.arange(num_confs), progress_bar)
 

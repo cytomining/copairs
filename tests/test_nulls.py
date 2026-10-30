@@ -65,9 +65,11 @@ def test_config_key_arrays_match_scalar(seed):
 
 @pytest.mark.parametrize("seed", [-1, 2**64])
 def test_seed_out_of_range(seed):
-    """Seeds outside [0, 2**64) raise."""
+    """Seeds outside [0, 2**64) raise in config_key_arrays and resolve_seed."""
     with pytest.raises(ValueError, match="seed must be"):
         philox.config_key_arrays(seed, np.array([1]), np.array([2]))
+    with pytest.raises(ValueError, match="seed must be"):
+        common.resolve_seed(seed)
 
 
 def test_config_keys_reject_wide_configurations():

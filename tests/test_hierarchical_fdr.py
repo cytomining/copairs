@@ -13,10 +13,29 @@ import pytest
 
 import copairs.map.map as map_module
 from copairs.map.map import mean_average_precision, mean_average_precision_hierarchical
+from copairs.matching import UnpairedException
 from copairs.map.hierarchical_fdr import (
     apply_fdr_correction,
     apply_hierarchical_fdr_correction,
 )
+
+
+def run_map(ap_scores, hierarchical, cache_dir):
+    """Run mAP per compound and dose, with or without hierarchical FDR."""
+    kwargs = dict(
+        sameby=["compound", "dose"],
+        null_size=100,
+        threshold=0.05,
+        seed=42,
+        progress_bar=False,
+        cache_dir=cache_dir,
+        null="copied",  # a mock AP table has no pairs to permute
+    )
+    if hierarchical:
+        return mean_average_precision_hierarchical(
+            ap_scores, hierarchical_by=["compound"], **kwargs
+        )
+    return mean_average_precision(ap_scores, **kwargs)
 
 
 class TestHierarchicalFDR:
@@ -185,37 +204,37 @@ class TestHierarchicalFDR:
 
     @pytest.mark.parametrize("hierarchical", [False, True])
     @pytest.mark.parametrize(
-        "column, value", [("average_precision", np.nan), ("n_pos_pairs", 0)]
+        "invalidate",
+        [
+            lambda df: df.assign(average_precision=np.nan),
+            lambda df: df.assign(n_pos_pairs=0),
+            lambda df: df.iloc[:0],
+        ],
+        ids=["nan_ap", "no_positives", "no_rows"],
     )
     def test_no_valid_ap_scores(
+        self, sample_ap_scores, tmp_path, invalidate, hierarchical
+    ):
+        """No valid AP scores raise UnpairedException in both mAP entry points."""
+        with pytest.raises(UnpairedException, match="valid AP scores"):
+            run_map(invalidate(sample_ap_scores), hierarchical, tmp_path)
+
+    @pytest.mark.parametrize("hierarchical", [False, True])
+    @pytest.mark.parametrize(
+        "column, value", [("average_precision", np.nan), ("n_pos_pairs", 0)]
+    )
+    def test_one_valid_ap_score(
         self, sample_ap_scores, tmp_path, column, value, hierarchical
     ):
-        """No valid AP scores give an empty mAP table with the usual columns."""
-        ap_scores = sample_ap_scores.assign(**{column: value})
-        kwargs = dict(
-            sameby=["compound", "dose"],
-            null_size=100,
-            threshold=0.05,
-            seed=42,
-            progress_bar=False,
-            cache_dir=tmp_path,
-            null="copied",  # a mock AP table has no pairs to permute
-        )
-        if hierarchical:
-            result = mean_average_precision_hierarchical(
-                ap_scores, hierarchical_by=["compound"], **kwargs
-            )
-        else:
-            result = mean_average_precision(ap_scores, **kwargs)
+        """One valid AP score among invalid ones still gives its group's mAP."""
+        ap_scores = sample_ap_scores.copy()
+        ap_scores.loc[ap_scores.index[1:], column] = value
+        result = run_map(ap_scores, hierarchical, tmp_path)
 
-        assert len(result) == 0
-        assert {
-            "mean_average_precision",
-            "p_value",
-            "corrected_p_value",
-            "below_p",
-            "below_corrected_p",
-        } <= set(result.columns)
+        assert len(result) == 1
+        first_ap = ap_scores["average_precision"].iloc[0]
+        assert result["mean_average_precision"].iloc[0] == first_ap
+        assert result[["p_value", "corrected_p_value"]].notna().all(axis=None)
 
     def test_fdr_correction_no_tests(self):
         """FDR correction of zero p-values returns an empty table."""

@@ -16,7 +16,6 @@ from .average_precision import (
     LabelPairs,
     _columns,
     attach_pairs,
-    _diffby_codes,
     _FeatureSimilarity,
 )
 
@@ -103,7 +102,16 @@ def average_precision(
     them, as a ``(DataFrame, LabelPairs)`` tuple. They keep ``feats``, every
     positive and negative pair (8 bytes per pair) and each AP row's profile
     and label (12 bytes per row) alive with the frame, whichever null is
-    used; drop them with ``frame.attrs.pop("copairs_pairs")``.
+    used; drop them with ``frame.attrs.pop("copairs_pairs")``. Preserve the
+    original index and filter whole tested labels only. Pair/layout checks do
+    not establish provenance or detect every incomplete label; callers must
+    retain the correct pair handle and all label holders. Copies share features
+    and pair/mapping arrays: do not mutate them between AP and mAP testing.
+    Ordinary saves contain results only; later permutation testing needs the
+    original handle or AP recomputation. The multilabel permutation null uses
+    connected components of the negative graph, with fixed draws and member
+    counts per component, keeping other labels fixed. Its exchangeability
+    assumption is distinct from the single-label reference-block model.
 
     See Also
     --------
@@ -187,22 +195,20 @@ def average_precision(
         else:
             cols = list(dict.fromkeys([multilabel_col, *sameby, *other]))
             lone = partial(_lone_pairs, meta[cols], multilabel_col, sameby, other, keys)
-    diffby = [c for c in _columns(pos_diffby) if c != multilabel_col]
+    meta = meta.drop(multilabel_col, axis=1)
+    results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
+    results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.uint32)
+    results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.uint32)
     pairs = LabelPairs(
         pos_rows,
         np.asarray(neg_pairs),
         _FeatureSimilarity(feats, distance, batch_size),
-        _diffby_codes(meta, diffby),
         profile=profile,
         row_key=row_key,
         label_col=multilabel_col,
         keys=np.asarray(keys),
         _lone=lone,
     )
-    meta = meta.drop(multilabel_col, axis=1)
-    results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
-    results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.uint32)
-    results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.uint32)
     attach_pairs(results, pairs)
     logger.info("Finished.")
     return (results, pairs) if return_pairs else results

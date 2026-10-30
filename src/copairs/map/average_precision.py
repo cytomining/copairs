@@ -1,6 +1,7 @@
 """Functions to compute average precision."""
 
 import logging
+from uuid import uuid4
 from typing import List, Callable
 from dataclasses import field, dataclass
 
@@ -18,6 +19,7 @@ logger = logging.getLogger("copairs")
 
 # Key of the pairs an AP function attaches to the frame it returns.
 PAIRS_ATTR = "copairs_pairs"
+ROW_ID = "_copairs_row_id"
 
 
 class _AttachedPairs(dict):
@@ -64,11 +66,6 @@ def attached_pairs(frame: pd.DataFrame):
     return handle.pairs if isinstance(handle, _AttachedPairs) else None
 
 
-# SciPy metrics whose cdist estimates a scale (variances, covariance) from
-# each batch of pairs, so a pair's similarity depends on the batch it is in.
-BATCH_DEPENDENT_METRICS = ("seuclidean", "mahalanobis")
-
-
 class _FeatureSimilarity:
     """``pairs -> similarities`` of an AP call's features, as its AP stage computed them.
 
@@ -104,7 +101,7 @@ def check_recomputable(similarity) -> None:
     if (
         isinstance(similarity, _FeatureSimilarity)
         and isinstance(similarity.distance, str)
-        and similarity.distance in BATCH_DEPENDENT_METRICS
+        and similarity.distance in compute.BATCH_DEPENDENT_METRICS
     ):
         raise ValueError(
             f"distance={similarity.distance!r} estimates its scale from each "
@@ -129,55 +126,143 @@ class RankPairs:
     similarity : callable
         ``pairs -> similarities`` (NumPy), the function the APs were computed
         with.
-    pos_diffby : np.ndarray or None
-        ``(profiles, columns)`` integer codes of the ``pos_diffby`` columns of
-        each row, which the permutation null checks its draws keep; None
-        when there are none (or unknown, then unchecked).
+    row_ids : np.ndarray or None
+        Private row identities assigned by ``average_precision``. Keep the
+        ``_copairs_row_id`` column and original index when filtering/copying.
+        None is for caller-supplied pairs on external tables, whose source
+        alignment the caller must establish.
+    source_metadata : pd.DataFrame or None
+        Original contributors' metadata, indexed by source row. Shared across
+        handles/copies and used to validate whole-group filtering for arbitrary
+        grouping columns. Required for permutation; do not mutate this snapshot.
+
+    Notes
+    -----
+    Copies share the backing pair arrays and features. Do not mutate them
+    between AP calculation and testing; this frozen container does not make
+    NumPy arrays immutable. Custom similarities must be independent of batch
+    size and contents.
     """
 
     pos: np.ndarray
     neg: np.ndarray
     similarity: Callable[[np.ndarray], np.ndarray]
-    pos_diffby: np.ndarray | None = None
+    row_ids: np.ndarray | None = None
+    source_metadata: pd.DataFrame | None = None
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)
 class LabelPairs(RankPairs):
-    """The pairs behind a multilabel AP table, whose rows are (profile, label).
+    """Pairs behind a multilabel AP table, whose rows are (profile, label).
 
-    Attached to the frame :func:`copairs.map.multilabel.average_precision`
-    returns (and returned with it by ``return_pairs=True``). ``pos`` pairs
-    rows of that frame, as in :class:`RankPairs`: the two rows of a positive
-    pair hold the label the pair shares, and a pair sharing several labels
-    appears once per label. ``neg`` and the rows of ``pos_diffby`` index
-    profiles (rows of the metadata); ``profile`` and ``row_key`` map AP rows
-    to profiles and labels. The permutation null also needs the pairs that
-    share exactly one label and meet the negative rules on the other
-    columns (negatives but for that label); they are found when it asks,
-    not kept with the frame.
-
-    Attributes
-    ----------
-    profile : np.ndarray
-        Profile of each AP row, by the AP frame's index.
-    row_key : np.ndarray
-        Label (index into ``keys``) of each AP row, by the AP frame's index.
-    label_col : str
-        The multilabel column.
-    keys : np.ndarray
-        The labels with positive pairs.
+    ``pos`` pairs expanded AP rows; ``neg`` pairs source profiles. ``profile``
+    and ``row_key`` map each original AP row to its profile and label in
+    ``keys``. The joint null uses expanded AP rows; permutation uses source
+    profiles and the lazy pairs sharing only the tested label. Preserve the
+    AP frame's original index and complete labels: this handle does not track
+    source identities or original group membership. Storage is shared under
+    the same no-mutation and results-only persistence contract as RankPairs.
     """
 
     profile: np.ndarray
     row_key: np.ndarray
     label_col: str
     keys: np.ndarray
-    # () -> (pairs, key): the pairs sharing exactly one label, keys[key],
-    # that meet the negative rules on the other columns; None when the
-    # label column is not one of the negative pairs' diffby columns.
     _lone: Callable[[], tuple[np.ndarray, np.ndarray]] | None = field(
         default=None, repr=False
     )
+
+
+def _columns(cols) -> list:
+    """Column name or sequence of column names as a list."""
+    return [cols] if isinstance(cols, str) else list(cols)
+
+
+def check_row_identity(frame: pd.DataFrame, pairs: RankPairs | None) -> None:
+    """Validate persistent row tokens against the index and selected pair source.
+
+    Tokens survive ordinary DataFrame operations even when attrs are lost.
+    They are provenance markers, not a replacement for saved pairs/features.
+    External tables without tokens require explicit, caller-aligned pairs.
+    """
+    if ROW_ID not in frame:
+        if pairs is not None and pairs.row_ids is not None:
+            raise ValueError(
+                f"missing row identities: preserve {ROW_ID} or recompute AP"
+            )
+        return
+    tokens = frame[ROW_ID]
+    expected_positions = frame.index.astype(str).to_numpy()
+    text = tokens.astype("string")
+    if not text.str.fullmatch(r"[0-9a-f]{32}:[0-9]+").fillna(False).all():
+        raise ValueError(
+            "invalid AP row identities; preserve the original tokens or recompute AP"
+        )
+    parts = text.str.rsplit(":", n=1)
+    if parts.str[0].nunique() > 1:
+        raise ValueError(
+            "AP row identities mix incompatible sources; recompute AP or test each source separately"
+        )
+    positions = parts.str[-1]
+    if not np.array_equal(positions.to_numpy(), expected_positions):
+        raise ValueError(
+            "AP row identities do not match the index; keep original rows (no reset_index)"
+        )
+    if pairs is not None:
+        ids = pairs.row_ids
+        index = frame.index.to_numpy()
+        if (
+            ids is None
+            or (len(index) and index.max() >= len(ids))
+            or not np.array_equal(tokens.to_numpy(), ids[index])
+        ):
+            raise ValueError(
+                "pairs do not match the row identities in the AP table; use the original pairs"
+            )
+
+
+def check_complete_groups(frame, sameby, pairs, tested_index):
+    """Validate original group membership independently of positive connectivity.
+
+    Known grouping columns must retain their original values. A new grouping
+    column can be used only if every original contributor is still present, so
+    its complete membership can be established without guessing missing values.
+    """
+    source = pairs.source_metadata
+    if source is None:
+        raise ValueError(
+            "permutation needs original source metadata to validate group membership; recompute AP"
+        )
+    if not tested_index.isin(source.index).all():
+        raise ValueError(
+            "AP rows do not match the original source metadata; recompute AP"
+        )
+    extra = [column for column in sameby if column not in source]
+    if extra:
+        if not source.index.isin(frame.index).all():
+            raise ValueError(
+                "cannot validate group membership for new grouping columns after filtering; "
+                "include those columns in the metadata before recomputing AP"
+            )
+        source = source.assign(
+            **{column: frame.loc[source.index, column] for column in extra}
+        )
+    for column in sameby:
+        original = source.loc[tested_index, column].astype(object)
+        current = frame.loc[tested_index, column].astype(object)
+        equal = original.eq(current).fillna(False) | (original.isna() & current.isna())
+        if not equal.all():
+            raise ValueError(
+                f"grouping metadata {column!r} changed since AP calculation; recompute AP"
+            )
+    group_ids = source.groupby(sameby, observed=True).ngroup()
+    expected = group_ids.value_counts()
+    actual = group_ids.loc[tested_index].value_counts()
+    if not actual.eq(expected.reindex(actual.index)).all():
+        raise ValueError(
+            "incomplete permutation group: original members were dropped or excluded; "
+            "drop whole groups only or recompute AP on the kept profiles"
+        )
 
 
 def build_rank_lists(
@@ -306,8 +391,10 @@ def average_precision(
         The batch size for similarity computations to optimize memory usage.
         Default is 20000.
 
-    distance : str
+    distance : str or callable
         The distance function used for computing similarities. Default is "cosine".
+        A custom similarity must return the same value for a pair regardless
+        of batch size/contents; ensuring this is the caller's responsibility.
 
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
@@ -334,6 +421,7 @@ def average_precision(
         - 'normalized_average_precision': The normalized AP score (scale-independent).
         - 'n_pos_pairs': The number of positive pairs for each profile.
         - 'n_total_pairs': The total number of pairs for each profile.
+        - '_copairs_row_id': Private provenance marker; preserve it and the index.
         - Additional metadata columns from the input.
 
     Raises
@@ -350,6 +438,10 @@ def average_precision(
         * Negative pairs are defined by `neg_diffby` (profiles differ in these metadata values)
           and optionally constrained by `neg_sameby` (profiles share these metadata values if specified).
     """
+    if ROW_ID in meta:
+        raise ValueError(
+            f"{ROW_ID} is reserved for AP row identities; remove it before recomputing AP"
+        )
     # Combine all metadata columns needed for pair definitions
     columns = flatten_str_list(pos_sameby, pos_diffby, neg_sameby, neg_diffby)
 
@@ -362,6 +454,7 @@ def average_precision(
 
     # Reset metadata index for consistent indexing
     meta = meta.reset_index(drop=True).copy()
+    source_columns = list(meta.columns)
 
     logger.info("Indexing metadata...")
 
@@ -414,27 +507,25 @@ def average_precision(
     meta.loc[paired_ix, "normalized_average_precision"] = normalized_scores
 
     logger.info("Finished.")
+    # A source nonce plus original position detects resets even for identical
+    # scores/metadata. This randomness is provenance only, never a null seed.
+    source = uuid4().hex
+    row_ids = np.array([f"{source}:{i}" for i in range(len(meta))], dtype=object)
+    row_ids.setflags(write=False)
+    meta[ROW_ID] = row_ids
+    source_metadata = meta.loc[
+        (meta["n_pos_pairs"] > 0) & meta["average_precision"].notna(), source_columns
+    ].copy(deep=True)
+    source_metadata.attrs.clear()
     pairs = RankPairs(
         pos_pairs,
         neg_pairs,
         _FeatureSimilarity(feats, distance, batch_size),
-        _diffby_codes(meta, pos_diffby),
+        row_ids,
+        source_metadata,
     )
     attach_pairs(meta, pairs)
     return (meta, pairs) if return_pairs else meta
-
-
-def _columns(cols) -> list:
-    """``cols`` (a column name or a list of them) as a list."""
-    return [cols] if isinstance(cols, str) else list(cols)
-
-
-def _diffby_codes(meta: pd.DataFrame, pos_diffby) -> np.ndarray | None:
-    """``(profiles, columns)`` integer codes of ``meta``'s ``pos_diffby`` columns, or None."""
-    diffby = _columns(pos_diffby)
-    if not diffby:
-        return None
-    return np.stack([pd.factorize(meta[c])[0] for c in diffby], axis=1)
 
 
 def p_values(
