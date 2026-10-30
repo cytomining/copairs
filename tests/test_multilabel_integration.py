@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 
 from copairs.map import (
-    LabelPairs,
     get_map_pvalue,
     mean_average_precision,
     mean_average_precision_hierarchical,
@@ -45,9 +44,19 @@ def label_example():
 def test_expanded_row_mapping_and_joint(label_example):
     """Attach the expanded AP-row graph and use it in joint sampling."""
     _, _, ap, pairs = label_example
-    assert isinstance(pairs, LabelPairs) and attached_pairs(ap) is pairs
-    np.testing.assert_array_equal(pairs.profile[ap.index], ap.profile)
-    np.testing.assert_array_equal(pairs.keys[pairs.row_key[ap.index]], ap.target)
+    assert type(pairs) is dict and attached_pairs(ap) is pairs
+    assert set(pairs) == {
+        "pos",
+        "neg",
+        "similarity",
+        "profile",
+        "row_key",
+        "label_col",
+        "keys",
+        "_lone",
+    }
+    np.testing.assert_array_equal(pairs["profile"][ap.index], ap.profile)
+    np.testing.assert_array_equal(pairs["keys"][pairs["row_key"][ap.index]], ap.target)
     expected = np.array(
         [
             (a, b)
@@ -55,7 +64,7 @@ def test_expanded_row_mapping_and_joint(label_example):
             if ap.loc[a, "target"] == ap.loc[b, "target"]
         ]
     )
-    np.testing.assert_array_equal(pairs.pos, expected)
+    np.testing.assert_array_equal(pairs["pos"], expected)
     options = dict(null_size=31, null="joint", progress_bar=False)
     attached = get_map_pvalue(ap, ["target"], **options)
     explicit = get_map_pvalue(ap, ["target"], pos_pairs=expected, **options)
@@ -75,7 +84,7 @@ def test_component_null_against_independent_enumeration(label_example):
     )
     group = layouts[0]
     pool = permutation._LabelPool(
-        group.comps, components, ptr, neighbours, pairs.similarity
+        group.comps, components, ptr, neighbours, pairs["similarity"]
     )
     layout = permutation._LabelLayout(
         group.members, group.edges, group.lone, group.block_of, pool

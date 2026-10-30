@@ -1562,12 +1562,12 @@ def _label_layouts(
     groups : list of np.ndarray
         Each group's positions in ``rows``; a group holds one label.
     rows : np.ndarray
-        The AP rows (indices of ``pairs.profile`` and ``pairs.row_key``).
+        The AP rows (indices of ``pairs["profile"]`` and ``pairs["row_key"]``).
     num_pos, num_neg : np.ndarray
         Each row's positive and negative pair counts, checked against
         ``pairs``.
-    pairs : copairs.map.LabelPairs
-        The pairs the APs were computed from.
+    pairs : dict
+        The multilabel pair dictionary the APs were computed from.
 
     Returns
     -------
@@ -1578,26 +1578,26 @@ def _label_layouts(
     neighbours : tuple of np.ndarray
         CSR ``(ptr, partners)`` of each profile's negatives.
     """
-    if pairs._lone is None:
+    if pairs.get("_lone") is None:
         raise ValueError(
-            f"the permutation null of multilabel APs needs {pairs.label_col!r} "
+            f"the permutation null of multilabel APs needs {pairs['label_col']!r} "
             "among the negative pairs' diffby columns (and not their sameby)"
         )
-    if len(rows) and rows.max() >= len(pairs.profile):
+    if len(rows) and rows.max() >= len(pairs["profile"]):
         raise ValueError(
             f"the AP scores' index reaches row {rows.max()}, but the frame "
             "multilabel.average_precision returned with these pairs has "
-            f"{len(pairs.profile)} rows; pass the pairs of the frame these "
+            f"{len(pairs['profile'])} rows; pass the pairs of the frame these "
             "scores come from"
         )
-    profile_of = np.asarray(pairs.profile, dtype=np.int64)
-    row_key = np.asarray(pairs.row_key, dtype=np.int64)
+    profile_of = np.asarray(pairs["profile"], dtype=np.int64)
+    row_key = np.asarray(pairs["row_key"], dtype=np.int64)
     profile, label_of = profile_of[rows], row_key[rows]
     # Positive pairs of AP rows as pairs of profiles, with their labels.
-    pos_rows = check_pairs(pairs.pos, "positive pairs")
+    pos_rows = check_pairs(pairs["pos"], "positive pairs")
     pos, pos_key = profile_of[pos_rows], row_key[pos_rows[:, 0]]
-    neg = check_pairs(pairs.neg, "negative pairs")
-    lone, lone_key = pairs._lone()
+    neg = check_pairs(pairs["neg"], "negative pairs")
+    lone, lone_key = pairs["_lone"]()
     lone = np.asarray(lone).reshape(-1, 2)
     n_prof = 1 + max(
         int(profile.max(initial=-1)),
@@ -1609,7 +1609,7 @@ def _label_layouts(
     comp = _components(nbr_ptr, nbr)
     order, ptr = _segments(comp, n_prof)
     comp_profiles = {int(c): order[ptr[c] : ptr[c + 1]] for c in np.unique(comp)}
-    labels = np.asarray(pairs.keys).tolist()
+    labels = np.asarray(pairs["keys"]).tolist()
     n_keys = len(labels)
     pos_segments = _segments(pos_key, n_keys)
     lone_segments = _segments(lone_key, n_keys)
@@ -1620,7 +1620,7 @@ def _label_layouts(
         if len(values) != 1:
             raise ValueError(
                 "the permutation null of multilabel APs needs each group to hold "
-                f"one {pairs.label_col!r} value; group by it, or pass "
+                f"one {pairs['label_col']!r} value; group by it, or pass "
                 "null='joint' or null='copied'"
             )
         key = int(values[0])
@@ -1720,11 +1720,11 @@ def label_permutation_pvalues(
     groups : list of np.ndarray
         Each group's rows of the AP table; a group holds one label.
     rows : np.ndarray
-        The AP table's index (rows of ``pairs.profile``), which also gives
-        each row's label (``pairs.row_key``).
+        The AP table's index (rows of ``pairs["profile"]``), which also gives
+        each row's label (``pairs["row_key"]``).
     num_pos, num_total, null_size, seed, observed, progress_bar, max_workers
         As in :func:`permutation_pvalues`; pools are components' profiles.
-    pairs : copairs.map.LabelPairs
+    pairs : dict
         Original positive graph, negatives, row mapping and similarities.
     max_reference_profiles : int
         Maximum component-union size minus the tested group's members.
@@ -1767,7 +1767,9 @@ def label_permutation_pvalues(
 
     def build(g, table):
         comps = layouts[g].comps
-        return _LabelPool(comps, comp_profiles, nbr_ptr, nbr, pairs.similarity, table)
+        return _LabelPool(
+            comps, comp_profiles, nbr_ptr, nbr, pairs["similarity"], table
+        )
 
     def start(g, pool):
         run = _label_run(*layouts[g], pool, seed, null_size)
@@ -1779,6 +1781,6 @@ def label_permutation_pvalues(
         comps: np.concatenate([comp_profiles[c] for c in comps]) for comps in set(keys)
     }
     return _run_groups(
-        keys, refs, pairs.similarity, build, pool_bytes, start, null_size,
+        keys, refs, pairs["similarity"], build, pool_bytes, start, null_size,
         progress_bar, max_workers, pool_memory_budget, key_table_memory_budget,
     )  # fmt: skip

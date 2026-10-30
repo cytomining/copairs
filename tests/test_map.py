@@ -255,9 +255,7 @@ def test_progress_bar_consistency():
         )
         for progress_bar in (True, False)
     ]
-    assert with_pb.drop(columns="_copairs_row_id").equals(
-        no_pb.drop(columns="_copairs_row_id")
-    ), "The progress_bar argument changed results"
+    assert with_pb.equals(no_pb), "The progress_bar argument changed results"
 
 
 def test_multilabel_has_normalized_ap():
@@ -496,7 +494,9 @@ def test_joint_null_uses_attached_pairs_for_outside_positives():
     ap = ap[~ap["ctrl"]]  # A's positives are B's two members, and B's are A's
     assert ap["n_pos_pairs"].tolist() == [2, 2, 2, 3, 3]
     kwargs = dict(progress_bar=False, null="joint")
-    explicit = get_map_pvalue(ap, ["comp"], 5000, SEED, pos_pairs=pairs.pos, **kwargs)
+    explicit = get_map_pvalue(
+        ap, ["comp"], 5000, SEED, pos_pairs=pairs["pos"], **kwargs
+    )
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # no fallback to the copied null
         attached = get_map_pvalue(ap, ["comp"], 5000, SEED, **kwargs)
@@ -530,6 +530,15 @@ def test_ap_frames_carry_their_pairs():
     ap, pairs = average_precision(
         meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
     )
+    assert type(pairs) is dict
+    assert set(pairs) == {"pos", "neg", "similarity"}
+    assert set(ap) == {
+        *meta.columns,
+        "average_precision",
+        "normalized_average_precision",
+        "n_pos_pairs",
+        "n_total_pairs",
+    }
     assert attached_pairs(ap) is pairs
     assert attached_pairs(ap[ap["g"] == "q"].copy()) is pairs
     assert attached_pairs(copy.deepcopy(ap)) is pairs
@@ -542,26 +551,11 @@ def test_ap_frames_carry_their_pairs():
     ap_again = average_precision(
         meta.set_axis(range(10, 19)), feats, ["g"], [], [], ["g"], progress_bar=False
     )
-    np.testing.assert_array_equal(attached_pairs(ap_again).pos, pairs.pos)
+    np.testing.assert_array_equal(attached_pairs(ap_again)["pos"], pairs["pos"])
     similarity = compute.get_similarity_fn("cosine", progress_bar=False)
     np.testing.assert_array_equal(
-        pairs.similarity(pairs.neg), similarity(feats, pairs.neg, 20000)
+        pairs["similarity"](pairs["neg"]), similarity(feats, pairs["neg"], 20000)
     )
-
-
-def test_rank_pairs_compare_by_identity():
-    """RankPairs hold arrays: == and hash() are identity, and do not raise."""
-    meta = pd.DataFrame({"g": ["q"] * 3 + [f"c{i}" for i in range(6)]})
-    feats = np.random.default_rng(SEED).standard_normal((len(meta), 5))
-    _, pairs = average_precision(
-        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
-    )
-    _, again = average_precision(
-        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
-    )
-    assert pairs == pairs
-    assert pairs != again
-    assert len({pairs, again, pairs}) == 2
 
 
 @pytest.mark.parametrize("distance", ["cosine", "correlation", "cityblock"])
@@ -574,7 +568,7 @@ def test_pair_similarity_runs_in_the_calling_thread(distance, monkeypatch):
         progress_bar=False, return_pairs=True,
     )  # fmt: skip
     similarity = compute.get_similarity_fn(distance, progress_bar=False)
-    expected = similarity(feats, pairs.neg, 7)
+    expected = similarity(feats, pairs["neg"], 7)
     ap = ap[ap["g"] != "other"]
     before = mean_average_precision(ap, ["g"], 200, 0.05, SEED, progress_bar=False)
 
@@ -582,7 +576,7 @@ def test_pair_similarity_runs_in_the_calling_thread(distance, monkeypatch):
         raise AssertionError("parallel_map called")
 
     monkeypatch.setattr(compute, "parallel_map", no_pool)
-    got = pairs.similarity(pairs.neg)
+    got = pairs["similarity"](pairs["neg"])
     assert got.dtype == expected.dtype
     np.testing.assert_array_equal(got, expected)
     after = mean_average_precision(ap, ["g"], 200, 0.05, SEED, progress_bar=False)

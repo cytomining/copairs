@@ -13,13 +13,16 @@ from copairs.matching import UnpairedException, find_pairs_multilabel
 from .filter import flatten_str_list, evaluate_and_filter, validate_pipeline_input
 from .normalization import normalize_ap
 from .average_precision import (
-    LabelPairs,
-    _columns,
     attach_pairs,
     _FeatureSimilarity,
 )
 
 logger = logging.getLogger("copairs")
+
+
+def _columns(cols) -> list:
+    """Column name or sequence of column names as a list."""
+    return [cols] if isinstance(cols, str) else list(cols)
 
 
 def _create_neg_query_solver(neg_pairs, neg_sims, num_profiles):
@@ -94,12 +97,18 @@ def average_precision(
     Returns normalized_average_precision in addition to average_precision.
     Each row is one (profile, label) pair: the profile's AP for that label.
 
-    The :class:`~copairs.map.LabelPairs` the APs were computed from, which
+    The pair dictionary the APs were computed from, which
     ``null="permutation"`` in :func:`copairs.map.mean_average_precision`
     needs, are attached to the returned frame as
     ``frame.attrs["copairs_pairs"]``, as in
     :func:`copairs.map.average_precision`; ``return_pairs=True`` also returns
-    them, as a ``(DataFrame, LabelPairs)`` tuple. They keep ``feats``, every
+    them, as a ``(DataFrame, dict)`` tuple. Entries ``"pos"`` and ``"neg"``
+    are positive AP-row and negative source-profile pairs; ``"similarity"``
+    maps source-profile pairs to similarities. ``"profile"`` and ``"row_key"``
+    map AP rows to source profiles and labels in ``"keys"``; ``"label_col"``
+    names the label column and selects multilabel permutation. ``"_lone"``
+    is a lazy function returning pairs sharing only one label (or None for
+    unsupported negative rules). These entries keep ``feats``, every
     positive and negative pair (8 bytes per pair) and each AP row's profile
     and label (12 bytes per row) alive with the frame, whichever null is
     used; drop them with ``frame.attrs.pop("copairs_pairs")``. Preserve the
@@ -199,16 +208,16 @@ def average_precision(
     results = meta.merge(results, right_on="ix", left_index=True).drop("ix", axis=1)
     results["n_pos_pairs"] = results["n_pos_pairs"].fillna(0).astype(np.uint32)
     results["n_total_pairs"] = results["n_total_pairs"].fillna(0).astype(np.uint32)
-    pairs = LabelPairs(
-        pos_rows,
-        np.asarray(neg_pairs),
-        _FeatureSimilarity(feats, distance, batch_size),
-        profile=profile,
-        row_key=row_key,
-        label_col=multilabel_col,
-        keys=np.asarray(keys),
-        _lone=lone,
-    )
+    pairs = {
+        "pos": pos_rows,
+        "neg": np.asarray(neg_pairs),
+        "similarity": _FeatureSimilarity(feats, distance, batch_size),
+        "profile": profile,
+        "row_key": row_key,
+        "label_col": multilabel_col,
+        "keys": np.asarray(keys),
+        "_lone": lone,
+    }
     attach_pairs(results, pairs)
     logger.info("Finished.")
     return (results, pairs) if return_pairs else results

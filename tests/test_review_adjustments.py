@@ -30,18 +30,6 @@ def profiles():
     )
 
 
-@pytest.mark.parametrize("null", ["joint", "permutation"])
-@pytest.mark.parametrize("equal_scores", [False, True])
-def test_equal_degree_reset_rejected(null, equal_scores):
-    """A reset cannot silently reuse identities even when scores/counts match."""
-    ap, pairs = profiles()
-    if equal_scores:
-        ap["average_precision"] = 0.5
-    bad = ap[ap.g == "b"].reset_index(drop=True)
-    with pytest.raises(ValueError, match="row identit|reset_index"):
-        get_map_pvalue(bad, ["g"], 10, null=null, pairs=pairs, progress_bar=False)
-
-
 def test_joint_missing_pairs_never_falls_back(monkeypatch):
     """A multi-member group without its graph raises before any copied sampling."""
     ap, _ = profiles()
@@ -101,26 +89,20 @@ def test_zero_draws_are_untested(null, hierarchical, monkeypatch, tmp_path):
 def test_default_seed_and_explicit_pairs_precedence():
     """Omitted seed equals zero and explicit valid pairs override attached state."""
     ap, pairs = profiles()
-    other, _ = profiles()
     from copairs.map.average_precision import attach_pairs
 
-    attach_pairs(ap, other.attrs["copairs_pairs"].pairs)
+    attach_pairs(ap, {**pairs, "pos": pairs["pos"][1:]})
     kwargs = dict(progress_bar=False, pairs=pairs, max_workers=1)
     a = mean_average_precision(ap, ["g"], 40, 0.05, **kwargs)
     b = mean_average_precision(ap, ["g"], 40, 0.05, seed=0, **kwargs)
     pd.testing.assert_frame_equal(a, b)
-    with pytest.raises(ValueError, match="row identit"):
+    with pytest.raises(ValueError, match="positive pairs"):
         mean_average_precision(ap, ["g"], 40, 0.05, progress_bar=False)
 
 
-def test_explicit_positive_pairs_must_agree_with_provenance():
-    """Raw positive arrays cannot bypass the attached row-identity checks."""
-    ap, pairs = profiles()
-    bad = ap[ap.g == "b"].reset_index(drop=True)
-    with pytest.raises(ValueError, match="row identit|reset_index"):
-        get_map_pvalue(
-            bad, ["g"], 10, null="joint", pos_pairs=pairs.pos, progress_bar=False
-        )
+def test_explicit_positive_pairs_must_agree_with_selected_pairs():
+    """Raw positive arrays must agree with an available selected pair dictionary."""
+    ap, _ = profiles()
     with pytest.raises(ValueError, match="positive pairs|pos_pairs"):
         get_map_pvalue(
             ap,
@@ -341,12 +323,12 @@ def test_noncomplete_positive_graph_against_independent_enumeration():
         kept.index.to_numpy(),
         kept.n_pos_pairs.to_numpy(),
         (kept.n_total_pairs - kept.n_pos_pairs).to_numpy(),
-        pairs.pos,
-        pairs.neg,
+        pairs["pos"],
+        pairs["neg"],
     )[0]
     np.testing.assert_array_equal(edges, [[0, 2], [1, 2]])
-    pool = permutation._Pool(blocks, pairs.similarity)
-    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    pool = permutation._Pool(blocks, pairs["similarity"])
+    layout = permutation._Layout(members, edges, block_of, pairs["similarity"], pool)
     assignments = np.array(list(itertools.permutations(range(5), 3)))
     expected = []
     for chosen in assignments:
@@ -355,7 +337,7 @@ def test_noncomplete_positive_graph_against_independent_enumeration():
         for slot in range(3):
             neighbors = [j if i == slot else i for i, j in edges if slot in (i, j)]
             targets = [chosen[j] for j in neighbors] + negatives
-            sims = pairs.similarity(
+            sims = pairs["similarity"](
                 np.column_stack([np.full(len(targets), chosen[slot]), targets])
             )
             relevance = np.arange(len(targets)) < len(neighbors)

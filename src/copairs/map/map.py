@@ -26,12 +26,8 @@ from copairs.map.hierarchical_fdr import (
     apply_hierarchical_fdr_correction,
 )
 from copairs.map.average_precision import (
-    RankPairs,
-    LabelPairs,
     attached_pairs,
     check_recomputable,
-    check_row_identity,
-    check_complete_groups,
 )
 
 logger = logging.getLogger("copairs")
@@ -47,7 +43,7 @@ def get_map_pvalue(
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
-    pairs: RankPairs | None = None,
+    pairs: dict | None = None,
     *,
     max_reference_profiles: int = 16_384,
     pool_memory_budget: int = 4 * 1024**3,
@@ -68,8 +64,7 @@ def get_map_pvalue(
         DataFrame containing individual Average Precision (AP) scores and pair statistics
         (e.g., number of positive pairs `n_pos_pairs` and total pairs `n_total_pairs`).
     sameby : list or str
-        Nonempty, distinct string column names present in the input. Single-label
-        permutation grouping values must agree with the source metadata.
+        Nonempty, distinct string column names present in the input.
     null_size : int
         Number of Monte Carlo draws. Zero requests scores only: p-values are NaN
         after input/layout validation, without sampling or null-only tables.
@@ -87,7 +82,7 @@ def get_map_pvalue(
     pos_pairs : np.ndarray, optional
         The `(n_pairs, 2)` positive pairs used to compute the AP scores,
         indexing the rows of the frame `average_precision` returned (its
-        `return_pairs=True` gives them, as `pairs.pos`); `ap_scores` must keep
+        `return_pairs=True` gives them, as `pairs["pos"]`); `ap_scores` must keep
         that frame's index. Pairs whose counts disagree with `n_pos_pairs`
         raise. When omitted, they are taken from ``pairs`` or, failing that,
         from the pairs `average_precision` attached to ``ap_scores``. Multi-member
@@ -106,7 +101,7 @@ def get_map_pvalue(
         positives can use ``"joint"``, its AP null. Positive draw counts use
         Monte Carlo sampling with (hits + 1)/(draws + 1). It recomputes similarities, so
         APs computed with a distance that estimates its scale per batch
-        (``"seuclidean"``, ``"mahalanobis"``) raise. Multilabel ``LabelPairs``
+        (``"seuclidean"``, ``"mahalanobis"``) raise. Multilabel pair dictionaries
         use negative-graph components, preserving member counts per component
         and other labels, with the original positive graph. Negatives follow
         the original negative/lone-pair structure; counts can change. Each
@@ -123,8 +118,8 @@ def get_map_pvalue(
         configuration and the group's null averages them, so members with
         equal pair counts share one draw and the null does not narrow as
         replicates are added.
-    pairs : RankPairs or LabelPairs, optional
-        The pairs the AP scores were computed with, as
+    pairs : dict, optional
+        Dictionary with ``"pos"``, ``"neg"`` and ``"similarity"`` entries, as
         ``average_precision(..., return_pairs=True)`` returns them; their
         indices are rows of that call's frame, so ``ap_scores`` must keep its
         index. The permutation null needs them and, when not given, takes
@@ -133,20 +128,16 @@ def get_map_pvalue(
         reloaded, pickled, or concatenated from several AP calls) need
         ``pairs=`` or another null. The joint null takes its positive pairs
         from ``pairs`` too, or from the attached pairs (see ``pos_pairs``).
-        Explicit pairs override attachments. For single-label APs, they must
-        match the AP row identities; mixed AP-call identities are rejected,
-        including with raw ``pos_pairs``. Keep the original index and private
-        ``_copairs_row_id`` column. Single-label permutation also requires
-        ``pairs.source_metadata`` to validate complete groups,
-        including disconnected graphs. New grouping columns are supported only
-        when all original contributors remain. The original metadata snapshot is
-        copied once at AP calculation and shared by later copies, outside table
-        budgets. Features, pair arrays and the snapshot must not be mutated.
-        Multilabel LabelPairs do not track row identities or original membership:
-        callers must preserve the original AP index, correct pairs and complete
-        labels. The existing pair/layout checks cannot detect every mismatch.
-        For external tables without provenance, alignment is the caller's
-        responsibility. Custom similarities must be batch-independent; the
+        Multilabel dictionaries also carry ``"label_col"``, ``"profile"``,
+        ``"row_key"``, ``"keys"`` and the lazy ``"_lone"`` pair function;
+        ``"label_col"`` selects the multilabel permutation path.
+        Explicit pairs override attachments. Keep the original index, correct
+        pair dictionary and complete tested groups/labels. There is no source or
+        original-membership tracking; structural checks cannot detect every
+        misalignment or missing member, including dropped disconnected components.
+        Recompute AP when removing members of a tested group. Copies share the
+        dictionary, features and arrays; do not mutate them between AP and mAP.
+        Custom similarities must be batch-independent; the
         observed-mAP check is a safeguard, not a proof for arbitrary callables.
     max_reference_profiles : int, default 16384
         Maximum total reference profiles across a tested group's blocks; >= 0.
@@ -177,7 +168,7 @@ def get_map_pvalue(
         If no row has a non-NaN AP, positive pairs and a value in every
         `sameby` column, e.g. an empty table.
     ValueError
-        Invalid grouping, pair provenance/counts, layout or resource arguments.
+        Invalid grouping, pair dictionaries/counts, layout or resource arguments.
         ``max_workers`` must be a positive integer or None even for zero draws
         and joint sampling, which does not use that executor.
 
@@ -203,17 +194,22 @@ def get_map_pvalue(
     if null != "copied" and pairs is None:
         pairs = attached_pairs(ap_scores)
     if pairs is not None and null != "copied":
-        if not isinstance(pairs, RankPairs):
-            raise ValueError("pairs must be a RankPairs handle from the AP calculation")
+        if (
+            not isinstance(pairs, dict)
+            or not {"pos", "neg", "similarity"} <= pairs.keys()
+        ):
+            raise ValueError(
+                "pairs must be a dictionary with pos, neg and similarity entries"
+            )
         if pos_pairs is not None and not np.array_equal(
             check_pairs(pos_pairs, "pos_pairs"),
-            check_pairs(pairs.pos, "positive pairs"),
+            check_pairs(pairs["pos"], "positive pairs"),
         ):
             raise ValueError(
                 "pos_pairs must index the rows of the AP frame and match the selected handle's positive pairs"
             )
     if null == "joint" and pos_pairs is None and pairs is not None:
-        pos_pairs = pairs.pos
+        pos_pairs = pairs["pos"]
     if null == "permutation" and pairs is None:
         raise ValueError(
             "null='permutation' (the default) needs the pairs the APs were "
@@ -225,12 +221,10 @@ def get_map_pvalue(
             "or null='copied'."
         )
     if null == "permutation":
-        check_recomputable(pairs.similarity)
+        check_recomputable(pairs["similarity"])
 
     if null == "permutation" or pos_pairs is not None:
         _check_row_index(ap_scores.index)
-        if not isinstance(pairs, LabelPairs):
-            check_row_identity(ap_scores, pairs)
 
     # Filter out invalid or incomplete AP scores, remembering the original rows.
     # Rows missing a sameby value stay (the groupby drops them), so `indices`
@@ -246,8 +240,6 @@ def get_map_pvalue(
     missing_keys = valid & ~ap_scores[sameby].notna().all(axis=1)
     tested = ap_scores.loc[valid & ~missing_keys]
     counts = _normalize_pair_counts(tested)
-    if null == "permutation" and not isinstance(pairs, LabelPairs):
-        check_complete_groups(ap_scores, sameby, pairs, tested.index)
     ap_values = tested["average_precision"].to_numpy(dtype=np.float64)
     if not np.isfinite(ap_values).all() or ((ap_values < 0) | (ap_values > 1)).any():
         raise ValueError("usable AP scores must be finite values in [0, 1]")
@@ -325,16 +317,16 @@ def get_map_pvalue(
             max_workers=max_workers,
             **resources,
         )
-        if isinstance(pairs, LabelPairs):
+        if "label_col" in pairs:
             pvalues = permutation.label_permutation_pvalues(
                 *arguments, pairs, null_size, seed, **options
             )
         else:
             pvalues = permutation.permutation_pvalues(
                 *arguments,
-                pairs.pos,
-                pairs.neg,
-                pairs.similarity,
+                pairs["pos"],
+                pairs["neg"],
+                pairs["similarity"],
                 null_size,
                 seed,
                 **options,
@@ -451,7 +443,7 @@ def mean_average_precision(
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
-    pairs: RankPairs | None = None,
+    pairs: dict | None = None,
     *,
     max_reference_profiles: int = 16_384,
     pool_memory_budget: int = 4 * 1024**3,
@@ -465,7 +457,7 @@ def mean_average_precision(
     corrections using Benjamini-Hochberg FDR.
 
     Per-call resource controls (``max_reference_profiles``, ``pool_memory_budget``,
-    ``key_table_memory_budget``), pair provenance and supported layouts follow
+    ``key_table_memory_budget``), pair dictionaries and supported layouts follow
     :func:`get_map_pvalue`. With ``null_size=0`` statistical columns are NaN and
     significance flags are nullable booleans containing pd.NA; correction is skipped.
 
@@ -497,9 +489,9 @@ def mean_average_precision(
     null : str
         Null of the group mAP: ``"permutation"`` (default), ``"joint"`` or
         ``"copied"``; see `get_map_pvalue`.
-    pairs : RankPairs, optional
-        Pairs of the AP scores, needed by ``null="permutation"`` and attached
-        to AP frames; see `get_map_pvalue`.
+    pairs : dict, optional
+        Pair dictionary of the AP scores, needed by ``null="permutation"`` and
+        attached to AP frames; see `get_map_pvalue`.
 
     Returns
     -------
@@ -559,7 +551,7 @@ def mean_average_precision_hierarchical(
     cache_dir: Optional[Union[str, Path]] = None,
     pos_pairs: Optional[np.ndarray] = None,
     null: str = "permutation",
-    pairs: RankPairs | None = None,
+    pairs: dict | None = None,
     *,
     max_reference_profiles: int = 16_384,
     pool_memory_budget: int = 4 * 1024**3,
@@ -572,7 +564,7 @@ def mean_average_precision_hierarchical(
     appropriate for grouped hypothesis testing, such as dose-response data.
 
     Per-call resource controls (``max_reference_profiles``, ``pool_memory_budget``,
-    ``key_table_memory_budget``), pair provenance and supported layouts follow
+    ``key_table_memory_budget``), pair dictionaries and supported layouts follow
     :func:`get_map_pvalue`. With ``null_size=0`` all statistical columns, including
     stage-1 p-values, are NaN; significance flags contain pd.NA and correction is skipped.
     Supply ``hierarchical_by`` explicitly, preferably as a keyword.
@@ -619,9 +611,9 @@ def mean_average_precision_hierarchical(
     null : str
         Null of the group mAP: ``"permutation"`` (default), ``"joint"`` or
         ``"copied"``; see `get_map_pvalue`.
-    pairs : RankPairs, optional
-        Pairs of the AP scores, needed by ``null="permutation"`` and attached
-        to AP frames; see `get_map_pvalue`.
+    pairs : dict, optional
+        Pair dictionary of the AP scores, needed by ``null="permutation"`` and
+        attached to AP frames; see `get_map_pvalue`.
 
     Returns
     -------

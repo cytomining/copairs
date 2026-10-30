@@ -67,8 +67,8 @@ def group_of_q(meta, feats, spec):
         ap.index.to_numpy(),
         ap["n_pos_pairs"].to_numpy(),
         (ap["n_total_pairs"] - ap["n_pos_pairs"]).to_numpy(),
-        pairs.pos,
-        pairs.neg,
+        pairs["pos"],
+        pairs["neg"],
     )[0]
     return ap["average_precision"].mean(), layout, pairs
 
@@ -78,7 +78,7 @@ def draws_of(meta, feats, spec, null_size, seed=0):
     observed, layout, pairs = group_of_q(meta, feats, spec)
     out = np.empty(null_size)
     count, identity, _ = permutation.permutation_null(
-        *layout, pairs.similarity, null_size, seed, out=out
+        *layout, pairs["similarity"], null_size, seed, out=out
     )
     return observed, identity, count, out
 
@@ -147,10 +147,10 @@ def test_vectorized_matches_scalar_draws(
     if ties:  # rounding ties many similarities and zeroes some profiles (NaN)
         feats = np.round(feats)
     observed, (members, edges, blocks, block_of), pairs = group_of_q(meta, feats, spec)
-    pool = permutation._Pool(blocks, pairs.similarity)
+    pool = permutation._Pool(blocks, pairs["similarity"])
     draws = 0 if tables == "full-ranks" else 300
     layout = permutation._Layout(
-        members, edges, block_of, pairs.similarity, pool, draws=draws
+        members, edges, block_of, pairs["similarity"], pool, draws=draws
     )
     assert pool.ranked == (tables != "search")
     assert (layout.full_keys is not None) == tables.startswith("full")
@@ -180,10 +180,10 @@ def test_hits_match_scalar_draws():
     spec = dict(SPEC, neg_sameby=["plate"])
     observed, group, pairs = group_of_q(meta, feats, spec)
     count, identity, pool = permutation.permutation_null(
-        *group, pairs.similarity, 700, 5
+        *group, pairs["similarity"], 700, 5
     )
     members, edges, _, block_of = group
-    layout = permutation._Layout(members, edges, block_of, pairs.similarity, pool)
+    layout = permutation._Layout(members, edges, block_of, pairs["similarity"], pool)
     _, maps = scalar_draws(layout, 0, 700, *permutation.group_key(5, members))
     assert count == (maps >= tie_thresholds(identity)).sum()
     assert 0 < count < 700
@@ -338,15 +338,15 @@ def test_rejects_unsupported_layouts():
 
 
 def test_dropped_members_say_why_and_what_to_do():
-    """Dropping some of a group's members raises, naming the cause and the remedies."""
+    """A positive edge to a dropped member raises, naming the cause and remedies."""
     meta = layout_meta(1, 3, 5)
     feats = np.random.default_rng(2).standard_normal((len(meta), 4))
     ap = average_precision(meta, feats, progress_bar=False, **SPEC)
     args = (["g"], 100, 0.05, 0)
     with pytest.raises(
         ValueError,
-        match=r"incomplete permutation group.*dropped or excluded.*"
-        r"drop whole groups only.*recompute AP",
+        match=r"AP scores no longer have.*dropped after average_precision.*"
+        r"Drop whole groups only.*recompute average_precision",
     ):
         mean_average_precision(ap.drop(index=[0]), *args, progress_bar=False)
     kept = ap[ap["g"] == "q"]  # whole groups (and controls) may be dropped
@@ -577,10 +577,10 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
     assert got["p_value"].tolist() == expected["p_value"].tolist()
     _, layout, pairs = group_of_q(layout_meta(2, 2, 4), feats[:12], SPEC)
     blocks = layout[2]
-    table = permutation._KeyTable(np.sort(np.concatenate(blocks)), pairs.similarity)
+    table = permutation._KeyTable(np.sort(np.concatenate(blocks)), pairs["similarity"])
     np.testing.assert_array_equal(
-        permutation._Pool(blocks, pairs.similarity, table).krr,
-        key_matrix(pairs.similarity, np.concatenate(blocks)),
+        permutation._Pool(blocks, pairs["similarity"], table).krr,
+        key_matrix(pairs["similarity"], np.concatenate(blocks)),
     )
 
 
@@ -722,7 +722,7 @@ def label_group(meta, feats, label, spec=ML_SPEC):
         pairs,
     )
     pool = permutation._LabelPool(
-        layouts[0][3], comp_profiles, nbr_ptr, nbr, pairs.similarity
+        layouts[0][3], comp_profiles, nbr_ptr, nbr, pairs["similarity"]
     )
     return ap["average_precision"].mean(), layouts[0], pool, pairs
 
@@ -994,7 +994,7 @@ def test_label_pools_are_shared_and_workers_do_not_matter(monkeypatch):
     ]
     assert alone == p[0]
     _, layout, pool, pairs = label_group(meta, feats, "A", PLATE_SPEC)
-    table = permutation._KeyTable(np.sort(pool.profiles), pairs.similarity)
+    table = permutation._KeyTable(np.sort(pool.profiles), pairs["similarity"])
     np.testing.assert_array_equal(
         CountedPool(layout[3], *label_pool_args(meta, feats), table).keys, pool.keys
     )
@@ -1006,7 +1006,7 @@ def label_pool_args(meta, feats):
     _, comp_profiles, (nbr_ptr, nbr) = permutation._label_layouts(
         [], ap.index.to_numpy(), np.zeros(0), np.zeros(0), pairs
     )
-    return comp_profiles, nbr_ptr, nbr, pairs.similarity
+    return comp_profiles, nbr_ptr, nbr, pairs["similarity"]
 
 
 @pytest.mark.parametrize("hits_at", [[], [0], [255], [255, 767], [0, 255, 256, 1999]])
