@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from scipy.spatial.distance import cdist
 
 from copairs import compute
 
@@ -303,3 +304,27 @@ def test_get_null_dists_unseeded_skips_cache(tmp_path):
     second = compute.get_null_dists(confs, **kwargs)
     assert list(tmp_path.rglob("*.npy")) == []
     assert not np.array_equal(first, second)
+
+
+@pytest.mark.parametrize("metric", ["cityblock", "canberra", "jaccard", "seuclidean"])
+def test_scipy_metrics_take_cdist_in_bounded_blocks(monkeypatch, metric):
+    """SciPy metrics give each pair its full-batch cdist value from small cdist calls.
+
+    Batch-dependent metrics estimate their scale from the whole batch, so they
+    keep one call.
+    """
+    x, y = np.random.default_rng(3).standard_normal((2, 150, 8))
+    if metric == "jaccard":
+        x, y = x > 0, y > 0
+    distance = np.diag(cdist(x, y, metric))
+    rows = []
+
+    def recorded_cdist(a, b, metric):
+        rows.append(len(a))
+        return cdist(a, b, metric)
+
+    monkeypatch.setattr(compute, "cdist", recorded_cdist)
+    similarity = compute.pairwise_similarity_fn(metric)(x, y)
+    expected = 1 - distance if metric == "jaccard" else 1 / (1 + distance)
+    np.testing.assert_array_equal(similarity, expected)
+    assert max(rows) == (150 if metric == "seuclidean" else compute.CDIST_BLOCK)

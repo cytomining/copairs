@@ -1,15 +1,27 @@
 """Tests for (mean) Average Precision calculation."""
 
+import copy
+import json
+import pickle
+import warnings
+import itertools
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.metrics import average_precision_score
 
 from copairs import compute
-from copairs.map import average_precision, mean_average_precision
-from tests.helpers import simulate_random_dframe
-from copairs.matching import UnpairedException
+from copairs.map import (
+    get_map_pvalue,
+    average_precision,
+    mean_average_precision,
+    mean_average_precision_hierarchical,
+)
+from tests.helpers import ap_frame, query_meta, simulate_random_dframe
+from copairs.matching import UnpairedException, find_pairs
 from copairs.map.multilabel import average_precision as multilabel_average_precision
+from copairs.map.average_precision import attached_pairs
 
 SEED = 0
 
@@ -326,7 +338,12 @@ def test_mean_average_precision_independent_of_other_groups(tmp_path):
     )
     only_y = ap_scores[ap_scores["group"] == "Y"]
     kwargs = dict(
-        sameby=["group"], null_size=200, threshold=0.05, seed=0, progress_bar=False
+        sameby=["group"],
+        null_size=200,
+        threshold=0.05,
+        seed=0,
+        progress_bar=False,
+        null="copied",  # the cache belongs to the copied null
     )
     shared = tmp_path / "shared"
     both = mean_average_precision(ap_scores, cache_dir=shared, **kwargs)
@@ -339,3 +356,324 @@ def test_mean_average_precision_independent_of_other_groups(tmp_path):
     pd.testing.assert_frame_equal(after_both, alone)
     y_in_both = both.loc[both["group"] == "Y", "p_value"].tolist()
     assert y_in_both == alone["p_value"].tolist()
+
+
+def test_map_pvalue_replicates_use_the_joint_null():
+    """Replicate groups require actual pairs, attached or explicitly supplied."""
+    rng = np.random.default_rng(SEED)
+    meta = query_meta()
+    feats = rng.standard_normal((len(meta), 10))
+    ap_scores, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    kwargs = dict(progress_bar=False, null="joint")
+    bare = ap_scores.copy()
+    bare.attrs.clear()
+    with pytest.raises(ValueError, match="actual positive pairs"):
+        get_map_pvalue(bare, ["g"], 20_000, SEED, **kwargs)
+    attached = get_map_pvalue(ap_scores, ["g"], 20_000, SEED, **kwargs)
+    given = get_map_pvalue(bare, ["g"], 20_000, SEED, pairs=pairs, **kwargs)
+    explicit = get_map_pvalue(
+        bare,
+        ["g"],
+        20_000,
+        SEED,
+        pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+        **kwargs,
+    )
+    assert attached["p_value"].tolist() == explicit["p_value"].tolist()
+    assert given["p_value"].tolist() == explicit["p_value"].tolist()
+    assert ((attached["p_value"] > 0) & (attached["p_value"] <= 1)).all()
+
+
+def test_map_pvalue_narrows_with_group_size():
+    """The same mAP is more significant with more replicates."""
+    rows = []
+    for n in (2, 4, 8):
+        rows += [(f"n{n}", 0.18, n - 1, n - 1 + 100)] * n
+    frame = ap_frame(rows)
+    result = get_map_pvalue(
+        frame,
+        ["g"],
+        20_000,
+        SEED,
+        progress_bar=False,
+        null="joint",
+        pos_pairs=find_pairs(frame, sameby=["g"], diffby=[]),
+    )
+    p = result.set_index("g")["p_value"]
+    assert p["n2"] > p["n4"] > p["n8"]
+
+
+def test_map_pvalue_requires_explicit_copied_selection(tmp_path, monkeypatch):
+    """Missing graphs raise without invoking copied sampling; explicit copied works."""
+    rows = [("odd", 0.3, 10, 50)] * 3 + [("rep", 0.3, 2, 52)] * 3
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("copied fallback called")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("copairs.map.map._copied_pvalues", forbidden)
+        with pytest.raises(ValueError, match="actual positive pairs"):
+            get_map_pvalue(
+                ap_frame(rows),
+                ["g"],
+                1000,
+                SEED,
+                progress_bar=False,
+                cache_dir=tmp_path,
+                null="joint",
+            )
+    result = get_map_pvalue(
+        ap_frame(rows),
+        ["g"],
+        1000,
+        SEED,
+        progress_bar=False,
+        cache_dir=tmp_path,
+        null="copied",
+    )
+    p = result.set_index("g")["p_value"]
+    assert 0 < p["odd"] <= 1 and 0 < p["rep"] <= 1
+
+
+def test_map_pvalue_one_profile_groups_use_their_ap_null():
+    """A group of one profile, positives in other groups, gets that AP's null."""
+    genes = ["a"] * 4 + ["b"] * 4 + ["neg"] * 10  # one profile per guide
+    meta = pd.DataFrame({"gene": genes, "guide": range(len(genes))})
+    meta["ref"] = np.where(meta["gene"] == "neg", meta.index, -1)
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 8))
+    ap = average_precision(
+        meta, feats, ["gene", "ref"], [], [], ["gene", "ref"], progress_bar=False
+    )
+    ap = ap[ap["gene"] != "neg"]
+    kwargs = dict(progress_bar=False, null="joint")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        inferred = get_map_pvalue(ap, ["guide"], 20_000, SEED, **kwargs)
+    pos_pairs = find_pairs(meta, sameby=["gene", "ref"], diffby=[])
+    explicit = get_map_pvalue(
+        ap, ["guide"], 20_000, SEED, pos_pairs=pos_pairs, **kwargs
+    )
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    ranks = itertools.combinations(range(13), 3)  # 3 sibling guides, 10 controls
+    null = np.array([np.mean(np.arange(1, 4) / (np.array(r) + 1)) for r in ranks])
+    exact = [(null >= m - 1e-9).mean() for m in inferred["mean_average_precision"]]
+    np.testing.assert_allclose(inferred["p_value"], exact, atol=0.01)
+
+
+def test_joint_null_reads_attached_pairs():
+    """The joint null takes edges from attached pairs, so a reset or repeated index raises."""
+    rng = np.random.default_rng(SEED)
+    meta = query_meta(others=3)
+    meta = meta.sample(frac=1, random_state=1).reset_index(drop=True)
+    feats = rng.standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    kept = ap[ap["g"] != "other"]
+    bare = kept.copy()
+    pairs = attached_pairs(bare)
+    bare.attrs.clear()
+    kwargs = dict(progress_bar=False, null="joint")
+    got = get_map_pvalue(kept, ["g"], 2000, SEED, **kwargs)
+    expected = get_map_pvalue(bare, ["g"], 2000, SEED, pairs=pairs, **kwargs)
+    assert got["p_value"].tolist() == expected["p_value"].tolist()
+    reset = kept.reset_index(drop=True)  # pairs now misaligned
+    for null in ("joint", "permutation"):
+        with pytest.raises(ValueError, match="no reset_index"):
+            get_map_pvalue(reset, ["g"], 2000, SEED, progress_bar=False, null=null)
+    doubled = pd.concat([kept, kept])  # keeps the pairs, repeats every row
+    for null in ("joint", "permutation"):
+        with pytest.raises(ValueError, match="repeats row numbers"):
+            get_map_pvalue(doubled, ["g"], 2000, SEED, progress_bar=False, null=null)
+
+
+def test_joint_null_uses_attached_pairs_for_outside_positives():
+    """Groups whose positives lie in other groups get edges from the attached pairs."""
+    rows = [("T", "A")] * 3 + [("T", "B")] * 2 + [("ctrl", "ctrl")] * 10
+    meta = pd.DataFrame(rows, columns=["t", "comp"])
+    meta["ctrl"] = meta["t"] == "ctrl"
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 8))
+    ap, pairs = average_precision(
+        meta, feats, ["t"], ["comp"], [], ["ctrl"], progress_bar=False,
+        return_pairs=True,
+    )  # fmt: skip
+    ap = ap[~ap["ctrl"]]  # A's positives are B's two members, and B's are A's
+    assert ap["n_pos_pairs"].tolist() == [2, 2, 2, 3, 3]
+    kwargs = dict(progress_bar=False, null="joint")
+    explicit = get_map_pvalue(
+        ap, ["comp"], 5000, SEED, pos_pairs=pairs["pos"], **kwargs
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no fallback to the copied null
+        attached = get_map_pvalue(ap, ["comp"], 5000, SEED, **kwargs)
+    assert attached["p_value"].tolist() == explicit["p_value"].tolist()
+
+
+@pytest.mark.parametrize("null", ["permutation", "joint"])
+def test_pairs_need_the_ap_frames_row_index(null):
+    """A relabelled AP index raises a clear error wherever pairs index it."""
+    meta = query_meta()
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    for index in (meta["g"] + meta.index.astype(str), -1 - meta.index):
+        relabelled = ap.set_axis(index)
+        with pytest.raises(ValueError, match="index must hold the row numbers"):
+            get_map_pvalue(relabelled, ["g"], 100, SEED, progress_bar=False, null=null)
+    bare = ap.set_axis(meta["g"] + meta.index.astype(str))
+    bare.attrs.clear()
+    with pytest.raises(ValueError, match="actual positive pairs"):
+        get_map_pvalue(bare, ["g"], 100, SEED, progress_bar=False, null="joint")
+    assert len(
+        get_map_pvalue(bare, ["g"], 100, SEED, progress_bar=False, null="copied")
+    )
+
+
+def test_ap_frames_carry_their_pairs():
+    """AP frames carry their pairs through copies and filters, not saving or merging."""
+    rng = np.random.default_rng(SEED)
+    meta = pd.DataFrame({"g": ["q"] * 3 + [f"c{i}" for i in range(6)]})
+    feats = rng.standard_normal((len(meta), 5))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    assert type(pairs) is dict
+    assert set(pairs) == {"pos", "neg", "similarity"}
+    assert set(ap) == {
+        *meta.columns,
+        "average_precision",
+        "normalized_average_precision",
+        "n_pos_pairs",
+        "n_total_pairs",
+    }
+    assert attached_pairs(ap) is pairs
+    assert attached_pairs(ap[ap["g"] == "q"].copy()) is pairs
+    assert attached_pairs(copy.deepcopy(ap)) is pairs
+    assert attached_pairs(pd.concat([ap.iloc[:4], ap.iloc[4:]])) is pairs
+    assert json.loads(json.dumps(ap.attrs)) == {"copairs_pairs": {}}  # as to_parquet
+    assert attached_pairs(pickle.loads(pickle.dumps(ap))) is None
+    other = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    assert attached_pairs(pd.concat([ap, other])) is None
+    # The pairs index the frame's rows and rank with the AP stage's similarities.
+    ap_again = average_precision(
+        meta.set_axis(range(10, 19)), feats, ["g"], [], [], ["g"], progress_bar=False
+    )
+    np.testing.assert_array_equal(attached_pairs(ap_again)["pos"], pairs["pos"])
+    similarity = compute.get_similarity_fn("cosine", progress_bar=False)
+    np.testing.assert_array_equal(
+        pairs["similarity"](pairs["neg"]), similarity(feats, pairs["neg"], 20000)
+    )
+
+
+@pytest.mark.parametrize("distance", ["cosine", "correlation", "cityblock"])
+def test_pair_similarity_runs_in_the_calling_thread(distance, monkeypatch):
+    """The pairs' similarity starts no thread pool and matches the AP stage's."""
+    meta = query_meta(others=5)
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 6))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], batch_size=7, distance=distance,
+        progress_bar=False, return_pairs=True,
+    )  # fmt: skip
+    similarity = compute.get_similarity_fn(distance, progress_bar=False)
+    expected = similarity(feats, pairs["neg"], 7)
+    ap = ap[ap["g"] != "other"]
+    before = mean_average_precision(ap, ["g"], 200, 0.05, SEED, progress_bar=False)
+
+    def no_pool(*args, **kwargs):
+        raise AssertionError("parallel_map called")
+
+    monkeypatch.setattr(compute, "parallel_map", no_pool)
+    got = pairs["similarity"](pairs["neg"])
+    assert got.dtype == expected.dtype
+    np.testing.assert_array_equal(got, expected)
+    after = mean_average_precision(ap, ["g"], 200, 0.05, SEED, progress_bar=False)
+    assert after["p_value"].tolist() == before["p_value"].tolist()
+
+
+def test_map_pvalue_rejects_misaligned_pos_pairs():
+    """pos_pairs from a meta whose index has gaps no longer index ap_scores."""
+    rng = np.random.default_rng(SEED)
+    meta = query_meta()
+    meta = meta.drop(index=[1, 7, 20])  # filtered by the user: index 0, 2, 3, 4, ...
+    feats = rng.standard_normal((len(meta), 10))
+    ap, pairs = average_precision(
+        meta, feats, ["g"], [], [], ["g"], progress_bar=False, return_pairs=True
+    )
+    kwargs = dict(progress_bar=False, null="joint")
+    inferred = get_map_pvalue(ap, ["g"], 2000, SEED, **kwargs)
+    explicit = get_map_pvalue(ap, ["g"], 2000, SEED, pairs=pairs, **kwargs)
+    assert inferred["p_value"].tolist() == explicit["p_value"].tolist()
+    with pytest.raises(ValueError, match="must index the rows"):
+        get_map_pvalue(
+            ap,
+            ["g"],
+            2000,
+            SEED,
+            pos_pairs=find_pairs(meta, sameby=["g"], diffby=[]),
+            **kwargs,
+        )
+
+
+def run_map_entry(ap_scores, hierarchical, **kwargs):
+    """Run the mAP of group "g" from either entry point, hierarchical over "g"."""
+    kwargs = dict(null_size=100, threshold=0.05, seed=SEED, progress_bar=False) | kwargs
+    if hierarchical:
+        return mean_average_precision_hierarchical(
+            ap_scores.assign(h=0), ["g", "h"], hierarchical_by=["g"], **kwargs
+        )
+    return mean_average_precision(ap_scores, ["g"], **kwargs)
+
+
+@pytest.mark.parametrize("hierarchical", [False, True])
+@pytest.mark.parametrize("null", ["permutation", "joint", "copied"])
+def test_no_valid_ap_scores_raise_under_every_null(null, hierarchical, tmp_path):
+    """AP frames with no valid AP score or group key raise, with their pairs attached."""
+    meta = query_meta()
+    feats = np.random.default_rng(SEED).standard_normal((len(meta), 10))
+    ap = average_precision(meta, feats, ["g"], [], [], ["g"], progress_bar=False)
+    for frame in (ap.iloc[:0], ap.assign(average_precision=np.nan), ap.assign(g=None)):
+        with pytest.raises(UnpairedException, match="valid AP scores"):
+            run_map_entry(frame, hierarchical, null=null, cache_dir=tmp_path)
+
+
+def test_indices_keep_rows_without_sameby_values(tmp_path):
+    """`indices` count rows missing a sameby value; only invalid APs are dropped."""
+    ap = ap_frame(
+        [
+            (None, 0.5, 1, 10),
+            ("a", np.nan, 1, 10),
+            ("a", 0.4, 1, 10),
+            ("b", 0.3, 0, 10),
+            ("b", 0.2, 1, 10),
+        ]
+    )
+    result = mean_average_precision(
+        ap,
+        ["g"],
+        100,
+        0.05,
+        SEED,
+        progress_bar=False,
+        null="copied",
+        cache_dir=tmp_path,
+    )
+    assert result.set_index("g")["indices"].to_dict() == {"a": [1], "b": [2]}
+
+
+@pytest.mark.parametrize("hierarchical", [False, True])
+@pytest.mark.parametrize(
+    "bad, match",
+    [
+        (dict(null="exact"), "unknown null"),
+        (dict(null_size=-1), "null_size"),
+        (dict(seed=-1), "seed must be"),
+        (dict(seed=-1, null="copied"), "seed must be"),
+        (dict(pos_pairs=np.zeros((0, 2), dtype=int)), "joint null only"),
+        (dict(pairs=None, null="permutation"), "needs the pairs"),
+    ],
+)
+def test_empty_input_checks_arguments_first(bad, match, hierarchical):
+    """Bad arguments raise their own error on AP frames with no valid AP score."""
+    empty = ap_frame([("q", 0.5, 1, 10)]).iloc[:0]
+    empty.attrs.clear()  # no attached pairs
+    with pytest.raises(ValueError, match=match):
+        run_map_entry(empty, hierarchical, **bad)
