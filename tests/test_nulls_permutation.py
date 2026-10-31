@@ -5,7 +5,9 @@ import time
 import pickle
 import itertools
 import threading
+from types import SimpleNamespace
 from collections import Counter
+from concurrent.futures import Future
 
 import numpy as np
 import pandas as pd
@@ -520,6 +522,7 @@ def test_failed_run_stops_with_pools_waiting_for_memory(monkeypatch):
         raise RuntimeError("group failed")
 
     monkeypatch.setattr(permutation._Run, "maps_of", failing)
+    monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 32)
     raised = []
 
     def run():
@@ -620,6 +623,72 @@ def test_pvalues_do_not_depend_on_workers(monkeypatch):
     ]
     assert p[0] == p[1] == alone
     assert len(set(alone)) > 1
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_draw_queue_is_bounded_and_refilled(workers, monkeypatch):
+    """Bound pending work while completing every draw, including out-of-order tails."""
+    keys = ["a", "b", "a", "c", "b", "c"]
+    null_size = 1003
+    pending, calls, draw_functions = {}, {}, set()
+    built = Counter()
+
+    class DeferredExecutor:
+        def submit(self, fn, *args):
+            future = Future()
+            pending[future] = (fn, args)
+            assert len(pending) <= 3 * workers  # draw tasks plus pool/group setup
+            assert sum(f in draw_functions for f, _ in pending.values()) <= 2 * workers
+            return future
+
+    def complete_last(tasks, **kwargs):
+        assert set(tasks) == set(pending)
+        future = next(reversed(pending))  # deliberately finish out of order
+        fn, args = pending.pop(future)
+        future.set_result(fn(*args))
+        return {future}, set(pending)
+
+    def build(g):
+        built[keys[g]] += 1
+        return keys[g]
+
+    def start(g, pool):
+        assert pool == keys[g]
+        calls[g] = []
+
+        def maps_of(first, size):
+            calls[g].append((first, size))
+            return ((np.arange(first, first + size) + g) % 3 == 0).astype(float)
+
+        draw_functions.add(maps_of)
+        return SimpleNamespace(
+            thr=0.5, layout=SimpleNamespace(chunk=lambda: 17 + g), maps_of=maps_of
+        )
+
+    monkeypatch.setattr(permutation, "wait", complete_last)
+    result = dict(
+        permutation._schedule(
+            DeferredExecutor(),
+            workers,
+            keys,
+            build,
+            lambda g: 1,
+            start,
+            null_size,
+            pool_memory_budget=2,
+        )
+    )
+    assert not pending
+    assert built == Counter(a=1, b=1, c=1)
+    assert set(result) == set(range(len(keys)))
+    for g in result:
+        step = 17 + g
+        expected_chunks = [
+            (first, min(step, null_size - first)) for first in range(0, null_size, step)
+        ]
+        assert sorted(calls[g]) == expected_chunks
+        hits = sum((draw + g) % 3 == 0 for draw in range(null_size))
+        assert result[g] == (hits + 1) / (null_size + 1)
 
 
 def test_split_draws_do_not_change_pvalues(monkeypatch):

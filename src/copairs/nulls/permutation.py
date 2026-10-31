@@ -36,7 +36,7 @@ vectorized twins.
 import os
 from typing import NamedTuple
 from operator import index as integer_index
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import numpy as np
@@ -1177,7 +1177,9 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, pool_memory_bu
 
     A group's pool is built once (``build(g)``), the group starts on it
     (``start(g, pool)`` gives its ``_Run``), and its draws run as chunk
-    tasks, so all requested draws of a large group spread over the threads. Only this thread submits
+    tasks, so all requested draws of a large group spread over the threads.
+    Refill chunks round-robin with at most ``2 * workers`` draw futures;
+    pool/group setup adds at most ``workers`` more. Only this thread submits
     tasks, and no task waits for another: a group starts once its pool is
     built, and a group with a new pool only once ``_SharedPools.reserve``
     admits it. Groups start pool by pool, at most ``workers`` at a time, so
@@ -1189,14 +1191,10 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, pool_memory_bu
     tasks = {}  # future -> (step, group, first draw)
     waiting = {}  # pool key -> groups waiting for its build
     runs = {}  # group -> (_Run, _Hits)
+    ready = deque()  # (group, remaining draw chunks), one entry per ready group
     nxt = active = 0
 
-    def draw(g):
-        run, hits = runs[g]
-        for first, size in hits.tasks():
-            tasks[ex.submit(run.maps_of, first, size)] = ("draws", g, first)
-
-    while nxt < len(order) or tasks:
+    while nxt < len(order) or tasks or ready:
         while nxt < len(order) and active < workers:
             g = order[nxt]
             key = keys[g]
@@ -1211,6 +1209,12 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, pool_memory_bu
                 break
             nxt += 1
             active += 1
+        while ready and len(tasks) < 2 * workers:
+            g, remaining = ready.popleft()
+            first, size = next(remaining)
+            tasks[ex.submit(runs[g][0].maps_of, first, size)] = ("draws", g, first)
+            if first + size < null_size:
+                ready.append((g, remaining))
         finished, _ = wait(tasks, return_when=FIRST_COMPLETED)
         for future in finished:
             step, g, first = tasks.pop(future)
@@ -1227,7 +1231,7 @@ def _schedule(ex, workers, keys, build, nbytes, start, null_size, pool_memory_bu
                 )
                 done = runs[g][1].done
                 if not done:
-                    draw(g)
+                    ready.append((g, runs[g][1].tasks()))
             else:
                 done = runs[g][1].add(first, result)
             if done:
