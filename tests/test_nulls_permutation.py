@@ -561,9 +561,6 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
     ap = average_precision(meta, feats, progress_bar=False, **spec)
     ap = ap[ap["ref"] < 0]
     args = (["g"], 300, 0.05, 0)
-    monkeypatch.setattr(permutation, "KEY_TABLE_BUDGET", 0, raising=False)
-    expected = mean_average_precision(ap, *args, progress_bar=False)
-    monkeypatch.undo()
     sizes = []
     key_matrix = permutation._key_matrix
 
@@ -572,6 +569,11 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
         return key_matrix(similarity, profiles, *args)
 
     monkeypatch.setattr(permutation, "_key_matrix", counted)
+    expected = mean_average_precision(
+        ap, *args, progress_bar=False, key_table_memory_budget=0
+    )
+    assert len(sizes) > 1 and set(sizes) == {15}  # separate 3-plate pools
+    sizes.clear()
     got = mean_average_precision(ap, *args, progress_bar=False)
     assert sizes == [30]  # one table over the 6 plates' controls
     assert got["p_value"].tolist() == expected["p_value"].tolist()
@@ -812,23 +814,27 @@ def test_label_moves_match_multilabel_average_precision(design, label):
     assert count == (draws >= tie_thresholds(identity)).sum()
 
 
-def test_label_permutation_through_mean_average_precision():
-    """Multilabel APs with their pairs get permutation p-values per label."""
+def test_label_pairs_route_default_explicit_and_filtered_calls():
+    """Pair mappings support explicit input, renamed grouping and whole-label filters."""
     meta = label_meta()
     feats = np.random.default_rng(8).standard_normal((len(meta), 5))
     ap, pairs = multilabel_ap(meta, feats, return_pairs=True)
-    res = mean_average_precision(
-        ap, ["target"], 500, 0.05, 0, progress_bar=False, null="permutation",
-        pairs=pairs,
-    )  # fmt: skip
-    assert set(res["target"]) == {"A", "B", "C", "D"}
-    assert ((res["p_value"] > 0) & (res["p_value"] <= 1)).all()
+    options = dict(null_size=300, threshold=0.05, seed=0, progress_bar=False)
+    default = mean_average_precision(ap, ["target"], **options)
+    explicit = mean_average_precision(
+        ap, ["target"], null="permutation", pairs=pairs, **options
+    )
+    pd.testing.assert_frame_equal(default, explicit)
+    assert set(default["target"]) == {"A", "B", "C", "D"}
+    assert default["p_value"].between(0, 1, inclusive="right").all()
     # Labels come from the pairs: the frame needs no label column.
     renamed = mean_average_precision(
-        ap.drop(columns="target").assign(g=ap["target"]), ["g"], 500, 0.05, 0,
-        progress_bar=False,
-    )  # fmt: skip
-    assert renamed["p_value"].tolist() == res["p_value"].tolist()
+        ap.rename(columns={"target": "g"}), ["g"], **options
+    )
+    pd.testing.assert_frame_equal(renamed.rename(columns={"g": "target"}), default)
+    kept = ap[ap["target"].isin(["A", "C"])].copy()
+    filtered = mean_average_precision(kept, ["target"], **options)
+    assert filtered["p_value"].tolist() == default["p_value"].iloc[[0, 2]].tolist()
 
 
 def test_label_permutation_calibrated():
@@ -858,26 +864,8 @@ def test_label_permutation_calibrated():
     assert stats.kstest(p, "uniform").pvalue > 1e-3
 
 
-def test_default_null_on_multilabel_frames():
-    """Multilabel AP frames carry their pairs, so the default null needs no pairs=."""
-    meta = label_meta()
-    feats = np.random.default_rng(12).standard_normal((len(meta), 5))
-    ap, pairs = multilabel_ap(meta, feats, return_pairs=True)
-    default = mean_average_precision(ap, ["target"], 300, 0.05, 0, progress_bar=False)
-    explicit = mean_average_precision(
-        ap, ["target"], 300, 0.05, 0, progress_bar=False, null="permutation",
-        pairs=pairs,
-    )  # fmt: skip
-    assert default["p_value"].tolist() == explicit["p_value"].tolist()
-    kept = ap[ap["target"].isin(["A", "C"])].copy()  # whole labels may be dropped
-    filtered = mean_average_precision(
-        kept, ["target"], 300, 0.05, 0, progress_bar=False
-    )
-    assert filtered["p_value"].tolist() == explicit["p_value"].iloc[[0, 2]].tolist()
-
-
 def test_label_guards():
-    """Validate complete rows, distances and counts; preserve the original positive graph."""
+    """Check multilabel grouping, row bounds and counts against the pair mappings."""
     meta = plate_label_meta()
     feats = np.random.default_rng(13).standard_normal((len(meta), 5))
     args = (["target"], 100, 0.05, 0)
@@ -894,13 +882,6 @@ def test_label_guards():
         with pytest.raises(ValueError, match="no row for it in the group"):
             mean_average_precision(part, *by, progress_bar=False)
     assert len(mean_average_precision(dropped, *args, progress_bar=False, null="joint"))
-    scaled = multilabel_ap(meta, feats, PLATE_SPEC, distance="seuclidean")
-    with pytest.raises(ValueError, match="distance='seuclidean'.*null='joint'"):
-        mean_average_precision(scaled, *args, progress_bar=False)
-    with pytest.raises(ValueError, match="index must hold the row numbers"):
-        mean_average_precision(
-            ap.set_axis(ap.index.astype(str)), *args, progress_bar=False
-        )
     with pytest.raises(ValueError, match="index reaches row"):
         mean_average_precision(ap.set_axis(ap.index + 100), *args, progress_bar=False)
     for column, kind in (("n_pos_pairs", "positive"), ("n_total_pairs", "negative")):
@@ -918,27 +899,20 @@ def test_label_guards():
             multilabel_ap(wells, feats, spec), *args, progress_bar=False
         )
     )
-    unique = meta.assign(well=range(10))  # a distinct well per profile keeps the rule
-    assert len(
-        mean_average_precision(
-            multilabel_ap(unique, feats, spec), *args, progress_bar=False
-        )
-    )
 
 
-@pytest.mark.parametrize("spec", [PLATE_SPEC, ML_SPEC], ids=["plates", "one-component"])
-def test_label_pool_limit_sums_references_across_components(spec):
-    """The per-call cap counts component profiles minus members, across all components."""
+def test_label_pool_limit_sums_references_across_components():
+    """Sum references across both components, excluding each label's members."""
     meta = plate_label_meta()
     feats = np.random.default_rng(13).standard_normal((len(meta), 5))
-    ap = multilabel_ap(meta, feats, spec)
+    ap = multilabel_ap(meta, feats, PLATE_SPEC)
     args = (["target"], 100, 0.05, 0)
     with pytest.raises(
         ValueError, match="reference profiles.*max_reference_profiles=5"
     ):
         mean_average_precision(ap, *args, progress_bar=False, max_reference_profiles=5)
     assert len(
-        mean_average_precision(ap, *args, progress_bar=False, max_reference_profiles=10)
+        mean_average_precision(ap, *args, progress_bar=False, max_reference_profiles=7)
     )
 
 

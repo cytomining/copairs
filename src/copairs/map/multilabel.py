@@ -112,12 +112,12 @@ def average_precision(
     positive and negative pair (8 bytes per pair) and each AP row's profile
     and label (12 bytes per row) alive with the frame, whichever null is
     used; drop them with ``frame.attrs.pop("copairs_pairs")``. Preserve the
-    original index and filter whole tested labels only. Pair/layout checks do
-    not establish provenance or detect every incomplete label; callers must
-    retain the correct pair handle and all label holders. Copies share features
-    and pair/mapping arrays: do not mutate them between AP and mAP testing.
-    Ordinary saves contain results only; later permutation testing needs the
-    original handle or AP recomputation. The multilabel permutation null uses
+    original index, matching pairs and all holders of each tested label;
+    validation checks structure, not source identity or label completeness.
+    Filter whole labels or recompute AP. Copies share features and pair/mapping
+    arrays; keep them unchanged between AP and mAP testing. Saved tables contain
+    results only; later permutation testing needs the original pair dictionary
+    or AP recomputation. The multilabel permutation null uses
     connected components of the negative graph, with fixed draws and member
     counts per component, keeping other labels fixed. Its exchangeability
     assumption is distinct from the single-label reference-block model.

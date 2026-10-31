@@ -112,9 +112,8 @@ def get_map_pvalue(
         and other similarities are independent, which real profiles are not
         (members share references, and some profiles are close to many
         others), so it can give too small p-values for groups of many
-        replicates. ``"copied"`` retains the earlier statistical model without
-        guaranteeing historical numerical reproduction: each
-        member's AP null is sampled per `(n_pos_pairs, n_total_pairs)`
+        replicates. ``"copied"`` samples each member's AP null per
+        `(n_pos_pairs, n_total_pairs)`
         configuration and the group's null averages them, so members with
         equal pair counts share one draw and the null does not narrow as
         replicates are added.
@@ -131,14 +130,12 @@ def get_map_pvalue(
         Multilabel dictionaries also carry ``"label_col"``, ``"profile"``,
         ``"row_key"``, ``"keys"`` and the lazy ``"_lone"`` pair function;
         ``"label_col"`` selects the multilabel permutation path.
-        Explicit pairs override attachments. Keep the original index, correct
-        pair dictionary and complete tested groups/labels. There is no source or
-        original-membership tracking; structural checks cannot detect every
-        misalignment or missing member, including dropped disconnected components.
-        Recompute AP when removing members of a tested group. Copies share the
-        dictionary, features and arrays; do not mutate them between AP and mAP.
-        Custom similarities must be batch-independent; the
-        observed-mAP check is a safeguard, not a proof for arbitrary callables.
+        Explicit pairs override attachments. Keep the original index, matching
+        pairs and complete tested groups/labels; validation checks structure,
+        not source identity or group completeness. Recompute AP when removing
+        group members. Copies share the dictionary, features and arrays; keep
+        them unchanged between AP and mAP. Custom similarities must return the
+        same value for a pair regardless of batch size or contents.
     max_reference_profiles : int, default 16384
         Maximum total reference profiles across a tested group's blocks; >= 0.
         For multilabel groups, component-union size minus its members; all
