@@ -163,8 +163,8 @@ def test_unknown_null():
         )
 
 
-def test_hierarchical_takes_each_null():
-    """The hierarchical entry point validates null= and passes it to the p-values."""
+def dose_ap():
+    """APs of three compounds at two doses against eight controls; "a" is active."""
     rows = [(g, d) for g in "abc" for d in (1, 2) for _ in range(3)] + [("ctrl", 0)] * 8
     meta = pd.DataFrame(rows, columns=["g", "dose"])
     meta["ref"] = np.where(meta["g"] == "ctrl", meta.index, -1)
@@ -172,7 +172,12 @@ def test_hierarchical_takes_each_null():
     feats[meta["g"].eq("a").to_numpy()] += 2.0
     keys = ["g", "dose", "ref"]
     ap = average_precision(meta, feats, keys, [], [], keys, progress_bar=False)
-    ap = ap[ap["g"] != "ctrl"]
+    return ap[ap["g"] != "ctrl"]
+
+
+def test_hierarchical_takes_each_null():
+    """The hierarchical entry point validates null= and passes it to the p-values."""
+    ap = dose_ap()
     kwargs = dict(null_size=300, threshold=0.05, seed=0, progress_bar=False)
     sameby = ["g", "dose"]
     p = {}

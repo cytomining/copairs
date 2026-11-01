@@ -5,6 +5,9 @@ import time
 import pickle
 import itertools
 import threading
+from types import SimpleNamespace
+from collections import Counter
+from concurrent.futures import Future
 
 import numpy as np
 import pandas as pd
@@ -12,8 +15,10 @@ import pytest
 from scipy import stats
 
 from copairs import compute
-from copairs.map import average_precision, mean_average_precision
+from copairs.map import multilabel, average_precision, mean_average_precision
 from copairs.nulls import permutation, tie_thresholds
+from tests.helpers import ML_SPEC, label_meta
+from copairs.nulls.common import stream_key
 
 SPEC = dict(pos_sameby=["g"], pos_diffby=[], neg_sameby=[], neg_diffby=["g"])
 LAYOUTS = [
@@ -97,17 +102,28 @@ def permutation_similarity(feats):
     return lambda pairs: cosine(feats, np.asarray(pairs), 20000)
 
 
-def scalar_draws(layout, start, size, k0, k1):
-    """Return draws ``start, ...`` from the scalar functions, one at a time."""
+def scalar_draws(layout, start, size, k0, k1, label=False):
+    """Return draws ``start, ...`` from the scalar functions, one at a time.
+
+    ``label`` takes the label null's (``draw_pool``, ``label_group_map``).
+    """
     n = layout.n
     pm = np.empty(n, dtype=np.int64)
     chosen = np.empty(int(np.diff(layout.bm_ptr).max()), dtype=np.int64)
-    scratch = map_scratch(n)
+    if label:
+        draw, group_map = permutation._draw_pool, permutation._label_group_map
+        scratch = label_scratch(n)
+    else:
+        draw, group_map, scratch = (
+            permutation._draw,
+            permutation._group_map,
+            map_scratch(n),
+        )
     pms, maps = [], []
     for j in range(start, start + size):
-        permutation._draw(j, *layout.draw_args(), k0, k1, pm, chosen)
+        draw(j, *layout.draw_args(), k0, k1, pm, chosen)
         pms.append(pm.copy())
-        maps.append(permutation._group_map(pm, *layout.map_args(), *scratch))
+        maps.append(group_map(pm, *layout.map_args(), *scratch))
     return np.array(pms), np.array(maps)
 
 
@@ -226,8 +242,9 @@ def test_calibrated_on_exchangeable_profiles():
     )
     ap = ap[meta["g"] != "ctrl"]
     res = mean_average_precision(
-        ap, ["g"], 999, 0.05, 0, progress_bar=False, null="permutation", pairs=pairs
-    )
+        ap, ["g"], 999, 0.05, 0, progress_bar=False, null="permutation",
+        pairs=pairs,
+    )  # fmt: skip
     p = res["p_value"].to_numpy()
     assert stats.binom(n_groups, 0.05).ppf(0.0005) <= (p <= 0.05).sum()
     assert (p <= 0.05).sum() <= stats.binom(n_groups, 0.05).ppf(0.9995)
@@ -465,7 +482,7 @@ def shared_pool_aps(n_groups=6):
 
 
 def test_pool_memory_is_bounded(monkeypatch):
-    """Under POOL_BUDGET, threads wait to build a pool until others are freed."""
+    """Under POOL_BUDGET, a group with a new pool waits until others are freed."""
     ap = shared_pool_aps()
     args = (["g"], 300, 0.05, 0)
     expected = mean_average_precision(ap, *args, progress_bar=False, max_workers=1)
@@ -497,81 +514,38 @@ def test_pool_memory_is_bounded(monkeypatch):
     assert got["p_value"].tolist() == expected["p_value"].tolist()
 
 
-def test_failed_run_stops_threads_waiting_for_pool_memory(monkeypatch):
-    """A failing group raises its error while another thread waits for pool memory.
+def test_failed_run_stops_with_pools_waiting_for_memory(monkeypatch):
+    """Propagate a shared-driver failure while later pools await memory admission."""
+    ap, by = shared_pool_aps(n_groups=9), ["g"]
 
-    In visiting order the pools are A, B and C, 3 groups each. Pool C is built
-    beside A while a group of B waits for memory (A + C fit, B fits alone);
-    then a group of A fails, the run's queued C group is cancelled, and C is
-    never freed, so B's thread must be stopped for the executor to exit.
-    """
-    ap = shared_pool_aps(n_groups=9)
-    shared, calls, lock = [], [], threading.Lock()
-    built = {"A": threading.Event(), "C": threading.Event()}
-    init = permutation._SharedPools.__init__
+    def failing(*args, **kwargs):
+        raise RuntimeError("group failed")
 
-    def recorded_init(self, *args):
-        init(self, *args)
-        shared.append(self)
-
-    def pool_name(blocks):
-        keys = sorted(set(shared[0].key))
-        return "ABC"[keys.index(tuple(b.tobytes() for b in blocks))]
-
-    def pool_bytes(blocks):
-        name = pool_name(blocks)
-        if name == "B":
-            built["A"].wait(10)  # B's first group waits beside A
-        return {"A": 5, "B": 6, "C": 5}[name]
-
-    class SignalledPool(permutation._Pool):
-        def __init__(self, blocks, *args):
-            super().__init__(blocks, *args)
-            if pool_name(blocks) in built:
-                built[pool_name(blocks)].set()
-
-    null = permutation.permutation_null
-
-    def failing_null(*args):
-        name = pool_name(args[2])
-        with lock:
-            calls.append(name)
-            last_of_a = calls.count("A") == 3 and name == "A"
-        if last_of_a:
-            built["C"].wait(10)
-            raise RuntimeError("group failed")
-        if name == "C":
-            time.sleep(1)  # the run is cancelled while C's last group is queued
-        return null(*args)
-
-    monkeypatch.setattr(permutation._SharedPools, "__init__", recorded_init)
-    monkeypatch.setattr(permutation, "_pool_bytes", pool_bytes)
-    monkeypatch.setattr(permutation, "_Pool", SignalledPool)
-    monkeypatch.setattr(permutation, "permutation_null", failing_null)
+    monkeypatch.setattr(permutation._Run, "maps_of", failing)
+    monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 32)
     raised = []
 
     def run():
         try:
             mean_average_precision(
                 ap,
-                ["g"],
+                by,
                 300,
                 0.05,
                 0,
                 progress_bar=False,
                 max_workers=5,
-                pool_memory_budget=10,
+                pool_memory_budget=1,
+                key_table_memory_budget=0,
             )
-        except BaseException as e:
-            raised.append(e)
+        except BaseException as exc:
+            raised.append(exc)
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    thread.join(timeout=30)
+    thread.join(timeout=10)
     assert not thread.is_alive(), "the failed run hangs"
-    # C was built beside A, and one of its groups was cancelled
-    assert built["C"].is_set() and calls.count("C") < 3
-    assert [str(e) for e in raised] == ["group failed"]
+    assert [str(exc) for exc in raised] == ["group failed"]
 
 
 def test_overlapping_pools_slice_one_key_table(monkeypatch):
@@ -590,9 +564,6 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
     ap = average_precision(meta, feats, progress_bar=False, **spec)
     ap = ap[ap["ref"] < 0]
     args = (["g"], 300, 0.05, 0)
-    monkeypatch.setattr(permutation, "KEY_TABLE_BUDGET", 0, raising=False)
-    expected = mean_average_precision(ap, *args, progress_bar=False)
-    monkeypatch.undo()
     sizes = []
     key_matrix = permutation._key_matrix
 
@@ -601,6 +572,11 @@ def test_overlapping_pools_slice_one_key_table(monkeypatch):
         return key_matrix(similarity, profiles, *args)
 
     monkeypatch.setattr(permutation, "_key_matrix", counted)
+    expected = mean_average_precision(
+        ap, *args, progress_bar=False, key_table_memory_budget=0
+    )
+    assert len(sizes) > 1 and set(sizes) == {15}  # separate 3-plate pools
+    sizes.clear()
     got = mean_average_precision(ap, *args, progress_bar=False)
     assert sizes == [30]  # one table over the 6 plates' controls
     assert got["p_value"].tolist() == expected["p_value"].tolist()
@@ -647,3 +623,441 @@ def test_pvalues_do_not_depend_on_workers(monkeypatch):
     ]
     assert p[0] == p[1] == alone
     assert len(set(alone)) > 1
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_draw_queue_is_bounded_and_refilled(workers, monkeypatch):
+    """Bound pending work while completing every draw, including out-of-order tails."""
+    keys = ["a", "b", "a", "c", "b", "c"]
+    null_size = 1003
+    pending, calls, draw_functions = {}, {}, set()
+    built = Counter()
+
+    class DeferredExecutor:
+        def submit(self, fn, *args):
+            future = Future()
+            pending[future] = (fn, args)
+            assert len(pending) <= 3 * workers  # draw tasks plus pool/group setup
+            assert sum(f in draw_functions for f, _ in pending.values()) <= 2 * workers
+            return future
+
+    def complete_last(tasks, **kwargs):
+        assert set(tasks) == set(pending)
+        future = next(reversed(pending))  # deliberately finish out of order
+        fn, args = pending.pop(future)
+        future.set_result(fn(*args))
+        return {future}, set(pending)
+
+    def build(g):
+        built[keys[g]] += 1
+        return keys[g]
+
+    def start(g, pool):
+        assert pool == keys[g]
+        calls[g] = []
+
+        def maps_of(first, size):
+            calls[g].append((first, size))
+            return ((np.arange(first, first + size) + g) % 3 == 0).astype(float)
+
+        draw_functions.add(maps_of)
+        return SimpleNamespace(
+            thr=0.5, layout=SimpleNamespace(chunk=lambda: 17 + g), maps_of=maps_of
+        )
+
+    monkeypatch.setattr(permutation, "wait", complete_last)
+    result = dict(
+        permutation._schedule(
+            DeferredExecutor(),
+            workers,
+            keys,
+            build,
+            lambda g: 1,
+            start,
+            null_size,
+            pool_memory_budget=2,
+        )
+    )
+    assert not pending
+    assert built == Counter(a=1, b=1, c=1)
+    assert set(result) == set(range(len(keys)))
+    for g in result:
+        step = 17 + g
+        expected_chunks = [
+            (first, min(step, null_size - first)) for first in range(0, null_size, step)
+        ]
+        assert sorted(calls[g]) == expected_chunks
+        hits = sum((draw + g) % 3 == 0 for draw in range(null_size))
+        assert result[g] == (hits + 1) / (null_size + 1)
+
+
+def test_split_draws_do_not_change_pvalues(monkeypatch):
+    """All 300 draws run in ten chunks of 32, with worker/budget invariant p-values."""
+    meta = plate_label_meta()
+    feats = np.random.default_rng(15).standard_normal((len(meta), 5))
+    frames = [
+        (shared_pool_aps(), ["g"]),
+        (multilabel_ap(meta, feats, PLATE_SPEC), ["target"]),
+    ]
+
+    def pvalues(workers, budget=2**32):
+        return [
+            mean_average_precision(
+                ap, by, 300, 0.05, 0, progress_bar=False, max_workers=workers,
+                pool_memory_budget=budget,
+            )["p_value"].tolist()
+            for ap, by in frames
+        ]  # fmt: skip
+
+    expected = pvalues(1)
+    calls, maps_of = [], permutation._Run.maps_of
+
+    def counted(self, start, size):
+        calls.append(self.key)  # one key per group
+        return maps_of(self, start, size)
+
+    monkeypatch.setattr(permutation._Layout, "chunk", lambda self: 32)
+    monkeypatch.setattr(permutation._LabelLayout, "chunk", lambda self: 32)
+    monkeypatch.setattr(permutation._Run, "maps_of", counted)
+    for workers, budget in ((1, 2**32), (4, 2**32), (4, 1)):
+        calls.clear()
+        assert pvalues(workers, budget) == expected
+        tasks = Counter(calls)
+        assert len(tasks) == 9  # 6 groups and 3 labels
+        assert set(tasks.values()) == {10}
+
+
+PLATE_SPEC = dict(ML_SPEC, neg_sameby=["plate"])
+
+
+def plate_label_meta():
+    """Two plates of compounds with targets; a compound on each plate has none.
+
+    Negatives share the plate, so each plate is a component of the negative
+    graph (its target-free compound is negative to all others there).
+    """
+    targets = [["A"], ["A", "B"], ["B"], ["C"], []]
+    targets += [["A", "C"], ["B"], ["A"], ["C", "B"], []]
+    return pd.DataFrame(
+        {
+            "target": [t + [f"own{i}"] for i, t in enumerate(targets)],
+            "plate": [0] * 5 + [1] * 5,
+        }
+    )
+
+
+LABEL_DESIGNS = {
+    "one-component": (label_meta, ML_SPEC, lambda meta: [list(range(len(meta)))]),
+    "plates": (
+        plate_label_meta,
+        PLATE_SPEC,
+        lambda meta: [list(np.flatnonzero(meta["plate"] == p)) for p in (0, 1)],
+    ),
+}
+
+
+def multilabel_ap(meta, feats, spec=ML_SPEC, **kwargs):
+    """Multilabel APs of ``meta`` under ``spec``."""
+    return multilabel.average_precision(
+        meta, feats, **spec, multilabel_col="target", progress_bar=False, **kwargs
+    )
+
+
+def moved_maps(meta, feats, label, spec, blocks):
+    """MAP of ``label`` after moving it to every set of as many profiles per block."""
+    holders = [i for i, t in enumerate(meta["target"]) if label in t]
+    k = [len(set(holders) & set(b)) for b in blocks]
+    values = []
+    for choice in itertools.product(
+        *(itertools.combinations(b, kb) for b, kb in zip(blocks, k))
+    ):
+        chosen = {i for part in choice for i in part}
+        target = [
+            [t for t in labels if t != label] + ([label] if i in chosen else [])
+            for i, labels in enumerate(meta["target"])
+        ]
+        ap = multilabel_ap(meta.assign(target=target), feats, spec)
+        values.append(ap.loc[ap["target"] == label, "average_precision"].mean())
+    return np.array(values)
+
+
+def label_group(meta, feats, label, spec=ML_SPEC):
+    """Observed mAP, layout, pool and pairs of ``label``'s group."""
+    ap, pairs = multilabel_ap(meta, feats, spec, return_pairs=True)
+    ap = ap[ap["target"] == label]
+    layouts, comp_profiles, (nbr_ptr, nbr) = permutation._label_layouts(
+        [np.arange(len(ap))],
+        ap.index.to_numpy(),
+        ap["n_pos_pairs"].to_numpy().astype(np.int64),
+        (ap["n_total_pairs"] - ap["n_pos_pairs"]).to_numpy().astype(np.int64),
+        pairs,
+    )
+    pool = permutation._LabelPool(
+        layouts[0][3], comp_profiles, nbr_ptr, nbr, pairs["similarity"]
+    )
+    return ap["average_precision"].mean(), layouts[0], pool, pairs
+
+
+def label_draws(meta, feats, label, null_size, spec=ML_SPEC, seed=0):
+    """Observed mAP of ``label`` and the null's draws for it."""
+    observed, layout, pool, _ = label_group(meta, feats, label, spec)
+    out = np.empty(null_size)
+    run = permutation._label_run(*layout, pool, seed)
+    count, draws = run.count(null_size, out=out)
+    assert draws == null_size
+    return observed, run.identity, count, out
+
+
+def label_scratch(n):
+    """Scratch arrays of the scalar ``label_group_map`` for ``n`` members."""
+    return (
+        np.empty(n, np.uint64),
+        np.empty(n, np.int32),
+        np.empty(n, np.bool_),
+        np.empty(n, np.float64),
+    )
+
+
+@pytest.mark.parametrize("lone_table", [False, True], ids=["lone-search", "lone-table"])
+@pytest.mark.parametrize("tables", ["ranked", "search"])
+@pytest.mark.parametrize("ties", [False, True], ids=["distinct", "tied"])
+@pytest.mark.parametrize("design, label", [
+    ("one-component", "A"), ("one-component", "B"), ("plates", "A"), ("plates", "C"),
+])  # fmt: skip
+def test_label_vectorized_matches_scalar_draws(
+    design, label, ties, tables, lone_table, monkeypatch
+):
+    """The NumPy label moves and mAPs equal the scalar functions', bit for bit.
+
+    Pools up to RANK_POOL read a rank table, larger ones search sorted rows;
+    layouts that run many draws read lone partners' counts from a table.
+    """
+    if tables == "search":
+        monkeypatch.setattr(permutation, "RANK_POOL", 0)
+    make_meta, spec, _ = LABEL_DESIGNS[design]
+    meta = make_meta()
+    feats = np.random.default_rng(len(meta) + ord(label)).standard_normal(
+        (len(meta), 6)
+    )
+    if ties:  # rounding ties many similarities and zeroes some profiles (NaN)
+        feats = np.round(feats)
+    observed, (members, edges, lone, comps, block_of, key), pool, _ = label_group(
+        meta, feats, label, spec
+    )
+    assert pool.ranked == (tables == "ranked")
+    assert len(comps) == (2 if design == "plates" else 1)
+    draws = 10**6 if lone_table else 0
+    layout = permutation._LabelLayout(members, edges, lone, block_of, pool, draws)
+    assert (layout.lone_before is not None) == lone_table
+    k0, k1 = permutation._label_key(3, members, key)
+    start = 2**32 - 50  # draws on both sides of the counter's word boundary
+    pm, maps = scalar_draws(layout, start, 300, k0, k1, label=True)
+    got_pm = permutation._draws_pool_np(layout, start, 300, k0, k1)
+    np.testing.assert_array_equal(got_pm, pm)
+    np.testing.assert_array_equal(permutation._label_maps_np(layout, got_pm), maps)
+    identity = layout.member_code
+    scalar = permutation._label_group_map(
+        identity, *layout.map_args(), *label_scratch(layout.n)
+    )
+    assert permutation._label_maps_np(layout, identity[None])[0] == scalar
+    assert scalar == pytest.approx(observed, abs=1e-12)
+
+
+@pytest.mark.parametrize("design, label", [
+    ("one-component", "A"), ("one-component", "B"), ("plates", "A"), ("plates", "C"),
+])  # fmt: skip
+def test_label_moves_match_multilabel_average_precision(design, label):
+    """Draws follow the mAP of uniformly random label moves, as copairs computes them."""
+    make_meta, spec, blocks_of = LABEL_DESIGNS[design]
+    meta = make_meta()
+    feats = np.random.default_rng(7).standard_normal((len(meta), 5))
+    exact = moved_maps(meta, feats, label, spec, blocks_of(meta))
+    observed, identity, count, draws = label_draws(meta, feats, label, 60_000, spec)
+    assert identity == pytest.approx(observed, abs=1e-12)
+    values, freq = np.unique(np.round(exact, 9), return_counts=True)
+    ix = np.searchsorted(values, np.round(draws, 9))
+    assert (values[np.minimum(ix, len(values) - 1)] == np.round(draws, 9)).all()
+    expected = freq / freq.sum() * len(draws)
+    chi2 = ((np.bincount(ix, minlength=len(values)) - expected) ** 2 / expected).sum()
+    assert stats.chi2.sf(chi2, len(values) - 1) > 1e-3
+    assert count == (draws >= tie_thresholds(identity)).sum()
+
+
+def test_label_pairs_route_default_explicit_and_filtered_calls():
+    """Pair mappings support explicit input, renamed grouping and whole-label filters."""
+    meta = label_meta()
+    feats = np.random.default_rng(8).standard_normal((len(meta), 5))
+    ap, pairs = multilabel_ap(meta, feats, return_pairs=True)
+    options = dict(null_size=300, threshold=0.05, seed=0, progress_bar=False)
+    default = mean_average_precision(ap, ["target"], **options)
+    explicit = mean_average_precision(
+        ap, ["target"], null="permutation", pairs=pairs, **options
+    )
+    pd.testing.assert_frame_equal(default, explicit)
+    assert set(default["target"]) == {"A", "B", "C", "D"}
+    assert default["p_value"].between(0, 1, inclusive="right").all()
+    # Labels come from the pairs: the frame needs no label column.
+    renamed = mean_average_precision(
+        ap.rename(columns={"target": "g"}), ["g"], **options
+    )
+    pd.testing.assert_frame_equal(renamed.rename(columns={"g": "target"}), default)
+    kept = ap[ap["target"].isin(["A", "C"])].copy()
+    filtered = mean_average_precision(kept, ["target"], **options)
+    assert filtered["p_value"].tolist() == default["p_value"].iloc[[0, 2]].tolist()
+
+
+def test_label_permutation_calibrated():
+    """Labels assigned independently of exchangeable profiles get uniform p-values."""
+    rng = np.random.default_rng(9)
+    n_cpd, n_labels = 300, 150
+    has = rng.random((n_cpd, n_labels)) < 0.03
+    meta = pd.DataFrame(
+        {
+            "target": [
+                [f"L{j}" for j in np.flatnonzero(h)] + [f"own{i}"]
+                for i, h in enumerate(has)
+            ]
+        }
+    )
+    feats = rng.standard_normal((n_cpd, 4))
+    ap, pairs = multilabel_ap(meta, feats, return_pairs=True)
+    ap = ap[ap["target"].str.startswith("L")]
+    res = mean_average_precision(
+        ap, ["target"], 999, 0.05, 0, progress_bar=False, null="permutation",
+        pairs=pairs,
+    )  # fmt: skip
+    p = res["p_value"].to_numpy()
+    n = len(p)
+    assert stats.binom(n, 0.05).ppf(0.0005) <= (p <= 0.05).sum()
+    assert (p <= 0.05).sum() <= stats.binom(n, 0.05).ppf(0.9995)
+    assert stats.kstest(p, "uniform").pvalue > 1e-3
+
+
+def test_label_guards():
+    """Check multilabel grouping, row bounds and counts against the pair mappings."""
+    meta = plate_label_meta()
+    feats = np.random.default_rng(13).standard_normal((len(meta), 5))
+    args = (["target"], 100, 0.05, 0)
+    ap = multilabel_ap(meta, feats, PLATE_SPEC)
+    by_plate = (["plate"], *args[1:])  # groups holding several labels
+    with pytest.raises(
+        ValueError, match="one 'target' value; group by it, or pass null='joint'"
+    ):
+        mean_average_precision(ap, *by_plate, progress_bar=False)
+    assert len(mean_average_precision(ap, *by_plate, progress_bar=False, null="joint"))
+    dropped = ap.drop(index=ap.index[ap["target"] == "A"][:1])
+    split = ap.assign(half=np.arange(len(ap)) % 2)  # a label's rows grouped apart
+    for part, by in ((dropped, args), (split, (["target", "half"], *args[1:]))):
+        with pytest.raises(ValueError, match="no row for it in the group"):
+            mean_average_precision(part, *by, progress_bar=False)
+    assert len(mean_average_precision(dropped, *args, progress_bar=False, null="joint"))
+    with pytest.raises(ValueError, match="index reaches row"):
+        mean_average_precision(ap.set_axis(ap.index + 100), *args, progress_bar=False)
+    for column, kind in (("n_pos_pairs", "positive"), ("n_total_pairs", "negative")):
+        miscounted = ap.copy()
+        miscounted.loc[miscounted.index[0], column] += 1
+        label = miscounted["target"].iloc[0]
+        with pytest.raises(ValueError, match=f"{kind} pairs for '{label}' but"):
+            mean_average_precision(miscounted, *args, progress_bar=False)
+    # Positives must differ in "well"; one well on each plate is shared by
+    # two compounds, so moved labels could pair profiles in one well.
+    wells = meta.assign(well=[0, 1, 2, 3, 3, 0, 1, 2, 3, 3])
+    spec = dict(PLATE_SPEC, pos_diffby=["well"])
+    assert len(
+        mean_average_precision(
+            multilabel_ap(wells, feats, spec), *args, progress_bar=False
+        )
+    )
+
+
+def test_label_pool_limit_sums_references_across_components():
+    """Sum references across both components, excluding each label's members."""
+    meta = plate_label_meta()
+    feats = np.random.default_rng(13).standard_normal((len(meta), 5))
+    ap = multilabel_ap(meta, feats, PLATE_SPEC)
+    args = (["target"], 100, 0.05, 0)
+    with pytest.raises(
+        ValueError, match="reference profiles.*max_reference_profiles=5"
+    ):
+        mean_average_precision(ap, *args, progress_bar=False, max_reference_profiles=5)
+    assert len(
+        mean_average_precision(ap, *args, progress_bar=False, max_reference_profiles=7)
+    )
+
+
+def test_labels_with_one_holder_set_draw_independently():
+    """Two labels held by the same profiles get different draws (keys by label)."""
+    meta = pd.DataFrame(
+        {
+            "target": [["A", "B"], ["A", "B"], ["A", "B"]]
+            + [[f"own{i}"] for i in range(7)]
+        }
+    )
+    feats = np.random.default_rng(14).standard_normal((len(meta), 5))
+    _, _, _, a = label_draws(meta, feats, "A", 200)
+    _, _, _, b = label_draws(meta, feats, "B", 200)
+    assert not np.array_equal(a, b)
+    members = [2, 0, 1]
+    assert permutation.group_key(5, members) == stream_key(5, (0, 1, 2))
+    # The label key keeps #150's text, "(seed, members)/label".
+    assert permutation._label_key(3, [12, 4, 7], 2) == (3205283342, 3195927061)
+    assert permutation._label_key(3, [12, 4, 7], 2) == stream_key(3, (4, 7, 12), "/2")
+    assert permutation._label_key(5, members, 0) != permutation._label_key(
+        5, members, 1
+    )
+
+
+def test_label_pools_are_shared_and_workers_do_not_matter(monkeypatch):
+    """Labels on the same components share one pool; threads do not change p-values."""
+    meta = plate_label_meta()
+    feats = np.random.default_rng(15).standard_normal((len(meta), 5))
+    ap = multilabel_ap(meta, feats, PLATE_SPEC)
+    args = (["target"], 300, 0.05, 0)
+    built = []
+
+    class CountedPool(permutation._LabelPool):
+        def __init__(self, comps, *args):
+            built.append(comps)
+            super().__init__(comps, *args)
+
+    monkeypatch.setattr(permutation, "_LabelPool", CountedPool)
+    p = [
+        mean_average_precision(ap, *args, progress_bar=False, max_workers=w)[
+            "p_value"
+        ].tolist()
+        for w in (1, 4)
+    ]
+    assert p[0] == p[1]
+    assert built == [(0, 5)] * 2  # one pool of both plates per call
+    alone = [
+        mean_average_precision(ap[ap["target"] == t], *args, progress_bar=False)[
+            "p_value"
+        ].item()
+        for t in ("A", "B", "C")
+    ]
+    assert alone == p[0]
+    _, layout, pool, pairs = label_group(meta, feats, "A", PLATE_SPEC)
+    table = permutation._KeyTable(np.sort(pool.profiles), pairs["similarity"])
+    np.testing.assert_array_equal(
+        CountedPool(layout[3], *label_pool_args(meta, feats), table).keys, pool.keys
+    )
+
+
+def label_pool_args(meta, feats):
+    """``(comp_profiles, nbr_ptr, nbr, similarity)`` of PLATE_SPEC's label pools."""
+    ap, pairs = multilabel_ap(meta, feats, PLATE_SPEC, return_pairs=True)
+    _, comp_profiles, (nbr_ptr, nbr) = permutation._label_layouts(
+        [], ap.index.to_numpy(), np.zeros(0), np.zeros(0), pairs
+    )
+    return comp_profiles, nbr_ptr, nbr, pairs["similarity"]
+
+
+@pytest.mark.parametrize("hits_at", [[], [0], [255], [255, 767], [0, 255, 256, 1999]])
+def test_count_hits_at_chunk_edges(hits_at):
+    """Every draw is counted, irrespective of chunk boundaries."""
+    seq = np.zeros(2000)
+    seq[hits_at] = 1.0
+    for chunk in (77, 256, 2**16):
+        assert permutation._count_hits(
+            lambda start, size: seq[start : start + size], len(seq), 0.5, chunk
+        ) == (len(hits_at), len(seq))

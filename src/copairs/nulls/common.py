@@ -53,13 +53,10 @@ def check_seed(seed: int | None) -> None:
         raise ValueError(f"seed must be an integer in [0, 2**64), got {seed}")
 
 
-def stream_key(seed: int, obj) -> tuple[np.uint64, np.uint64]:
-    """Philox key ``(k0, k1)`` of ``obj``'s draws: a pure function of ``(seed, obj)``.
-
-    The key is the 64-bit blake2b digest of ``repr((seed, obj))``, so ``obj``
-    must have a deterministic ``repr`` (tuples of ints).
-    """
-    digest = hashlib.blake2b(repr((int(seed), obj)).encode(), digest_size=8)
+def stream_key(seed: int, obj, suffix: str = "") -> tuple[np.uint64, np.uint64]:
+    """Philox key from the deterministic representation of ``(seed, obj)`` and suffix."""
+    text = repr((int(seed), obj)) + suffix
+    digest = hashlib.blake2b(text.encode(), digest_size=8)
     word = int.from_bytes(digest.digest(), "little")
     return np.uint64(word & 0xFFFFFFFF), np.uint64(word >> 32)
 
@@ -131,21 +128,18 @@ def check_pairs(pairs, name="pairs") -> np.ndarray:
     return unique
 
 
-def check_pair_counts(count, member, expected, kind: str) -> None:
-    """Raise unless profile ``member[i]`` has ``expected[i]`` pairs in ``count``.
-
-    ``count`` is indexed by profile; ``kind`` names the pairs ("positive").
-    """
-    wrong = np.flatnonzero(count[member] != expected)
-    if len(wrong):
-        m = member[wrong[0]]
-        raise ValueError(
-            f"profile {m} has {count[m]} {kind} pairs but {expected[wrong[0]]} in "
-            "the AP table; the pairs must index the rows of the frame "
-            "average_precision returned, as average_precision(..., "
-            "return_pairs=True) gives them, and the AP scores must keep that "
-            "frame's index (no reset_index)"
-        )
+def check_pair_counts(count, member, expected, kind: str, label=None) -> None:
+    """Validate member-aligned pair counts, optionally identifying a multilabel group."""
+    wrong = np.flatnonzero(count != expected)
+    if not len(wrong):
+        return
+    i = wrong[0]
+    suffix = "" if label is None else f" for {label!r}"
+    raise ValueError(
+        f"profile {member[i]} has {count[i]} {kind} pairs{suffix} but {expected[i]} in "
+        "the AP table; use the pairs returned with this AP frame and preserve "
+        "its original index (no reset_index)"
+    )
 
 
 def group_edges(groups, profile, num_pos, pos_pairs):
@@ -180,7 +174,9 @@ def group_edges(groups, profile, num_pos, pos_pairs):
     )
     rows = np.concatenate(groups) if len(groups) else np.zeros(0, dtype=np.int64)
     degree = np.bincount(pos_pairs.ravel(), minlength=size)
-    check_pair_counts(degree, profile[rows], np.asarray(num_pos)[rows], "positive")
+    check_pair_counts(
+        degree[profile[rows]], profile[rows], np.asarray(num_pos)[rows], "positive"
+    )
     group_of = np.full(size, -1, dtype=np.int64)
     local = np.zeros(size, dtype=np.int64)
     for g, ix in enumerate(groups):

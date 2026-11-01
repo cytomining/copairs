@@ -237,7 +237,7 @@ def average_precision(
     distance : str or callable
         The distance function used for computing similarities. Default is "cosine".
         A custom similarity must return the same value for a pair regardless
-        of batch size/contents; ensuring this is the caller's responsibility.
+        of batch size or contents.
 
     progress_bar : bool
         Whether or not to show tqdm's progress bar.
@@ -250,10 +250,10 @@ def average_precision(
         and copies (not saving, pickling or concatenating with other AP
         calls' frames). The dictionary contains ``"pos"`` and ``"neg"`` arrays
         of shape (n, 2), indexed by source row, and a ``"similarity"`` callable
-        mapping pairs to similarities. Keep the original AP index, correct pairs
-        and complete tested groups; structural checks cannot detect every
-        misalignment or omission. Recompute AP when removing group members.
-        Copies share the dictionary, arrays and features: do not mutate them
+        mapping pairs to similarities. Keep the original AP index, matching
+        pairs and complete tested groups; validation checks structure, not source
+        identity or group completeness. Recompute AP when removing group members.
+        Copies share the dictionary, arrays and features; keep them unchanged
         between AP calculation and testing. They keep ``feats`` and every pair
         (8 bytes per pair) alive with the frame, whichever null is used;
         drop them with ``frame.attrs.pop("copairs_pairs")``.

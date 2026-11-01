@@ -101,15 +101,19 @@ def get_map_pvalue(
         positives can use ``"joint"``, its AP null. Positive draw counts use
         Monte Carlo sampling with (hits + 1)/(draws + 1). It recomputes similarities, so
         APs computed with a distance that estimates its scale per batch
-        (``"seuclidean"``, ``"mahalanobis"``) raise. ``"joint"`` samples
+        (``"seuclidean"``, ``"mahalanobis"``) raise. Multilabel pair dictionaries
+        use negative-graph components, preserving member counts per component
+        and other labels, with the original positive graph. Negatives follow
+        the original negative/lone-pair structure; counts can change. Each
+        group must contain one complete label. Overlapping reference sets are
+        allowed for this explicitly distinct multilabel model. ``"joint"`` samples
         the members' APs together (`copairs.nulls.joint`): a positive pair
         inside the group is one random number in both members' rank lists,
         and other similarities are independent, which real profiles are not
         (members share references, and some profiles are close to many
         others), so it can give too small p-values for groups of many
-        replicates. ``"copied"`` retains the earlier statistical model without
-        guaranteeing historical numerical reproduction: each
-        member's AP null is sampled per `(n_pos_pairs, n_total_pairs)`
+        replicates. ``"copied"`` samples each member's AP null per
+        `(n_pos_pairs, n_total_pairs)`
         configuration and the group's null averages them, so members with
         equal pair counts share one draw and the null does not narrow as
         replicates are added.
@@ -123,16 +127,19 @@ def get_map_pvalue(
         reloaded, pickled, or concatenated from several AP calls) need
         ``pairs=`` or another null. The joint null takes its positive pairs
         from ``pairs`` too, or from the attached pairs (see ``pos_pairs``).
-        Explicit pairs override attachments. Keep the original index, correct
-        pair dictionary and complete tested groups. There is no source or
-        original-membership tracking; structural checks cannot detect every
-        misalignment or missing member, including dropped disconnected components.
-        Recompute AP when removing members of a tested group. Copies share the
-        dictionary, features and arrays; do not mutate them between AP and mAP.
-        Custom similarities must be batch-independent; the
-        observed-mAP check is a safeguard, not a proof for arbitrary callables.
+        Multilabel dictionaries also carry ``"label_col"``, ``"profile"``,
+        ``"row_key"``, ``"keys"`` and the lazy ``"_lone"`` pair function;
+        ``"label_col"`` selects the multilabel permutation path.
+        Explicit pairs override attachments. Keep the original index, matching
+        pairs and complete tested groups/labels; validation checks structure,
+        not source identity or group completeness. Recompute AP when removing
+        group members. Copies share the dictionary, features and arrays; keep
+        them unchanged between AP and mAP. Custom similarities must return the
+        same value for a pair regardless of batch size or contents.
     max_reference_profiles : int, default 16384
         Maximum total reference profiles across a tested group's blocks; >= 0.
+        For multilabel groups, component-union size minus its members; all
+        components count. Pool-table estimates include members too.
         Checked before quadratic pool tables are allocated.
     pool_memory_budget : int, default 4294967296
         Positive byte budget for estimated concurrent pool key/rank tables.
@@ -205,9 +212,9 @@ def get_map_pvalue(
             "null='permutation' (the default) needs the pairs the APs were "
             "computed from. average_precision attaches them to the frame it "
             "returns, and these AP scores have none: they were built, loaded "
-            "from disk, pickled or concatenated from several AP calls, or come "
-            "from multilabel.average_precision, which this null does not "
-            "support. Recompute the APs, pass pairs=, or choose null='joint' "
+            "from disk, pickled or concatenated from several AP calls. "
+            "Both average_precision and multilabel.average_precision attach pairs. "
+            "Recompute the APs, pass pairs=, or choose null='joint' "
             "or null='copied'."
         )
     if null == "permutation":
@@ -295,21 +302,33 @@ def get_map_pvalue(
 
     if null == "permutation":
         logger.info("Computing p-values...")
-        map_scores["p_value"] = permutation.permutation_pvalues(
+        arguments = (
             groups,
             profile,
             ap_scores["n_pos_pairs"].to_numpy(),
             ap_scores["n_total_pairs"].to_numpy(),
-            pairs["pos"],
-            pairs["neg"],
-            pairs["similarity"],
-            null_size,
-            seed,
+        )
+        options = dict(
             observed=scores,
             progress_bar=progress_bar,
             max_workers=max_workers,
             **resources,
         )
+        if "label_col" in pairs:
+            pvalues = permutation.label_permutation_pvalues(
+                *arguments, pairs, null_size, seed, **options
+            )
+        else:
+            pvalues = permutation.permutation_pvalues(
+                *arguments,
+                pairs["pos"],
+                pairs["neg"],
+                pairs["similarity"],
+                null_size,
+                seed,
+                **options,
+            )
+        map_scores["p_value"] = pvalues
         return map_scores
 
     num_pos = ap_scores["n_pos_pairs"].to_numpy().astype(np.int64)
