@@ -1,0 +1,3 @@
+group,mean_average_precision,members,positive_counts,total_counts,permutation_p_value,permutation_corrected_p_value,permutation_below_corrected_p,joint_p_value,joint_corrected_p_value,joint_below_corrected_p,copied_p_value,copied_corrected_p_value,copied_below_corrected_p,case,seed
+BRD-K68132782-003-13-8,0.4911553217932496,6,5,29,0.0072599274007259,0.008256388024355,True,0.0010599894001059,0.001205478141297,True,0.0472495275047249,0.0537347567700793,False,lincs_activity,0
+PSMB1,1.0,2,1,"49,50",0.0106798932010679,0.1379226207737922,False,0.0098899011009889,0.1230167698323016,False,0.0003899961000389,0.0100773992260077,True,lincs_targets,0

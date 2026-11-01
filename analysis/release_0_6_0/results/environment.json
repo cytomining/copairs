@@ -1,0 +1,23 @@
+{
+  "candidate": "742f2d8bdd24528cfbbd181ba46b940297324fd5",
+  "matching_library_files": 17,
+  "python": "3.11.13",
+  "packages": {
+    "copairs": "0.6.0",
+    "numpy": "2.4.6",
+    "pandas": "2.3.3",
+    "scipy": "1.17.1",
+    "duckdb": "1.4.4",
+    "pyarrow": "26.0.0",
+    "pycytominer": "1.2.3",
+    "scikit-learn": "1.9.1",
+    "statsmodels": "0.15.0"
+  },
+  "started_utc": "2026-11-01T03:47:42.440089+00:00",
+  "resources": {
+    "max_workers": 4,
+    "max_reference_profiles": 512,
+    "pool_memory_budget": 268435456,
+    "key_table_memory_budget": 33554432
+  }
+}

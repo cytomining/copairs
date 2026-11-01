@@ -1,0 +1,3 @@
+# Keep generated evidence inspectable without dominating the review diff.
+results/*.csv linguist-generated=true
+results/precision/*.csv linguist-generated=true
