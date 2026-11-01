@@ -1,0 +1,1148 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Find pairs and compute metrics between them">
+      
+      
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../examples/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>Migrating to 0.6.0 - copairs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#migrating-to-copairs-060-unreleased" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="copairs" class="md-header__button md-logo" aria-label="copairs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            copairs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Migrating to 0.6.0
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/cytomining/copairs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="copairs" class="md-nav__button md-logo" aria-label="copairs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    copairs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/cytomining/copairs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to 0.6.0
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating to 0.6.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#choose-the-statistical-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose the statistical model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multilabel-permutation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multilabel permutation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pair-dictionaries-and-input-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair dictionaries and input lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scores-only-calls-and-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scores-only calls and correction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seeds-resources-and-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Seeds, resources and execution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/finding_pairs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Finding Pairs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/phenotypic_activity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mAP for phenotypic activity assessment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/phenotypic_consistency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mAP for phenotypic consistency assessment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/null_size/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Determining null size for mAP p-value calculation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/null_comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Comparing mAP null distributions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/matching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    matching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/map/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/replicating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    replicating
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#choose-the-statistical-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose the statistical model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multilabel-permutation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multilabel permutation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pair-dictionaries-and-input-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair dictionaries and input lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scores-only-calls-and-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scores-only calls and correction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seeds-resources-and-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Seeds, resources and execution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="migrating-to-copairs-060-unreleased">Migrating to copairs 0.6.0 (unreleased)<a class="headerlink" href="#migrating-to-copairs-060-unreleased" title="Permanent link">&para;</a></h1>
+<p>0.6.0 is a breaking release: label permutation becomes the default mAP null,
+including for multilabel APs. Numerical results change; reproducing historical
+results requires the earlier software environment, not a legacy mode in 0.6.0.</p>
+<h2 id="choose-the-statistical-model">Choose the statistical model<a class="headerlink" href="#choose-the-statistical-model" title="Permanent link">&para;</a></h2>
+<p><code>null="joint"</code> and <code>null="copied"</code> remain explicit alternatives. Missing information
+or unsupported structure raises rather than selecting another null.</p>
+<p>Multi-member joint groups require actual positive pairs: counts alone do not
+identify their graph. Singleton joint groups can use counts alone. Copied sampling
+uses counts, with its existing AP-draw cache.</p>
+<p>Single-label permutation retains the observed positive graph, including
+non-complete graphs. Identical reference sets define blocks; each draw preserves
+the member count per block. Positive/negative metadata rules construct the graph
+and pools but are not reapplied during draws. The positive-only <code>pos_diffby</code> guard
+is removed. Positive edges outside the group, negatives inside it and
+overlapping-but-different reference sets within a group remain unsupported.</p>
+<h2 id="multilabel-permutation">Multilabel permutation<a class="headerlink" href="#multilabel-permutation" title="Permanent link">&para;</a></h2>
+<p>Multilabel AP frames now attach pair dictionaries, also available with
+<code>return_pairs=True</code>. Positive pairs index expanded (profile, label) AP rows;
+negative pairs index source profiles. Joint sampling uses those positive AP-row
+edges directly.</p>
+<p>Permutation moves one label within connected components of the original negative
+graph, preserving its member count per component and its positive-graph roles.
+Other labels stay fixed. Negatives are the original negatives plus pairs that
+shared only the moved label, minus the sampled receivers; counts can vary by draw.
+This supports overlapping-but-different references that the single-label model
+rejects. Group by the label column, which must appear in <code>neg_diffby</code> and not
+<code>neg_sameby</code>.</p>
+<p>Both permutation models assume exchangeability within their pools. For
+multilabel tests, component connectivity alone is insufficient; account for
+plate/batch structure with the pair rules. Overlap with other labels can change,
+so the test concerns label placement rather than an effect unique to that label.</p>
+<h2 id="pair-dictionaries-and-input-lifecycle">Pair dictionaries and input lifecycle<a class="headerlink" href="#pair-dictionaries-and-input-lifecycle" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">ap</span><span class="p">,</span> <span class="n">pairs</span> <span class="o">=</span> <span class="n">copairs</span><span class="o">.</span><span class="n">map</span><span class="o">.</span><span class="n">average_precision</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">feats</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span> <span class="n">return_pairs</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">kept</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">whole_group_mask</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>  <span class="c1"># preserve the original AP index</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">copairs</span><span class="o">.</span><span class="n">map</span><span class="o">.</span><span class="n">mean_average_precision</span><span class="p">(</span>
+    <span class="n">kept</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;group&quot;</span><span class="p">],</span> <span class="n">null_size</span><span class="o">=</span><span class="mi">10_000</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">pairs</span><span class="o">=</span><span class="n">pairs</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>Pairs are plain dictionaries with <code>"pos"</code> and <code>"neg"</code> arrays of shape <code>(n, 2)</code>
+and a <code>"similarity"</code> callable. Use dictionary access such as <code>pairs["pos"]</code>, not
+the proposed <code>RankPairs</code>/<code>LabelPairs</code> classes. Explicit <code>pairs=</code> overrides attached
+information. Raw <code>pos_pairs=</code> is joint-only and must match the selected dictionary
+when one is available.</p>
+<p>Multilabel dictionaries also contain <code>"profile"</code> and <code>"row_key"</code> arrays mapping
+AP rows to source profiles and labels in <code>"keys"</code>, the <code>"label_col"</code> column name,
+and a lazy <code>"_lone"</code> function returning pairs sharing only one label. <code>"_lone"</code>
+is <code>None</code> when negative rules do not support permutation; <code>"label_col"</code> selects
+the multilabel path.</p>
+<p>Keep original AP indices, matching pairs and complete tested groups/labels.
+Validation checks indices, counts and layout, not source identity or original
+membership. It can miss index resets, mixed AP sources or omitted members,
+including disconnected components and label holders without positive AP rows.
+Filter whole groups; recompute AP when removing members of a tested group.</p>
+<p>Copies share the dictionary, arrays and features; keep them unchanged between
+AP calculation and testing. Saved tables contain results only. Later permutation
+tests require the original pair dictionary or AP recomputation. Concatenating
+frames from different AP calls drops their attached pairs.</p>
+<p>Rows with missing AP, no positives or missing group keys are excluded with logged
+counts; retain complete tested groups through filtering. No usable groups,
+invalid scores/counts and unsupported layouts raise. Counts support NumPy,
+nullable pandas and Arrow integers, plus integral floating columns. They are
+normalized to int64 without rounding integer inputs through float64; fractional,
+nonfinite and out-of-range counts in tested rows raise.</p>
+<h2 id="scores-only-calls-and-correction">Scores-only calls and correction<a class="headerlink" href="#scores-only-calls-and-correction" title="Permanent link">&para;</a></h2>
+<p>For all three nulls, <code>null_size=0</code> validates inputs and layout, skips sampling and
+correction, and returns:</p>
+<table>
+<thead>
+<tr>
+<th>Columns</th>
+<th>Scores-only values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mean_average_precision</code>, <code>mean_normalized_average_precision</code></td>
+<td>Computed scores</td>
+</tr>
+<tr>
+<td><code>p_value</code>, <code>corrected_p_value</code></td>
+<td><code>NaN</code></td>
+</tr>
+<tr>
+<td><code>below_p</code>, <code>below_corrected_p</code></td>
+<td><code>pd.NA</code>, nullable <code>boolean</code> dtype</td>
+</tr>
+<tr>
+<td>Hierarchical <code>stage1_p_value</code>, <code>stage1_corrected_p_value</code></td>
+<td><code>NaN</code></td>
+</tr>
+<tr>
+<td>Hierarchical <code>stage1_significant</code></td>
+<td><code>pd.NA</code>, nullable <code>boolean</code> dtype</td>
+</tr>
+</tbody>
+</table>
+<p>Significance is unknown, rather than <code>False</code>. Correction helpers exclude missing
+tests and preserve their missing results.</p>
+<p>Grouping columns must be nonempty, distinct string names present in the input;
+<code>hierarchical_by</code> must be a nonempty proper subset of <code>sameby</code>. <code>max_workers</code>
+must be <code>None</code> or a positive integer, excluding booleans. These checks apply to
+zero draws and joint sampling too.</p>
+<p>Positive draw counts use inclusive, dtype-aware ties, float64 means reported in
+AP dtype, observed-mAP consistency checks and <code>(hits + 1)/(draws + 1)</code>. All requested
+Monte Carlo draws run; there is no automatic enumeration or <code>stop_after</code> parameter.</p>
+<h2 id="seeds-resources-and-execution">Seeds, resources and execution<a class="headerlink" href="#seeds-resources-and-execution" title="Permanent link">&para;</a></h2>
+<p><code>get_map_pvalue</code>, <code>mean_average_precision</code> and
+<code>mean_average_precision_hierarchical</code> default to <code>seed=0</code>. Explicit <code>None</code> resolves
+fresh entropy once per run. Joint/permutation use unsigned-64-bit seeds; copied
+accepts any non-negative integer and leaves fresh runs uncached. Supply
+<code>hierarchical_by=[...]</code> explicitly, preferably by keyword.</p>
+<p>All three functions accept keyword-only settings:</p>
+<div class="highlight"><pre><span></span><code><span class="n">max_reference_profiles</span><span class="o">=</span><span class="mi">16_384</span>
+<span class="n">pool_memory_budget</span><span class="o">=</span><span class="mi">4</span> <span class="o">*</span> <span class="mi">1024</span><span class="o">**</span><span class="mi">3</span>
+<span class="n">key_table_memory_budget</span><span class="o">=</span><span class="mi">256</span> <span class="o">*</span> <span class="mi">1024</span><span class="o">**</span><span class="mi">2</span>
+</code></pre></div>
+<ul>
+<li>The non-negative reference cap counts all reference profile rows across one
+  group's blocks, before quadratic pool-table allocation. For multilabel APs,
+  it counts the component union minus the label's members; memory estimates
+  include the full pool.</li>
+<li>The positive pool byte budget schedules estimated concurrent key/rank tables.
+  One oversized pool may run alone.</li>
+<li>The non-negative key-table budget limits cross-pool reuse; zero disables it.</li>
+<li>Budgets cover tables, not total process RAM. Features, layouts and temporary
+  arrays need additional memory. Per-call settings leave global limits unchanged.</li>
+<li><code>max_workers</code> controls permutation group/key work and copied p-value evaluation,
+  not joint sampling, DuckDB, the original AP thread pool or BLAS.</li>
+</ul>
+<p>With fixed inputs, row identities, seed and software environment, worker/chunk
+settings leave results unchanged. Equivalent joint signatures share draws and
+correlated Monte Carlo errors.</p>
+<p>Custom similarities must return the same value for a pair regardless of batch
+size or other pairs in the batch. Batch-estimated <code>seuclidean</code> and <code>mahalanobis</code>
+are unsupported for permutation testing.</p>
+<h2 id="release-scope">Release scope<a class="headerlink" href="#release-scope" title="Permanent link">&para;</a></h2>
+<p>0.6.0 combines #156 and #157 after main-branch validation. Adaptive stopping,</p>
+<h1 id="155-acceleration-and-richer-persistence-are-separate-work-other-follow-ups">155 acceleration and richer persistence are separate work. Other follow-ups:<a class="headerlink" href="#155-acceleration-and-richer-persistence-are-separate-work-other-follow-ups" title="Permanent link">&para;</a></h1>
+<p>calibration (#162), fixed variance/covariance distances (#164), joint/permutation
+caching (#165), and metadata-reapplied zero-positive assignments (#161).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy"], "search": "../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+    
+  </body>
+</html>
