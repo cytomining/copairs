@@ -1,0 +1,22 @@
+{
+  "case": "lincs_targets",
+  "label": "PSMB1",
+  "members": 2,
+  "positive_counts": [
+    1,
+    1
+  ],
+  "total_counts": [
+    49,
+    50
+  ],
+  "exact_p": {
+    "joint": 0.01020408163265306,
+    "copied": 0.00040816326530612246
+  },
+  "seeds_checked": [
+    0,
+    19,
+    41
+  ]
+}

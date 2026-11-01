@@ -1,0 +1,91 @@
+key,title,kind,blocked,profiles,features,controls,members_min,members_max,groups_expected,null,seed,draws,status,tested,flagged,raw_p_below_05,seconds,ap_seconds,mAP_identical,changed_vs_permutation,gained_vs_permutation,lost_vs_permutation,singleton_labels,profiles_with_multiple_labels
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,permutation,0,100000,ok,58,55,55,3.4310184839414433,0.19863669003825635,True,0,0,0,,
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,joint,0,100000,ok,58,55,55,2.545116038993001,0.19863669003825635,True,0,0,0,,
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,copied,0,100000,ok,58,50,52,0.08785177499521524,0.19863669003825635,True,5,0,5,,
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,permutation,0,100000,ok,29,0,7,0.40958742902148515,0.340813499991782,True,0,0,0,112.0,30.0
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,joint,0,100000,ok,29,0,8,1.5687648570165038,0.340813499991782,True,0,0,0,112.0,30.0
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,copied,0,100000,ok,29,5,7,0.24367635697126389,0.340813499991782,True,5,5,0,112.0,30.0
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,permutation,0,100000,ok,100,50,57,5.611065692035481,0.34941959800198674,True,0,0,0,,
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,joint,0,100000,ok,100,50,54,0.7497898290166631,0.34941959800198674,True,0,0,0,,
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,copied,0,100000,ok,100,31,44,0.27889370801858604,0.34941959800198674,True,19,0,19,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,permutation,0,100000,ok,100,51,58,5.129198651993647,0.24639342993032187,True,0,0,0,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,joint,0,100000,ok,100,50,53,0.7236654569860548,0.24639342993032187,True,1,0,1,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,copied,0,100000,ok,100,33,37,0.12067405297420919,0.24639342993032187,True,18,0,18,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,permutation,0,100000,ok,100,77,78,5.701912811025977,0.37186632701195776,True,0,0,0,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,joint,0,100000,ok,100,76,78,0.7412987420102581,0.37186632701195776,True,1,0,1,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,copied,0,100000,ok,100,59,72,0.2857988739851862,0.37186632701195776,True,18,0,18,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,permutation,0,100000,ok,100,84,86,5.713018718990497,0.3934784949524328,True,0,0,0,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,joint,0,100000,ok,100,81,85,0.7615676290588453,0.3934784949524328,True,3,0,3,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,copied,0,100000,ok,100,71,74,0.3046760199358687,0.3934784949524328,True,13,0,13,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,permutation,0,100000,ok,300,263,267,9.817561747971922,1.3212756160646677,True,0,0,0,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,joint,0,100000,ok,300,266,267,1.6686539530055597,1.3212756160646677,True,3,3,0,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,copied,0,100000,ok,300,266,267,0.39070351293776184,1.3212756160646677,True,3,3,0,,
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,permutation,0,100000,ok,413,80,128,9.245543519966304,1.0335743009345606,True,0,0,0,337.0,205.0
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,joint,0,100000,ok,413,79,132,57.08211147401016,1.0335743009345606,True,1,0,1,337.0,205.0
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,copied,0,100000,ok,413,88,130,5.610327612026595,1.0335743009345606,True,8,8,0,337.0,205.0
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,permutation,0,100000,ok,300,143,159,9.274908205028623,0.4292840559501201,True,0,0,0,,
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,joint,0,100000,ok,300,133,161,1.6448752419091761,0.4292840559501201,True,10,0,10,,
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,copied,0,100000,ok,300,121,159,0.9133125490043312,0.4292840559501201,True,22,0,22,,
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,permutation,0,100000,ok,413,6,112,8.373758677043952,0.8560429200297222,True,0,0,0,337.0,205.0
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,joint,0,100000,ok,413,4,109,57.14982610207517,0.8560429200297222,True,2,0,2,337.0,205.0
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,copied,0,100000,ok,413,13,114,5.159013067022897,0.8560429200297222,True,13,10,3,337.0,205.0
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,permutation,19,100000,ok,58,55,55,4.021839217050001,0.21474555297754705,True,0,0,0,,
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,joint,19,100000,ok,58,55,55,2.5377070229733363,0.21474555297754705,True,0,0,0,,
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,copied,19,100000,ok,58,50,51,0.07395727303810418,0.21474555297754705,True,5,0,5,,
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,permutation,41,100000,ok,58,55,55,3.510122091975063,0.21474555297754705,True,0,0,0,,
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,joint,41,100000,ok,58,55,55,2.6415176120353863,0.21474555297754705,True,0,0,0,,
+lincs_activity,LINCS: compound activity,activity,False,384,493,24.0,6,12,58,copied,41,100000,ok,58,50,51,0.0689922790043056,0.21474555297754705,True,5,0,5,,
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,permutation,19,100000,ok,29,0,7,0.4118796910624951,0.3805485940538347,True,0,0,0,112.0,30.0
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,joint,19,100000,ok,29,0,8,1.5602050590096042,0.3805485940538347,True,0,0,0,112.0,30.0
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,copied,19,100000,ok,29,5,7,0.24385056702885777,0.3805485940538347,True,5,5,0,112.0,30.0
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,permutation,41,100000,ok,29,0,7,0.5078080230159685,0.3805485940538347,True,0,0,0,112.0,30.0
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,joint,41,100000,ok,29,0,8,1.5796365370042622,0.3805485940538347,True,0,0,0,112.0,30.0
+lincs_targets,LINCS: target consistency,multilabel,False,51,493,,2,5,29,copied,41,100000,ok,29,5,7,0.2187827070010826,0.3805485940538347,True,5,5,0,112.0,30.0
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,permutation,19,100000,ok,100,50,56,6.994784031063318,1.4796894709579647,True,0,0,0,,
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,joint,19,100000,ok,100,50,54,0.7419237421127036,1.4796894709579647,True,0,0,0,,
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,copied,19,100000,ok,100,31,44,0.28140989993698895,1.4796894709579647,True,19,0,19,,
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,permutation,41,100000,ok,100,50,57,5.6129457539645955,1.4796894709579647,True,0,0,0,,
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,joint,41,100000,ok,100,50,54,0.7300807919818908,1.4796894709579647,True,0,0,0,,
+cellhealth_a549,Cell Health A549: guide activity,activity,False,792,506,192.0,6,6,100,copied,41,100000,ok,100,31,44,0.2779603669187054,1.4796894709579647,True,19,0,19,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,permutation,19,100000,ok,100,51,59,5.209071220015176,0.28193309996277094,True,0,0,0,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,joint,19,100000,ok,100,50,53,0.7193041930440813,0.28193309996277094,True,1,0,1,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,copied,19,100000,ok,100,33,37,0.12482314591761678,0.28193309996277094,True,18,0,18,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,permutation,41,100000,ok,100,51,59,7.420074995025061,0.28193309996277094,True,0,0,0,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,joint,41,100000,ok,100,50,53,0.6889321079943329,0.28193309996277094,True,1,0,1,,
+cellhealth_a549_blocked,Cell Health A549: plate-matched controls,activity,True,792,506,192.0,6,6,100,copied,41,100000,ok,100,33,37,0.11256701603997499,0.28193309996277094,True,18,0,18,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,permutation,19,100000,ok,100,77,78,6.297837147954851,1.7304985650116578,True,0,0,0,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,joint,19,100000,ok,100,77,78,0.7509578500175849,1.7304985650116578,True,0,0,0,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,copied,19,100000,ok,100,45,72,0.2893103070091456,1.7304985650116578,True,32,0,32,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,permutation,41,100000,ok,100,77,78,6.3164032839704305,1.7304985650116578,True,0,0,0,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,joint,41,100000,ok,100,77,78,0.7785945340292528,1.7304985650116578,True,0,0,0,,
+cellhealth_es2,Cell Health ES2: guide activity,activity,False,792,506,192.0,6,6,100,copied,41,100000,ok,100,45,72,0.2794641879154369,1.7304985650116578,True,32,0,32,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,permutation,19,100000,ok,100,85,86,6.136648350046016,1.83104090008419,True,0,0,0,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,joint,19,100000,ok,100,81,85,0.7531907820375636,1.83104090008419,True,4,0,4,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,copied,19,100000,ok,100,70,74,0.2876315350877121,1.83104090008419,True,15,0,15,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,permutation,41,100000,ok,100,84,86,10.108115406008437,1.83104090008419,True,0,0,0,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,joint,41,100000,ok,100,81,85,0.830618217936717,1.83104090008419,True,3,0,3,,
+cellhealth_hcc44,Cell Health HCC44: guide activity,activity,False,792,506,192.0,6,6,100,copied,41,100000,ok,100,70,74,0.3336764449486509,1.83104090008419,True,14,0,14,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,permutation,19,100000,ok,300,263,267,10.971159950946458,4.291855538031086,True,0,0,0,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,joint,19,100000,ok,300,266,267,1.700941379996948,4.291855538031086,True,3,3,0,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,copied,19,100000,ok,300,266,267,0.38152827497106045,4.291855538031086,True,3,3,0,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,permutation,41,100000,ok,300,263,267,10.81391132704448,4.291855538031086,True,0,0,0,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,joint,41,100000,ok,300,266,267,1.7796906270086765,4.291855538031086,True,3,3,0,,
+cellpainting_activity,Matched Cell Painting: compound activity,activity,False,1512,615,256.0,4,8,300,copied,41,100000,ok,300,265,267,0.389405912021175,4.291855538031086,True,2,2,0,,
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,permutation,19,100000,ok,413,80,128,10.521278508007526,0.8859704060014337,True,0,0,0,337.0,205.0
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,joint,19,100000,ok,413,79,132,57.576692785019986,0.8859704060014337,True,1,0,1,337.0,205.0
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,copied,19,100000,ok,413,92,131,5.029167836066335,0.8859704060014337,True,12,12,0,337.0,205.0
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,permutation,41,100000,ok,413,80,128,8.942465972038917,0.8859704060014337,True,0,0,0,337.0,205.0
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,joint,41,100000,ok,413,79,131,57.58617379295174,0.8859704060014337,True,1,0,1,337.0,205.0
+cellpainting_targets,Matched Cell Painting: target consistency,multilabel,False,300,615,,2,10,413,copied,41,100000,ok,413,90,130,5.044806310907006,0.8859704060014337,True,10,10,0,337.0,205.0
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,permutation,19,100000,ok,300,143,159,9.211157002020627,0.43597416195552796,True,0,0,0,,
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,joint,19,100000,ok,300,137,161,1.6553102309117094,0.43597416195552796,True,6,0,6,,
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,copied,19,100000,ok,300,121,159,0.3672789130359888,0.43597416195552796,True,22,0,22,,
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,permutation,41,100000,ok,300,143,159,9.460707744001411,0.43597416195552796,True,0,0,0,,
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,joint,41,100000,ok,300,135,161,1.6034367670072243,0.43597416195552796,True,8,0,8,,
+nelisa_activity,nELISA secretome: compound activity,activity,False,1512,191,256.0,4,8,300,copied,41,100000,ok,300,121,158,0.3903495529666543,0.43597416195552796,True,22,0,22,,
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,permutation,19,100000,ok,413,6,112,9.2775652280543,0.8813316409941763,True,0,0,0,337.0,205.0
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,joint,19,100000,ok,413,4,108,57.37981977802701,0.8813316409941763,True,2,0,2,337.0,205.0
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,copied,19,100000,ok,413,13,114,3.8193022060440853,0.8813316409941763,True,13,10,3,337.0,205.0
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,permutation,41,100000,ok,413,6,112,8.982862366945483,0.8813316409941763,True,0,0,0,337.0,205.0
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,joint,41,100000,ok,413,4,108,58.12899059592746,0.8813316409941763,True,2,0,2,337.0,205.0
+nelisa_targets,nELISA secretome: target consistency,multilabel,False,300,191,,2,10,413,copied,41,100000,ok,413,13,114,25.539974028943107,0.8813316409941763,True,13,10,3,337.0,205.0

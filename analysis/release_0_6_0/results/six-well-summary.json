@@ -1,0 +1,36 @@
+{
+  "compound": "BRD-A69275535-001-01-5",
+  "wells": [
+    "E13",
+    "E14",
+    "A01",
+    "A02",
+    "A03",
+    "A04"
+  ],
+  "selection": "First compound alphabetically; first two treatment wells and first four DMSO wells by well ID",
+  "features": 493,
+  "observed_mAP": 1.0,
+  "exact_p": {
+    "permutation": 0.13333333333333333,
+    "joint": 0.1111111111111111,
+    "copied": 0.2
+  },
+  "sampled_p": {
+    "permutation": 0.13409865901340987,
+    "joint": 0.10925890741092589,
+    "copied": 0.19877801221987781
+  },
+  "draws": 100000,
+  "seed": 0,
+  "perfect_pairs": [
+    [
+      "E13",
+      "E14"
+    ],
+    [
+      "A02",
+      "A03"
+    ]
+  ]
+}

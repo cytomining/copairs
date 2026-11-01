@@ -1,0 +1,42 @@
+{
+  "lincs": {
+    "recipe": "Supplied normalized/feature-selected plate; remove constant columns; all annotated compounds for target consistency",
+    "annotated_compounds": 51
+  },
+  "cellhealth": {
+    "recipe": "Whole-plate MAD robustization; pooled feature selection using the paper's operations; remove Costes features",
+    "raw_profiles": 3456,
+    "features": 506,
+    "selection": "Exactly six wells per noncontrol guide within a cell line; retain all Chr2/Luc/LacZ cutting controls"
+  },
+  "cellpainting": {
+    "raw_shape": [
+      1535,
+      919
+    ],
+    "recipe": "Whole-plate MAD robustization; paper feature selection operations for Cell Painting, no feature selection for nELISA",
+    "features": 615,
+    "excluded_compound_ids": [
+      "BRD-K35498378-001-06-1",
+      "BRD-K36927236-001-36-7",
+      "BRD-K49223707-001-01-0",
+      "BRD-K61397605-001-01-8",
+      "BRD-K70821460-300-02-4",
+      "BRD-K90497590-001-05-9"
+    ]
+  },
+  "nelisa": {
+    "raw_shape": [
+      1525,
+      222
+    ],
+    "recipe": "Whole-plate MAD robustization; paper feature selection operations for Cell Painting, no feature selection for nELISA",
+    "features": 191,
+    "excluded_compound_ids": [
+      "BRD-K35498378-001-06-1",
+      "BRD-K36927236-001-36-7",
+      "BRD-K49223707-001-01-0",
+      "BRD-K70821460-300-02-4"
+    ]
+  }
+}

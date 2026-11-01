@@ -1,0 +1,23 @@
+{
+  "commit": "742f2d8bdd24528cfbbd181ba46b940297324fd5",
+  "version": "0.6.0",
+  "files": {
+    "copairs/__init__.py": "fe96cff672b6ee3c7b5ae969d0ef5d0119c8ef5ce13fac654472f82b9be00ede",
+    "copairs/compute.py": "cc2bd588e4b1e304c69e5abb62fd7d9f74e97644e1317571739a492d1412acbe",
+    "copairs/matching.py": "fd181277ec6ce6113c1dee6a54f48b833a4cd30b8019db55a030939744be4c59",
+    "copairs/methods.py": "5ac4764ca5220f74ae12cda21559a1f5209d6946baf36d84618d73c55fb5bad4",
+    "copairs/replicating.py": "b264638b76e4bc1290959be14cdbab5fb6e8df63d964c8cf547f5e9c014ac78a",
+    "copairs/map/__init__.py": "f81216efb63ecbc873361b6fc304814d90bb9f011bcdd914fe70d81914618db7",
+    "copairs/map/average_precision.py": "34142fdee5a8aac4ce72473516c59ab5f8c7a858aa7f5c065e915fc9d8edfe73",
+    "copairs/map/filter.py": "58368bada74ddeee9adc36a3e6606f8d6c3b5db2c61a56784ee6664af87d8ec8",
+    "copairs/map/hierarchical_fdr.py": "5ecbda23539ddb9b7ecd9d7064dd9d01919ef412f4a7289716dd263d71fa02ed",
+    "copairs/map/map.py": "4df074d7e8975e9de50294baaea2d943b390ccc902d5a03a66179897da854b97",
+    "copairs/map/multilabel.py": "67a6f379dbfa9ca26dc2c74ae06e9ade201e3914909b443eaa97b713274b3ea9",
+    "copairs/map/normalization.py": "8a9fbfb2d72c8995419f497e3235a693d44a77fc96c22d14f8fa949f5c311cc6",
+    "copairs/nulls/__init__.py": "427c6f315ddb44eed3a9d136956bf44e19f71318254bf8832cad0835c3ccf969",
+    "copairs/nulls/common.py": "c3e670ad6263b014fd6d9862545e7ca758de8010146bf0ef9f9fb96b3f490987",
+    "copairs/nulls/joint.py": "5338f79774c2ab9a314b297a32a75557ba5557b04a5e9fb12518dcaeae3eb671",
+    "copairs/nulls/permutation.py": "2c77e0254a2d1a9a9cd9f81002ef979dccfce59931c0ebc6c544a492d44bf2d4",
+    "copairs/nulls/philox.py": "2e795f1bef2199a05dacce4e6d8e6c17f360d8909cd6c9d166a07101f74a39f4"
+  }
+}

@@ -1,0 +1,74 @@
+[
+  {
+    "file": "cellhealth/SQ00014610_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014610/SQ00014610_augmented.csv.gz",
+    "bytes": 5508376,
+    "sha256": "c7c8cd79e280381fb9af318203352d5a82cd62e7fc142aee671c25a75a5d1b94"
+  },
+  {
+    "file": "cellhealth/SQ00014611_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014611/SQ00014611_augmented.csv.gz",
+    "bytes": 5514385,
+    "sha256": "f876d158448abbbbedcb533caef8b66b0cfb49f0cb975a093b77537c8fc14419"
+  },
+  {
+    "file": "cellhealth/SQ00014612_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014612/SQ00014612_augmented.csv.gz",
+    "bytes": 5517486,
+    "sha256": "8caa9094a8bc68d53683bdd65b389594ee4364a8789a6105d96997768636268f"
+  },
+  {
+    "file": "cellhealth/SQ00014613_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014613/SQ00014613_augmented.csv.gz",
+    "bytes": 5575722,
+    "sha256": "4cc47ec8d1bb4a6c35ac3fbde11a156b6a6f64a298ace1bd7e561f83e8ac8dce"
+  },
+  {
+    "file": "cellhealth/SQ00014614_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014614/SQ00014614_augmented.csv.gz",
+    "bytes": 5565098,
+    "sha256": "ad2e21db2501251134f4e3bf0f10cdab06bcbe4e5e45945dbb5403369b3477ef"
+  },
+  {
+    "file": "cellhealth/SQ00014615_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014615/SQ00014615_augmented.csv.gz",
+    "bytes": 5577513,
+    "sha256": "2710fb0862050b1e667fed69f688c8b6a19a5e6f82b54725d115bee9bc453de1"
+  },
+  {
+    "file": "cellhealth/SQ00014616_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014616/SQ00014616_augmented.csv.gz",
+    "bytes": 5544309,
+    "sha256": "30a66df250310982cb4478ec3f06c159c44e980b9a0e4ff600e836e263c8697e"
+  },
+  {
+    "file": "cellhealth/SQ00014617_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014617/SQ00014617_augmented.csv.gz",
+    "bytes": 5549029,
+    "sha256": "fd1e29375ac919c227f55663d2a4e5418f22a22b1c5e7838ae91317619f9431f"
+  },
+  {
+    "file": "cellhealth/SQ00014618_augmented.csv.gz",
+    "url": "https://raw.githubusercontent.com/broadinstitute/cell-health/cd91bd0daacef2b5ea25dcceb62482bb664d9de1/1.generate-profiles/data/profiles/SQ00014618/SQ00014618_augmented.csv.gz",
+    "bytes": 5542596,
+    "sha256": "12da367abc9613db489afc8dffa1d90939ccb12b6876a35f0c36597e6ec39fad"
+  },
+  {
+    "file": "lincs/SQ00014812_normalized_feature_select.csv.gz",
+    "url": "https://media.githubusercontent.com/media/broadinstitute/lincs-cell-painting/da8ae6a3bc103346095d61b4ee02f08fc85a5d98/profiles/2016_04_01_a549_48hr_batch1/SQ00014812/SQ00014812_normalized_feature_select.csv.gz",
+    "bytes": 633011,
+    "sha256": "28be66bd8b61b7f9c80c28a8ee57059a1b1e308805cc10807958dd5fbff649b4"
+  },
+  {
+    "file": "nelisa/cellpainting_profiles.parquet",
+    "url": "https://raw.githubusercontent.com/carpenter-singh-lab/2025_Kalinin_mAP/a489e06670facc17346ea52e6f4c458c88e4f26d/experiments/5_nelisa/inputs/cellpainting_profiles.parquet",
+    "bytes": 12493428,
+    "sha256": "b0aa4c10e09d6f92af09a3f3d00885676873f3c801819cf9a5111c009fd72e6e"
+  },
+  {
+    "file": "nelisa/nelisa_profiles.parquet",
+    "url": "https://raw.githubusercontent.com/carpenter-singh-lab/2025_Kalinin_mAP/a489e06670facc17346ea52e6f4c458c88e4f26d/experiments/5_nelisa/inputs/nelisa_profiles.parquet",
+    "bytes": 2916580,
+    "sha256": "6a40f89f42780766adbda0510a7777a4c21a980df3c5d3bad0ced8836872ba1c"
+  }
+]
