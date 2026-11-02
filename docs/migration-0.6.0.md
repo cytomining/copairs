@@ -1,4 +1,4 @@
-# Migrating to copairs 0.6.0 (unreleased)
+# Migrating to copairs 0.6.0
 
 0.6.0 is a breaking release: label permutation becomes the default mAP null,
 including for multilabel APs. Numerical results change; reproducing historical

@@ -24,6 +24,32 @@ Recorded 2026-11-01 for the 0.6.0 release-preparation PR.
   `docs/release-0.6.0.md` and excludes the research scripts/results.
 - The release-page table matches the generated table exactly.
 
+## Final review and reproduction checks (2026-11-02)
+
+- Fixed two analysis-validation gaps: Cell Health preprocessing now consumes
+  only hash-verified manifest inputs, and report generation checks both score
+  columns and group identities across every method and seed.
+- Regression evidence: the previous report accepted altered normalized scores
+  and group membership; both cases now raise. Three report tests pass.
+- Rebuilt all ten prepared datasets with an extra, invalid, unlisted Cell Health
+  file present. Every prepared frame and case/preprocessing record matches the
+  archived inputs exactly; the unlisted file is ignored.
+- Regenerated reports and the six-well enumeration/sampling example. All output
+  files are byte-identical to the committed results; no table counts changed.
+- Independently recomputed BH correction with SciPy for all 90 comparisons and
+  three precision runs. Every decision agrees, including 45 ES2/copied calls at
+  each precision seed. Round-trip CSV parsing preserves the original precision;
+  default pandas parsing introduces only last-bit corrected-p differences.
+- All 309 archived artifact checksums pass.
+- Python 3.11 source suite: **391 passed** (388 library tests plus 3 report tests).
+- Python 3.14 installed-wheel suite from the fresh sdist: **388 passed**, with
+  `PYTHONPATH` unset and optional Arrow tests enabled (DuckDB 1.4.4).
+- A separate installed-wheel smoke check passes with unpinned current dependencies,
+  including DuckDB 2.0.0, for single-label/multilabel data, all three nulls,
+  default/explicit permutation equivalence, and zero-draw unknown significance.
+- Lint, formatting, lock, strict documentation, build and strict Twine checks pass.
+  All 17 library files in source, wheel and sdist still match candidate `742f2d8`.
+
 This PR changes analysis and documentation, not the runtime library. It does
 not claim a new full-suite test run from the local analysis environment;
 the PR's normal CI runs the package tests. It creates no tag and publishes no

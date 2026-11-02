@@ -32,6 +32,7 @@ def report(workdir, inputs, output):
     assert len(summary) == len(cases) * len(seeds) * len(NULLS)
     groups = []
     for case in cases:
+        baseline_scores = None
         for seed in seeds:
             directory = locations[(case["key"], seed, "permutation")]
             counts = pd.read_csv(
@@ -44,6 +45,12 @@ def report(workdir, inputs, output):
                 directory = locations[(case["key"], seed, null)]
                 frame = pd.read_csv(directory / f"{seed}-{null}.csv", index_col=0)
                 assert not frame.index.duplicated().any()
+                scores = frame[
+                    ["mean_average_precision", "mean_normalized_average_precision"]
+                ]
+                if baseline_scores is None:
+                    baseline_scores = scores
+                pd.testing.assert_frame_equal(scores, baseline_scores, check_exact=True)
                 if joined is None:
                     joined = frame[["mean_average_precision"]].join(counts)
                 np.testing.assert_array_equal(

@@ -64,7 +64,8 @@ def prepare(workdir):
     data = workdir / "data"
     prepared = workdir / "prepared"
     prepared.mkdir(parents=True, exist_ok=True)
-    for asset in json.loads((HERE / "data-sources.json").read_text()):
+    assets = json.loads((HERE / "data-sources.json").read_text())
+    for asset in assets:
         path = data / asset["file"]
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
@@ -138,7 +139,13 @@ def prepare(workdir):
     }
 
     raw = []
-    for path in sorted((data / "cellhealth").glob("SQ*_augmented.csv.gz")):
+    # Only consume verified manifest inputs, never extra files in a reused directory.
+    cellhealth_paths = sorted(
+        data / asset["file"]
+        for asset in assets
+        if Path(asset["file"]).parent == Path("cellhealth")
+    )
+    for path in cellhealth_paths:
         frame = pd.read_csv(path).rename(
             columns={
                 "Image_Metadata_Plate": "Metadata_Plate",
