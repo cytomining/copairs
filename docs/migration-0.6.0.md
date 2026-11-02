@@ -1,8 +1,10 @@
-# Migrating to copairs 0.6.0 (unreleased)
+# Migrating to copairs 0.6.0
 
 0.6.0 is a breaking release: label permutation becomes the default mAP null,
 including for multilabel APs. Numerical results change; reproducing historical
 results requires the earlier software environment, not a legacy mode in 0.6.0.
+See the [real-data comparisons](release-0.6.0.md) for how the null choices affect
+p-values and decisions across experimental designs.
 
 ## Choose the statistical model
 
